@@ -1,0 +1,11 @@
+.next/
+node_modules/
+dist/
+.playwright-mcp/
+.rea-brave-profile/
+.rea-edge-profile/
+.env*
+!.env.example
+supabase/bootstrap/clinic-admin.generated.sql
+*.log
+/logo-header.png
