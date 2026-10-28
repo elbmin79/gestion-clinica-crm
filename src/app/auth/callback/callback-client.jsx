@@ -16,6 +16,8 @@ export default function AuthCallbackClient({ next }) {
       const supabase = createClient();
       const url = new URL(window.location.href);
       const code = url.searchParams.get('code');
+      const tokenHash = url.searchParams.get('token_hash');
+      const type = url.searchParams.get('type');
 
       if (code) {
         const { error } = await supabase.auth.exchangeCodeForSession(code);
@@ -23,6 +25,14 @@ export default function AuthCallbackClient({ next }) {
           router.replace(next);
           return;
         }
+        console.error('[auth:callback] PKCE exchange failed', { message: error?.message });
+      } else if (tokenHash && (type === 'recovery' || type === 'invite' || type === 'signup' || type === 'email')) {
+        const { error } = await supabase.auth.verifyOtp({ token_hash: tokenHash, type });
+        if (!error && active) {
+          router.replace(next);
+          return;
+        }
+        console.error('[auth:callback] OTP verification failed', { type, message: error?.message });
       } else {
         const hash = new URLSearchParams(url.hash.slice(1));
         const accessToken = hash.get('access_token');
@@ -37,9 +47,7 @@ export default function AuthCallbackClient({ next }) {
         }
       }
 
-      const { data } = await supabase.auth.getSession();
-      if (data?.session && active) router.replace(next);
-      else if (active) setFailed(true);
+      if (active) setFailed(true);
     };
 
     finish().catch(() => { if (active) setFailed(true); });

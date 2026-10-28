@@ -48,6 +48,18 @@ export async function sendPasswordReset(formData) {
   const { error } = await supabase.auth.resetPasswordForEmail(email, {
     redirectTo: redirectTo.toString(),
   });
-  if (error) redirect('/forgot-password?error=send-failed');
+  if (error) {
+    // Keep provider details in server logs so failed recovery emails can be
+    // diagnosed without exposing account or infrastructure details in the UI.
+    console.error('[auth:password-reset] Supabase rejected email request', {
+      status: error.status,
+      code: error.code,
+      message: error.message,
+    });
+    if (error.status === 429 || error.code === 'over_email_send_rate_limit') {
+      redirect('/forgot-password?error=rate-limited');
+    }
+    redirect('/forgot-password?error=send-failed');
+  }
   redirect('/forgot-password?sent=1');
 }

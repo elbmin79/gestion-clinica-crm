@@ -13,6 +13,7 @@ export default async function ForgotPasswordPage({ searchParams }) {
     {!configured ? <div className="form-note">La conexión de autenticación no está disponible.</div> : params?.sent === '1' ? <div className="form-note" role="status">Si el correo está registrado, recibirás un enlace para continuar. Revisa también tu carpeta de spam.</div> : <form action={sendPasswordReset} className="form-stack">
       <label>Correo electrónico<input name="email" type="email" autoComplete="email" required autoFocus /></label>
       {params?.error === 'invalid' && <p className="auth-error" role="alert">Escribe un correo válido.</p>}
+      {params?.error === 'rate-limited' && <p className="auth-error" role="alert">Supabase rechazó el envío por su límite de correos. No se envió ningún mensaje. Solicita al administrador del proyecto que habilite un proveedor de correo para Auth; después podrás pedir un enlace nuevo.</p>}
       {params?.error === 'send-failed' && <p className="auth-error" role="alert">No se pudo enviar el enlace. Revisa la configuración de Auth e inténtalo de nuevo.</p>}
       <button className="button primary" type="submit">Enviar enlace</button>
     </form>}
