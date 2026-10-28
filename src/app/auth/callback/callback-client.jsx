@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import AuthBrand from '../auth-brand';
 import { createClient } from '../../../lib/supabase/client';
 
 export default function AuthCallbackClient({ next }) {
@@ -47,8 +48,7 @@ export default function AuthCallbackClient({ next }) {
 
   return <main className="auth-page">
     <section className="auth-card">
-      <div className="auth-brand"><span className="brand-mark">C</span><span>clínica<span>.</span></span></div>
-      <div className="eyebrow">ACCESO SEGURO</div>
+      <AuthBrand className="auth-brand--compact" />
       <h1>{failed ? 'Enlace no válido' : 'Verificando tu enlace'}</h1>
       {failed ? <><p>Este enlace pudo haber vencido o ya fue utilizado.</p><Link className="auth-link" href="/forgot-password">Solicitar un enlace nuevo</Link></> : <p>Esto solo tomará un momento…</p>}
     </section>
