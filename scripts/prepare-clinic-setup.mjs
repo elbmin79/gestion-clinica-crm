@@ -65,10 +65,10 @@ async function main() {
 
   let sql = await readFile(templatePath, 'utf8');
   sql = sql
-    .replace("'REPLACE-WITH-ADMIN-EMAIL'", `'${escapeSqlLiteral(adminEmail)}'`)
-    .replace("'REPLACE-WITH-CLINIC-NAME'", `'${escapeSqlLiteral(clinicName)}'`)
-    .replace("'America/Tijuana'", `'${escapeSqlLiteral(timeZone)}'`);
-  if (sql.includes("'REPLACE-WITH-ADMIN-EMAIL'") || sql.includes("'REPLACE-WITH-CLINIC-NAME'")) {
+    .replace("admin_email text := 'REPLACE-WITH-ADMIN-EMAIL';", `admin_email text := '${escapeSqlLiteral(adminEmail)}';`)
+    .replace("clinic_name text := 'REPLACE-WITH-CLINIC-NAME';", `clinic_name text := '${escapeSqlLiteral(clinicName)}';`)
+    .replaceAll("'America/Tijuana'", `'${escapeSqlLiteral(timeZone)}'`);
+  if (sql.includes("admin_email text := 'REPLACE-WITH-ADMIN-EMAIL';") || sql.includes("clinic_name text := 'REPLACE-WITH-CLINIC-NAME';")) {
     throw new Error('The generated bootstrap still contains an unresolved placeholder.');
   }
 

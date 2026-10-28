@@ -1,12 +1,7 @@
+import "./fonts.css";
 import "./globals.css";
+import "./font-tokens.css";
 import App from "./app-shell";
-import { Nunito } from "next/font/google";
-
-const nunito = Nunito({
-  variable: "--font-nunito",
-  subsets: ["latin"],
-  display: "swap",
-});
 
 export const metadata = {
   title: "CRM clínico",
@@ -19,7 +14,7 @@ export const dynamic = "force-dynamic";
 
 export default function RootLayout({ children }) {
   return (
-    <html lang="es" className={nunito.variable}>
+    <html lang="es">
       <body><App>{children}</App></body>
     </html>
   );

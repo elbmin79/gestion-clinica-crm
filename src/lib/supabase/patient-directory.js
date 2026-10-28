@@ -1,4 +1,4 @@
-import { createClient } from './client';
+import { createClient } from './client.js';
 
 const statusToUi = {
   active: 'Activo',
@@ -63,7 +63,7 @@ function mapDocument(row) {
 
 async function fetchDirectory(client, clinicId, role) {
   const canReadDiagnoses = ['admin', 'clinician'].includes(role);
-  const [patientResult, businessResult, branchResult, providerResult, assignmentResult, diagnosisResult, documentResult, activityResult, templateResult] = await Promise.all([
+  const [patientResult, businessResult, branchResult, providerResult, assignmentResult, diagnosisResult, documentResult, activityResult, templateResult, encounterResult, fileResult, botoxResult] = await Promise.all([
     client.from('patients').select('id, record_number, full_name, email, phone, service_summary, status, primary_branch_id, primary_provider_id, appointment_whatsapp_opt_in, appointment_whatsapp_opt_in_at, appointment_whatsapp_opt_in_source, created_at, updated_at').eq('clinic_id', clinicId).order('created_at', { ascending: false }),
     client.from('businesses').select('id, name, active').eq('clinic_id', clinicId).order('name'),
     client.from('branches').select('id, business_id, name, address, active').eq('clinic_id', clinicId).order('name'),
@@ -75,6 +75,13 @@ async function fetchDirectory(client, clinicId, role) {
     client.from('patient_documents').select('id, patient_id, diagnosis_id, kind, title, service, template_version, content_snapshot, status, requested_at, signed_at, created_by, signed_by').eq('clinic_id', clinicId).order('requested_at', { ascending: false }),
     client.from('patient_activities').select('id, patient_id, activity_type, note, created_at, author_id').eq('clinic_id', clinicId).order('created_at', { ascending: false }),
     client.from('document_templates').select('id, kind, title, category, version, content, active, created_at').eq('clinic_id', clinicId).eq('active', true).order('created_at', { ascending: false }),
+    canReadDiagnoses
+      ? client.from('patient_encounters').select('id, patient_id, appointment_id, occurred_at, chief_complaint, history, examination, assessment, plan, created_at').eq('clinic_id', clinicId).order('occurred_at', { ascending: false })
+      : Promise.resolve({ data: [], error: null }),
+    client.from('patient_document_files').select('id, patient_id, kind, title, signed_at, storage_path, mime_type, byte_size, created_at').eq('clinic_id', clinicId).order('created_at', { ascending: false }),
+    canReadDiagnoses
+      ? client.from('botox_treatment_records').select('id, patient_id, appointment_id, clinician_id, performed_at, product, lot_number, expiration_date, treatment_areas, total_units, follow_up, consent_document_id, consent_file_id, created_at').eq('clinic_id', clinicId).order('performed_at', { ascending: false })
+      : Promise.resolve({ data: [], error: null }),
   ]);
 
   resultError(patientResult, 'No se pudo cargar el directorio de pacientes.');
@@ -86,6 +93,35 @@ async function fetchDirectory(client, clinicId, role) {
   resultError(documentResult, 'No se pudo cargar el historial de documentos.');
   resultError(activityResult, 'No se pudo cargar el historial de seguimiento.');
   resultError(templateResult, 'No se pudieron cargar los formatos de documentos.');
+  resultError(encounterResult, 'No se pudo cargar la historia clínica.');
+  resultError(fileResult, 'No se pudieron cargar los archivos del expediente.');
+  resultError(botoxResult, 'No se pudieron cargar los registros de Botox.');
+
+  const encountersByPatient = new Map();
+  for (const row of encounterResult.data || []) {
+    encountersByPatient.set(row.patient_id, [...(encountersByPatient.get(row.patient_id) || []), {
+      id: row.id, appointmentId: row.appointment_id || '', occurredAt: row.occurred_at,
+      chiefComplaint: row.chief_complaint, history: row.history || '', examination: row.examination || '',
+      assessment: row.assessment || '', plan: row.plan || '',
+    }]);
+  }
+  const filesByPatient = new Map();
+  for (const row of fileResult.data || []) {
+    filesByPatient.set(row.patient_id, [...(filesByPatient.get(row.patient_id) || []), {
+      id: row.id, kind: row.kind, title: row.title, signedAt: row.signed_at || '',
+      storagePath: row.storage_path, mimeType: row.mime_type, byteSize: row.byte_size, createdAt: row.created_at,
+    }]);
+  }
+  const botoxByPatient = new Map();
+  for (const row of botoxResult.data || []) {
+    botoxByPatient.set(row.patient_id, [...(botoxByPatient.get(row.patient_id) || []), {
+      id: row.id, appointmentId: row.appointment_id || '', clinicianId: row.clinician_id || '',
+      performedAt: row.performed_at, product: row.product, lotNumber: row.lot_number,
+      expirationDate: row.expiration_date || '', treatmentAreas: row.treatment_areas,
+      totalUnits: Number(row.total_units), followUp: row.follow_up || '',
+      consentDocumentId: row.consent_document_id || '', consentFileId: row.consent_file_id || '', createdAt: row.created_at,
+    }]);
+  }
 
   const businesses = businessResult.data || [];
   const branches = branchResult.data || [];
@@ -175,6 +211,9 @@ async function fetchDirectory(client, clinicId, role) {
       diagnosisId: diagnosis?.id || '',
       diagnosisSummary: diagnosis?.summary || '',
       diagnosisHistory: diagnosisHistory.get(row.id) || [],
+      clinicalHistory: encountersByPatient.get(row.id) || [],
+      recordFiles: filesByPatient.get(row.id) || [],
+      botoxTreatments: botoxByPatient.get(row.id) || [],
       last: index === 0 ? 'Actualizado recientemente' : `Expediente desde ${new Intl.DateTimeFormat('es-MX', { month: 'short', year: 'numeric' }).format(new Date(row.created_at))}`,
       tone: tones[index % tones.length],
     };
@@ -215,16 +254,16 @@ async function fetchDirectory(client, clinicId, role) {
   };
 }
 
-export function createPatientDirectoryStore() {
+export function createPatientDirectoryStore({ clientFactory = createClient } = {}) {
   return {
     async load(clinicId, role) {
-      const client = createClient();
+      const client = clientFactory();
       if (!client) throw new Error('La conexión con Supabase no está configurada.');
       return fetchDirectory(client, clinicId, role);
     },
 
     async create(clinicId, input) {
-      const client = createClient();
+      const client = clientFactory();
       if (!client) throw new Error('La conexión con Supabase no está configurada.');
       const recordNumber = `PAC-${crypto.randomUUID().slice(0, 8).toLocaleUpperCase('en-US')}`;
       const result = await client.from('patients').insert({
@@ -243,7 +282,7 @@ export function createPatientDirectoryStore() {
     },
 
     async update(clinicId, patient, input) {
-      const client = createClient();
+      const client = clientFactory();
       if (!client) throw new Error('La conexión con Supabase no está configurada.');
       const status = Object.entries(statusToUi).find(([, label]) => label === input.status)?.[0] || 'active';
       const whatsappOptIn = input.whatsappOptIn === true;
@@ -264,7 +303,7 @@ export function createPatientDirectoryStore() {
       return result.data;
     },
     async addActivity(clinicId, patient, input) {
-      const client = createClient();
+      const client = clientFactory();
       if (!client) throw new Error('La conexión con Supabase no está configurada.');
       const user = await client.auth.getUser();
       resultError(user, 'No se pudo validar la sesión actual.');
@@ -279,8 +318,76 @@ export function createPatientDirectoryStore() {
       return result.data;
     },
 
+    async createEncounter(clinicId, patient, input) {
+      const client = clientFactory();
+      if (!client) throw new Error('La conexión con Supabase no está configurada.');
+      const user = await client.auth.getUser();
+      resultError(user, 'No se pudo validar la sesión actual.');
+      const result = await client.from('patient_encounters').insert({
+        clinic_id: clinicId, patient_id: patient.databaseId, appointment_id: input.appointmentId || null,
+        clinician_id: patient.providerId || null, occurred_at: input.occurredAt,
+        chief_complaint: input.chiefComplaint.trim(), history: input.history.trim(),
+        examination: input.examination.trim(), assessment: input.assessment.trim(), plan: input.plan.trim(),
+        created_by: user.data.user?.id,
+      }).select('id').single();
+      resultError(result, 'No se pudo guardar la consulta. Verifica el esquema y tu rol clínico.');
+      return result.data;
+    },
+
+    async createBotoxTreatment(clinicId, patient, input) {
+      const client = clientFactory();
+      if (!client) throw new Error('La conexión con Supabase no está configurada.');
+      const user = await client.auth.getUser();
+      resultError(user, 'No se pudo validar la sesión actual.');
+      const result = await client.from('botox_treatment_records').insert({
+        clinic_id: clinicId, patient_id: patient.databaseId, appointment_id: input.appointmentId || null,
+        clinician_id: patient.providerId || null, performed_at: input.performedAt,
+        product: input.product.trim(), lot_number: input.lotNumber.trim(),
+        expiration_date: input.expirationDate || null, treatment_areas: input.treatmentAreas.trim(),
+        total_units: input.totalUnits, follow_up: input.followUp.trim(),
+        consent_document_id: input.consentDocumentId || null, consent_file_id: input.consentFileId || null,
+        created_by: user.data.user?.id,
+      }).select('id').single();
+      resultError(result, 'No se pudo guardar el registro de Botox. Revisa tus permisos y vuelve a intentar.');
+      return result.data;
+    },
+
+    async uploadPatientFile(clinicId, patient, input) {
+      const client = clientFactory();
+      if (!client) throw new Error('La conexión con Supabase no está configurada.');
+      const id = crypto.randomUUID();
+      const extension = input.file.type === 'application/pdf' ? 'pdf' : input.file.type === 'image/png' ? 'png' : 'jpg';
+      const path = `${clinicId}/${patient.databaseId}/${id}.${extension}`;
+      const upload = await client.storage.from('patient-records').upload(path, input.file, { contentType: input.file.type, upsert: false });
+      resultError(upload, 'No se pudo subir el archivo privado del expediente.');
+      const user = await client.auth.getUser();
+      if (user.error || !user.data.user) {
+        await client.storage.from('patient-records').remove([path]);
+        if (user.error) resultError(user, 'No se pudo validar la sesión actual.');
+        throw new Error('No se pudo validar la sesión actual.');
+      }
+      const result = await client.from('patient_document_files').insert({
+        id, clinic_id: clinicId, patient_id: patient.databaseId, kind: input.kind,
+        title: input.title.trim(), signed_at: input.signedAt || null, storage_path: path,
+        mime_type: input.file.type, byte_size: input.file.size, uploaded_by: user.data.user.id,
+      }).select('id').single();
+      if (result.error) {
+        await client.storage.from('patient-records').remove([path]);
+        resultError(result, 'No se pudo guardar la referencia del archivo.');
+      }
+      return { id, storagePath: path, title: input.title.trim(), kind: input.kind, signedAt: input.signedAt || '', mimeType: input.file.type, byteSize: input.file.size, createdAt: new Date().toISOString() };
+    },
+
+    async openPatientFile(path) {
+      const client = clientFactory();
+      if (!client) throw new Error('La conexión con Supabase no está configurada.');
+      const result = await client.storage.from('patient-records').createSignedUrl(path, 60);
+      resultError(result, 'No se pudo abrir el archivo privado.');
+      return result.data.signedUrl;
+    },
+
     async createTemplate(clinicId, kind, input) {
-      const client = createClient();
+      const client = clientFactory();
       if (!client) throw new Error('La conexión con Supabase no está configurada.');
       const result = await client.rpc('save_clinic_document_template', {
         target_clinic_id: clinicId,
@@ -294,7 +401,7 @@ export function createPatientDirectoryStore() {
     },
 
     async acceptDiagnosis(clinicId, patient, summary) {
-      const client = createClient();
+      const client = clientFactory();
       if (!client) throw new Error('La conexión con Supabase no está configurada.');
       const user = await client.auth.getUser();
       resultError(user, 'No se pudo validar quién acepta el diagnóstico.');
@@ -317,7 +424,7 @@ export function createPatientDirectoryStore() {
     },
 
     async createPatientDocument(clinicId, patient, input) {
-      const client = createClient();
+      const client = clientFactory();
       if (!client) throw new Error('La conexión con Supabase no está configurada.');
       const user = await client.auth.getUser();
       resultError(user, 'No se pudo validar la sesión actual.');
@@ -346,7 +453,7 @@ export function createPatientDirectoryStore() {
       };
     },
     async createBusiness(clinicId, name) {
-      const client = createClient();
+      const client = clientFactory();
       if (!client) throw new Error('La conexión con Supabase no está configurada.');
       const result = await client.from('businesses').insert({ clinic_id: clinicId, name: name.trim() }).select('id, name, active').single();
       resultError(result, 'No se pudo guardar el negocio. Revisa tus permisos.');
@@ -354,7 +461,7 @@ export function createPatientDirectoryStore() {
     },
 
     async createBranch(clinicId, input) {
-      const client = createClient();
+      const client = clientFactory();
       if (!client) throw new Error('La conexión con Supabase no está configurada.');
       const result = await client.from('branches').insert({
         clinic_id: clinicId,
@@ -367,7 +474,7 @@ export function createPatientDirectoryStore() {
     },
 
     async updateBranch(clinicId, branch, input) {
-      const client = createClient();
+      const client = clientFactory();
       if (!client) throw new Error('La conexión con Supabase no está configurada.');
       const result = await client.from('branches').update({ name: input.name.trim(), address: input.address.trim() || null })
         .eq('clinic_id', clinicId).eq('id', branch.id)
@@ -377,7 +484,7 @@ export function createPatientDirectoryStore() {
     },
 
     async createProvider(clinicId, input) {
-      const client = createClient();
+      const client = clientFactory();
       if (!client) throw new Error('La conexión con Supabase no está configurada.');
       const result = await client.from('clinic_providers').insert({
         clinic_id: clinicId,
@@ -399,7 +506,7 @@ export function createPatientDirectoryStore() {
     },
 
     async updateProvider(clinicId, provider, input) {
-      const client = createClient();
+      const client = clientFactory();
       if (!client) throw new Error('La conexión con Supabase no está configurada.');
       const uniqueBranchIds = [...new Set(input.branchIds)];
       const priorAssignments = await client.from('provider_branches').select('branch_id').eq('clinic_id', clinicId).eq('provider_id', provider.id);

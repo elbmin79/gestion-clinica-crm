@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "next dev --hostname 127.0.0.1",
     "clinic:setup": "node scripts/prepare-clinic-setup.mjs",
+    "test": "node --test",
     "build": "next build",
     "start": "next start --hostname 127.0.0.1"
   },

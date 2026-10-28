@@ -50,15 +50,21 @@ Administrators and receptionists can review appointment payment history and
 record a deposit from the appointment detail. Clinicians do not load the finance
 workspace; the database remains the final deposit gate before confirmation.
 The shared overview uses the clinic directory and shared agenda to show its
-summary.
+summary. Patient records also support structured consultation entries (reason,
+history, examination, assessment, and plan) and patient-linked copies of signed
+consents/contracts. Shared files use a private 10 MB PDF/JPG/PNG Supabase Storage
+bucket with clinic/patient-scoped paths and 60-second signed read URLs. The
+browser demo uses IndexedDB for uploaded binaries and browser storage for their
+labels; it is demonstration-only and must not contain real patient data.
 Payments can be read and created by administrators, receptionists, and billing
 members. Billing receives only patient name/record number and appointment fields
 needed to reconcile, through role-checked database functions; no phone, email,
 or diagnosis is returned. Income/refund records are append-only, and a database
 trigger rejects refunds beyond available net income. The adapters select
 clinics from the user's memberships and do not fall back to demo rows in shared
-mode. Confirmed appointments create queue rows for the requested two-day,
-one-day, and five-hour reminders. The shared Recordatorios page displays the
+mode. Pending appointments create a two-day confirmation request (sent
+immediately for short-notice bookings); after confirmation, the reminder queue
+contains the one-day and five-hour reminders. The shared Recordatorios page displays the
 current schedule generation, retaining prior sends when an appointment is
 rescheduled or cancelled and later confirmed again. The queue reports delivery
 eligibility only when the patient has explicit WhatsApp authorization and a
@@ -125,15 +131,21 @@ delivery settings are incomplete.
 6. Add a trusted delivery and signing integration before moving a document
    status to signed. The client currently cannot update a stored document's
    status in the schema.
-7. Configure reminder delivery only after the clinic has selected and approved
+7. Configure reminders and two-way confirmation only after the clinic has selected and approved
    its WhatsApp Business account, phone number, Meta message templates, and
    hosting region. Apply every migration, including
-   `202610260013_whatsapp_reminder_dispatch.sql`, before enabling the worker.
+   `202610260013_whatsapp_reminder_dispatch.sql`,
+   `202610270001_patient_encounters_and_files.sql`, and
+   `202610270002_appointment_confirmation_responses.sql` before enabling the worker.
    In the server's secret manager (never browser-visible variables), configure
    `SUPABASE_SERVICE_ROLE_KEY`, `REMINDER_DISPATCH_SECRET`,
    `WHATSAPP_CLOUD_API_VERSION`, `WHATSAPP_PHONE_NUMBER_ID`,
    `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_TEMPLATE_LANGUAGE`, and the three
-   `WHATSAPP_TEMPLATE_*` names. Configure `CLINIC_TIME_ZONE` to the clinic's
+   `WHATSAPP_TEMPLATE_*` names. The confirmation template must be approved with
+   three quick-reply buttons in this order: Confirmar, Cancelar, Reagendar; its
+   body still has the two parameters described above. Configure `WHATSAPP_APP_SECRET`
+   and a random `WHATSAPP_WEBHOOK_VERIFY_TOKEN` in the server secret manager, then
+   register `GET/POST /api/webhooks/whatsapp` in Meta. Configure `CLINIC_TIME_ZONE` to the clinic's
    IANA timezone. Each approved template must be a utility template whose body
    has exactly two text parameters in this order: patient first name and
    appointment date/time. Appointment messages intentionally omit treatment or
@@ -145,7 +157,14 @@ delivery settings are incomplete.
    the chosen host/scheduler to allow that runtime. Do not expose the service-role
    key or Meta access token to browser code. Start with a clinic test number and
    verify delivery, opt-out, provider rejection, and uncertain outcomes before
-   enabling patient traffic. Deposit amounts are entered per appointment and
+   enabling patient traffic. Schedule `POST /api/confirmations/dispatch` with the
+   same bearer secret every minute as well. New pending appointments request a
+   confirmation 48 hours before start (immediately for short-notice bookings).
+   Confirm/cancel replies update appointment status; a confirmation blocked by
+   the required deposit is surfaced for staff. Reagendar creates a follow-up for
+   staff to answer manually. These paths cannot be live-tested until Supabase,
+   Meta templates/webhooks, credentials, and a trusted scheduler are configured.
+   Deposit amounts are entered per appointment and
    enforced by the app and database.
 
 Do not import the Velka database or real patient records as part of this setup.

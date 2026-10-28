@@ -549,3 +549,111 @@ html[data-theme="dark"] .team-layout .business-row span:not(.badge){color:#c4b2c
 .branch-row>div:nth-child(2) small{font-size:12px;line-height:1.35}
 html[data-theme="dark"] .team-layout .branch-row{min-height:116px;padding:10px 0}
 html[data-theme="dark"] .team-layout .branch-row>div:nth-child(2) small{color:#c4b2c0}
+
+/* Premium overview: keep the rose identity, but let the work lead the page. */
+.overview-dashboard{
+  --overview-panel:#f7edf3;
+  --overview-band:#f4e5ed;
+  --overview-border:#e4ced9;
+  --overview-muted:#705966;
+  --overview-pink:#a84670;
+  --overview-pink-soft:#f2dce7;
+  --overview-shadow:rgba(90,42,65,.08);
+}
+html[data-theme="dark"] .overview-dashboard{
+  --overview-panel:#241c25;
+  --overview-band:#2b202b;
+  --overview-border:#493843;
+  --overview-muted:#c4b2c0;
+  --overview-pink:#e4a0bb;
+  --overview-pink-soft:#402a39;
+  --overview-shadow:rgba(0,0,0,.2);
+}
+.overview-dashboard .page-title{margin-bottom:22px}
+.overview-dashboard .page-title h1{font-size:clamp(29px,2.5vw,35px);letter-spacing:-.035em;line-height:1.12;font-variant-numeric:lining-nums}
+.overview-dashboard .page-title p{color:var(--overview-muted);font-size:15px;line-height:1.5}
+.overview-dashboard .metric-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:0 0 22px;border:0;border-radius:0;background:transparent;overflow:visible;box-shadow:none}
+.overview-dashboard .metric-card{height:auto;min-height:108px;min-width:0;display:flex;flex-direction:column;justify-content:center;align-items:flex-start;gap:5px;padding:16px 20px;border:1px solid var(--overview-border);border-radius:13px;background:var(--overview-panel);position:relative;overflow:hidden}
+.overview-dashboard .metric-card:not(:last-child){border-right:1px solid var(--overview-border)}
+.overview-dashboard .metric-label{position:static;inset:auto;color:var(--overview-muted);font-size:13px;font-weight:650;line-height:1.3;letter-spacing:.01em}
+.overview-dashboard .metric-value{margin:0;color:var(--ink);font-size:28px;font-weight:800;line-height:1.1;letter-spacing:-.035em;font-variant-numeric:tabular-nums lining-nums}
+.overview-dashboard .metric-change{min-width:0;margin:0;display:flex;align-items:center;gap:6px;color:var(--overview-muted);font-size:13px;line-height:1.35;overflow-wrap:anywhere}
+.overview-dashboard .metric-change.attention{color:var(--overview-pink);font-weight:700}
+.overview-dashboard .attention-dot{width:7px;height:7px;flex:0 0 7px;border-radius:50%;background:var(--overview-pink)}
+.overview-dashboard .dashboard-grid{grid-template-columns:minmax(0,1.4fr) minmax(350px,1fr);gap:15px;margin-bottom:15px}
+.overview-dashboard .panel{border-color:var(--overview-border);border-radius:14px;background:var(--overview-panel);box-shadow:0 8px 22px var(--overview-shadow)}
+.overview-dashboard .panel-title{font-size:17px;font-weight:750;letter-spacing:-.02em}
+.overview-dashboard .panel-subtitle{color:var(--overview-muted);font-size:13px;line-height:1.45}
+.overview-dashboard .empty-inline{color:var(--overview-muted)}
+.overview-dashboard .live-pill{background:var(--overview-pink-soft);color:var(--overview-pink)}
+.overview-dashboard .live-pill span{background:var(--overview-pink);box-shadow:0 0 0 3px color-mix(in srgb,var(--overview-pink) 16%,transparent)}
+html[data-theme="light"] .overview-dashboard .metric-grid{background:var(--overview-band)}
+html[data-theme="light"] .overview-dashboard .panel{background:var(--overview-panel)}
+@media(max-width:1250px){
+  .overview-dashboard .dashboard-grid{grid-template-columns:minmax(0,1.2fr) minmax(330px,1fr);gap:15px}
+  .overview-dashboard .metric-card{padding-left:16px;padding-right:16px}
+}
+@media(max-width:900px){
+  .overview-dashboard .dashboard-grid{grid-template-columns:minmax(0,1fr)}
+  .overview-dashboard .metric-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media(max-width:560px){
+  .overview-dashboard .page-title h1{font-size:29px}
+  .overview-dashboard .metric-card{min-height:102px;padding:13px 14px}
+  .overview-dashboard .metric-value{font-size:26px}
+}
+@media(max-width:350px){
+  .overview-dashboard .metric-grid{grid-template-columns:minmax(0,1fr)}
+}
+
+.record-actions{display:flex;align-items:center;gap:10px}
+.record-actions>span{font-size:12px;color:var(--muted,#819087);font-weight:500}
+.clinical-encounter p{margin:7px 0;color:var(--ink,#45534a);white-space:pre-wrap;overflow-wrap:anywhere}
+.clinical-encounter p b{font-weight:700}
+.patient-record-file{min-height:58px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 2px;border-bottom:1px solid var(--line,#edf0ef)}
+.patient-record-file:last-of-type{border-bottom:0}
+.patient-record-file>div{display:flex;min-width:0;flex-direction:column;gap:4px}
+.patient-record-file strong{font-size:13px;color:var(--ink,#45534a);overflow-wrap:anywhere}
+.patient-record-file span{font-size:12px;color:var(--muted,#819087)}
+.patient-record-modal .clinical-history-box,.patient-record-modal .patient-files-box{padding:0 13px 10px}
+.patient-record-modal .clinical-history-box>.panel-title,.patient-record-modal .patient-files-box>.panel-title{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:12px 0}
+.clinical-encounter{padding:12px 0}
+.botox-treatment-box .panel-title{gap:12px}
+.botox-record-facts{display:flex;flex-wrap:wrap;gap:8px 18px;margin:8px 0;color:var(--muted,#819087);font-size:12px}
+.botox-record-facts b{color:var(--ink,#45534a);font-weight:700}
+html[data-theme="dark"] .clinical-encounter p{color:#d0c0cc}
+html[data-theme="dark"] .botox-record-facts{color:#bba9b7}
+html[data-theme="dark"] .botox-record-facts b{color:#f1e8ef}
+html[data-theme="dark"] .record-actions>span{color:#c4b2c0}
+html[data-theme="dark"] .patient-record-file{border-color:#403440}
+html[data-theme="dark"] .patient-record-file strong{color:#f1e8ef}
+html[data-theme="dark"] .patient-record-file span{color:#bba9b7}
+@media(max-width:560px){.record-actions{gap:6px}.record-actions .button{padding-inline:8px}.patient-record-file{align-items:flex-start}}
+.auth-link{color:#326c50;font-size:14px;font-weight:700;text-decoration:none}.auth-link:hover{text-decoration:underline}
+
+/* Day agenda: a separate resource lane per clinician, with readable overlap. */
+.resource-calendar-grid{grid-template-columns:63px minmax(0,1fr)}
+.resource-time-gutter .provider-lane-spacer{height:48px;padding:0;top:0}
+.provider-day-lanes{position:relative;display:grid;grid-template-columns:repeat(var(--provider-lane-count),minmax(190px,1fr));min-width:0;overflow-x:auto;overscroll-behavior-x:contain;scrollbar-color:#d6a2b8 #f8edf3;scrollbar-width:thin}
+.provider-day-lane{min-width:190px}
+.provider-lane-heading{height:48px;display:flex;align-items:center;gap:8px;padding:0 9px;border-bottom:1px solid #ead7e0;border-left:1px solid #ead7e0;background:#f8edf3;color:#513647}
+.provider-lane-avatar{width:27px;height:27px;display:grid;place-items:center;flex:none;border-radius:50%;background:#e9cddd;color:#764a63;font-size:10px;font-weight:800;letter-spacing:.02em}
+.provider-lane-heading>div{display:flex;flex:1;min-width:0;flex-direction:column;gap:2px}
+.provider-lane-heading strong{overflow:hidden;color:inherit;font-size:12px;font-weight:800;line-height:1.2;text-overflow:ellipsis;white-space:nowrap}
+.provider-lane-heading small{color:#84697a;font-size:10px;font-weight:600;line-height:1.2}
+.provider-day-lanes .day-column{min-width:0;border-left-color:#ead7e0}
+.provider-day-lanes .calendar-slot{left:4px;width:calc(100% - 8px)}
+.provider-day-lanes .calendar-event{left:4px;width:calc(100% - 8px);border:0;border-radius:6px;padding:4px 7px;box-shadow:0 1px 3px rgba(71,37,56,.12)}
+.provider-day-lanes .provider-now-line{left:0;right:0;pointer-events:none;border-color:#d45c8a}
+.resource-calendar-grid .calendar-event.tone-violet{background:#5058a8;color:#fff}
+.resource-calendar-grid .calendar-event.tone-peach{background:#d97970;color:#fff}
+.resource-calendar-grid .calendar-event.tone-mint{background:#36a77b;color:#fff}
+.resource-calendar-grid .calendar-event.tone-blue{background:#1598cb;color:#fff}
+.resource-calendar-grid .calendar-event.tone-rose{background:#e17d80;color:#fff}
+.resource-calendar-grid .calendar-event.tone-sand{background:#e9b72b;color:#382d16}
+.resource-calendar-grid .calendar-event.tone-violet .event-patient,.resource-calendar-grid .calendar-event.tone-peach .event-patient,.resource-calendar-grid .calendar-event.tone-mint .event-patient,.resource-calendar-grid .calendar-event.tone-blue .event-patient,.resource-calendar-grid .calendar-event.tone-rose .event-patient{color:#fff}
+.resource-calendar-grid .calendar-event.tone-sand .event-patient{color:#382d16}
+.resource-calendar-grid .calendar-event.tone-violet .event-time,.resource-calendar-grid .calendar-event.tone-violet .event-service,.resource-calendar-grid .calendar-event.tone-violet .event-status,.resource-calendar-grid .calendar-event.tone-violet .event-meta,.resource-calendar-grid .calendar-event.tone-peach .event-time,.resource-calendar-grid .calendar-event.tone-peach .event-service,.resource-calendar-grid .calendar-event.tone-peach .event-status,.resource-calendar-grid .calendar-event.tone-peach .event-meta,.resource-calendar-grid .calendar-event.tone-mint .event-time,.resource-calendar-grid .calendar-event.tone-mint .event-service,.resource-calendar-grid .calendar-event.tone-mint .event-status,.resource-calendar-grid .calendar-event.tone-mint .event-meta,.resource-calendar-grid .calendar-event.tone-blue .event-time,.resource-calendar-grid .calendar-event.tone-blue .event-service,.resource-calendar-grid .calendar-event.tone-blue .event-status,.resource-calendar-grid .calendar-event.tone-blue .event-meta,.resource-calendar-grid .calendar-event.tone-rose .event-time,.resource-calendar-grid .calendar-event.tone-rose .event-service,.resource-calendar-grid .calendar-event.tone-rose .event-status,.resource-calendar-grid .calendar-event.tone-rose .event-meta{color:#fff}
+.resource-calendar-grid .calendar-event.tone-sand .event-time,.resource-calendar-grid .calendar-event.tone-sand .event-service,.resource-calendar-grid .calendar-event.tone-sand .event-status,.resource-calendar-grid .calendar-event.tone-sand .event-meta{color:#382d16}
+.resource-calendar-grid .calendar-event.is-pending{filter:none;border-left-style:none}
+@media(max-width:900px){.provider-day-lanes{grid-template-columns:repeat(var(--provider-lane-count),minmax(180px,1fr))}.provider-day-lane{min-width:180px}.provider-lane-heading{padding-inline:7px}}

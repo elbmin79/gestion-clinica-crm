@@ -85,8 +85,9 @@ The agenda includes day, week, month, year, and daily list views. Appointments c
 
 New appointments require a clinic-entered deposit amount. That deposit must be
 recorded against the appointment before staff can confirm or complete it; the
-shared database enforces the same rule. The Recordatorios page schedules the
-requested two-day, one-day, and five-hour notices for confirmed appointments.
+shared database enforces the same rule. The Recordatorios page schedules
+one-day and five-hour reminders for confirmed appointments; pending
+appointments have a separate two-day confirmation request.
 Demo reminders are illustrative only. Shared-mode delivery has a server-only
 WhatsApp Cloud API dispatcher, but it remains disabled until the clinic
 configures approved templates, credentials, the database migration, and a
@@ -127,3 +128,14 @@ Payment records are immutable in this demo; corrections are recorded as refunds.
 
 
 Consent formats support revisions: creating a new version starts from the selected format's title, type, and text. Patient document copies retain their original content snapshot when a later version is saved.
+
+Patient expediente views now include a structured clinical consultation timeline
+and attachments for signed consent/contract copies. Shared-mode uploads require
+the private Storage bucket and policies from migrations `202610270001` onward.
+Demo-mode file attachments are stored in browser IndexedDB; all demo data is
+synthetic and must not include real patient or clinical information.
+
+Pending appointments queue a two-day WhatsApp confirmation request. The
+confirmation dispatcher and signed inbound webhook support confirm, cancel, and
+manual reschedule follow-up. They require the migrations and Meta configuration
+in `docs/supabase-setup.md`; they do not send messages in the current workspace.

@@ -5,6 +5,7 @@ import { signIn } from './actions';
 const messages = {
   invalid: 'No se pudo iniciar sesión. Revisa el correo y la contraseña.',
   'not-configured': 'La conexión de autenticación todavía no está configurada.',
+  'auth-link': 'El enlace de acceso venció o ya se usó. Solicita uno nuevo.',
 };
 
 export default async function LoginPage({ searchParams }) {
@@ -24,6 +25,7 @@ export default async function LoginPage({ searchParams }) {
         <label>Correo electrónico<input name="email" type="email" autoComplete="username" required autoFocus /></label>
         <label>Contraseña<input name="password" type="password" autoComplete="current-password" required /></label>
         {messages[params?.error] && <p className="auth-error" role="alert">{messages[params.error]}</p>}
+        <Link className="auth-link" href="/forgot-password">¿No tienes contraseña o la olvidaste?</Link>
         <button className="button primary" type="submit">Entrar</button>
       </form>}
       {!configured && <div className="clinic-setup"><h2>Preparar el espacio de la clínica</h2><ol>

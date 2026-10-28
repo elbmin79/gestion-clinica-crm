@@ -1,0 +1,56 @@
+'use client';
+
+import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import Link from 'next/link';
+import { createClient } from '../../../lib/supabase/client';
+
+export default function AuthCallbackClient({ next }) {
+  const router = useRouter();
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    const finish = async () => {
+      const supabase = createClient();
+      const url = new URL(window.location.href);
+      const code = url.searchParams.get('code');
+
+      if (code) {
+        const { error } = await supabase.auth.exchangeCodeForSession(code);
+        if (!error && active) {
+          router.replace(next);
+          return;
+        }
+      } else {
+        const hash = new URLSearchParams(url.hash.slice(1));
+        const accessToken = hash.get('access_token');
+        const refreshToken = hash.get('refresh_token');
+        if (accessToken && refreshToken) {
+          window.history.replaceState(null, '', `${url.pathname}${url.search}`);
+          const { error } = await supabase.auth.setSession({ access_token: accessToken, refresh_token: refreshToken });
+          if (!error && active) {
+            router.replace(next);
+            return;
+          }
+        }
+      }
+
+      const { data } = await supabase.auth.getSession();
+      if (data?.session && active) router.replace(next);
+      else if (active) setFailed(true);
+    };
+
+    finish().catch(() => { if (active) setFailed(true); });
+    return () => { active = false; };
+  }, [next, router]);
+
+  return <main className="auth-page">
+    <section className="auth-card">
+      <div className="auth-brand"><span className="brand-mark">C</span><span>clínica<span>.</span></span></div>
+      <div className="eyebrow">ACCESO SEGURO</div>
+      <h1>{failed ? 'Enlace no válido' : 'Verificando tu enlace'}</h1>
+      {failed ? <><p>Este enlace pudo haber vencido o ya fue utilizado.</p><Link className="auth-link" href="/forgot-password">Solicitar un enlace nuevo</Link></> : <p>Esto solo tomará un momento…</p>}
+    </section>
+  </main>;
+}
