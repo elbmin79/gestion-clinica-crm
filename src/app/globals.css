@@ -642,7 +642,7 @@ html[data-theme="dark"] .patient-record-file span{color:#bba9b7}
 .auth-link{color:#326c50;font-size:14px;font-weight:700;text-decoration:none}.auth-link:hover{text-decoration:underline}
 
 /* Day agenda: a separate resource lane per clinician, with readable overlap. */
-.resource-calendar-grid{grid-template-columns:63px minmax(0,1fr)}
+.resource-calendar-grid{grid-template-columns:63px minmax(0,1fr);padding-right:0}
 .resource-time-gutter .provider-lane-spacer{height:48px;padding:0;top:0}
 .provider-day-lanes{position:relative;display:grid;grid-template-columns:repeat(var(--provider-lane-count),minmax(190px,1fr));min-width:0;overflow-x:auto;overscroll-behavior-x:contain;scrollbar-color:#d6a2b8 #f8edf3;scrollbar-width:thin}
 .provider-day-lane{min-width:190px}
@@ -654,6 +654,8 @@ html[data-theme="dark"] .patient-record-file span{color:#bba9b7}
 .provider-day-lanes .day-column{min-width:0;border-left-color:#ead7e0}
 .provider-day-lanes .calendar-slot{left:4px;width:calc(100% - 8px)}
 .provider-day-lanes .calendar-event{left:4px;width:calc(100% - 8px);border:0;border-radius:6px;padding:4px 7px;box-shadow:0 1px 3px rgba(71,37,56,.12)}
+.provider-day-lanes .calendar-event.is-short{min-height:19px;padding:2px 7px}
+.provider-day-lanes .calendar-event.is-short .event-sub{display:none}
 .provider-day-lanes .provider-now-line{left:0;right:0;pointer-events:none;border-color:#d45c8a}
 .resource-calendar-grid .calendar-event.tone-violet{background:#5058a8;color:#fff}
 .resource-calendar-grid .calendar-event.tone-peach{background:#d97970;color:#fff}
@@ -1099,7 +1101,7 @@ html[data-theme="dark"] .professional-error{color:#ffacba}
 .agenda-active-filters{display:flex;flex-wrap:wrap;gap:7px;margin-top:12px}
 .agenda-active-filters button{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--line);border-radius:5px;padding:5px 8px;background:var(--canvas);font-size:12px;max-width:100%;overflow-wrap:anywhere}
 .agenda-active-filters button:hover{border-color:var(--green)}
-.agenda-color-explanation{max-width:370px;font-size:12px;color:var(--ink);line-height:1.6;margin:0}
+.agenda-color-explanation{max-width:520px;font-size:12px;color:var(--ink);line-height:1.6;margin:0}
 .agenda-list-controls{display:flex;align-items:end;flex-wrap:wrap;gap:14px;padding:16px 22px;border-bottom:1px solid var(--line)}
 .agenda-list-controls label{display:flex;flex-direction:column;gap:6px;font-size:12px;font-weight:700;color:var(--ink)}
 .agenda-list-controls input,.agenda-list-controls select{background:var(--paper);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:9px;font-size:12px}
@@ -1135,3 +1137,142 @@ html[data-theme="dark"] .clinic-access-confirm-revoke:hover{background:#c76a8b}
 @media(max-width:700px){.page-title>div{min-width:0;max-width:100%}}
 .appointment-service-picker{display:grid;gap:6px;margin:0;padding:10px 12px 12px;border:1px solid var(--line,#e6ebe7);border-radius:9px;min-width:0}.appointment-service-picker legend{padding:0 5px;font-size:12px;font-weight:700;color:var(--muted,#68766d)}.appointment-service-picker>p{margin:0;color:var(--muted,#68766d);font-size:12px}.appointment-service-option{display:flex;align-items:center;gap:10px;padding:8px 9px;border-radius:7px;background:var(--surface-subtle,#f7f9f7);cursor:pointer}.appointment-service-option input{width:16px;height:16px;accent-color:var(--accent,#4e7960);flex:none}.appointment-service-option span{display:grid;gap:2px;min-width:0}.appointment-service-option strong{font-size:13px;color:var(--text,#27342b)}.appointment-service-option small{font-size:11px;color:var(--muted,#68766d)}
 .appointment-service-picker{position:relative;display:grid;gap:8px;margin:0;padding:11px 12px;border:1px solid var(--line);border-radius:9px;min-width:0;background:var(--paper)}.appointment-service-picker-heading{display:flex;align-items:center;justify-content:space-between;gap:10px}.appointment-service-picker-heading strong{color:var(--ink);font-size:13px}.appointment-service-picker-heading>span,.appointment-service-picker-hint{color:var(--muted);font-size:11px}.appointment-service-picker-hint{margin:0;line-height:1.5}.appointment-service-search{display:flex!important;flex-direction:row!important;align-items:center;gap:8px!important;height:38px;padding:0 10px;border:1px solid var(--line);border-radius:7px;background:var(--paper);color:var(--muted)!important}.appointment-service-search:focus-within{border-color:var(--green)}.appointment-service-search input{height:34px!important;min-width:0;flex:1;padding:0!important;border:0!important;background:transparent!important;color:var(--ink)!important;outline:none!important}.appointment-service-chips{display:flex;flex-wrap:wrap;gap:6px}.appointment-service-chip{display:inline-flex;align-items:center;gap:5px;max-width:100%;padding:4px 5px 4px 9px;border:1px solid color-mix(in srgb,var(--green) 22%,var(--line));border-radius:16px;background:color-mix(in srgb,var(--green) 8%,var(--paper));color:var(--ink);font-size:11px}.appointment-service-chip>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.appointment-service-chip button{display:grid;place-items:center;width:20px;height:20px;flex:none;padding:0;border:0;border-radius:50%;background:transparent;color:var(--muted)}.appointment-service-chip button:hover{background:var(--line);color:var(--ink)}.appointment-service-dropdown{position:absolute;z-index:20;top:calc(100% + 4px);left:0;right:0;padding:8px;border:1px solid var(--line);border-radius:9px;background:var(--paper);box-shadow:0 12px 30px #17231c20}.appointment-service-category{display:flex!important;flex-direction:row!important;align-items:center;justify-content:space-between;gap:12px!important;padding:0 2px 7px;color:var(--muted)!important;font-size:11px!important}.appointment-service-category select{height:30px!important;max-width:64%;background:var(--paper)!important;color:var(--ink)!important}.appointment-service-results{display:grid;gap:3px;max-height:270px;overflow:auto}.appointment-service-result{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;padding:8px;border:0;border-radius:6px;background:transparent;text-align:left}.appointment-service-result:hover,.appointment-service-result:focus-visible{background:color-mix(in srgb,var(--green) 8%,var(--paper))}.appointment-service-result-main{display:grid;gap:3px;min-width:0}.appointment-service-result-main strong{overflow:hidden;color:var(--ink);font-size:12px;text-overflow:ellipsis;white-space:nowrap}.appointment-service-result-main small{overflow:hidden;color:var(--muted);font-size:10px;text-overflow:ellipsis;white-space:nowrap}.appointment-service-result-meta{display:flex;align-items:center;gap:7px;flex:none;color:var(--muted);font-size:10px}.appointment-service-result-meta svg{color:var(--green)}.appointment-service-no-results,.appointment-service-more{margin:4px 2px;color:var(--muted);font-size:11px;line-height:1.5}.appointment-service-more{border-top:1px solid var(--line);padding-top:7px}
+
+html[data-theme="dark"] .agenda-filter-toggle[aria-expanded="true"]{background:#503244;border-color:#a96a88;color:#f6d8e5}
+html[data-theme="light"] .agenda-filter-toggle[aria-expanded="true"]{background:#f2e1ea;border-color:#d7afc1;color:#783653}
+
+.calendar-toolbar .agenda-options > .icon-button.outline{display:grid;width:32px;height:32px;padding:0;place-items:center}
+
+/* Agenda list and appointment hover states stay legible in both themes. */
+html[data-theme="dark"] .calendar-panel .agenda-list-table th{background:#302431;border-color:#493843;color:#d6c1cf}
+html[data-theme="dark"] .calendar-panel .agenda-list-table td{color:#c4b2c0;border-color:#403440}
+html[data-theme="dark"] .calendar-panel .agenda-list-table .patient-cell strong{color:#f1e8ef}
+html[data-theme="dark"] .calendar-panel .agenda-list-table .patient-cell span,
+html[data-theme="dark"] .calendar-panel .agenda-list-table td:first-child>span{color:#bda9b8}
+html[data-theme="dark"] .calendar-panel .agenda-list-color{color:#ead4e0}
+html[data-theme="dark"] .calendar-panel .agenda-list-table .clickable-row:hover{background:#493040}
+html[data-theme="dark"] .calendar-panel .agenda-list-table .clickable-row:hover td{color:#f1dce7;border-color:#664559}
+html[data-theme="dark"] .calendar-panel .agenda-list-table .clickable-row:hover .patient-cell strong{color:#fff5fa}
+html[data-theme="light"] .calendar-panel .agenda-list-table th{background:#f1e3eb;border-color:#e4cbd8;color:#604452}
+html[data-theme="light"] .calendar-panel .agenda-list-table .clickable-row:hover{background:#e7c3d3}
+html[data-theme="light"] .calendar-panel .agenda-list-table .clickable-row:hover td{background:transparent;color:#4a2938;border-color:#d5a7bc}
+html[data-theme="light"] .calendar-panel .agenda-list-table .clickable-row:hover .patient-cell strong{color:#452738}
+html[data-theme="light"] .calendar-panel .agenda-list-table .clickable-row:hover .patient-cell span,
+html[data-theme="light"] .calendar-panel .agenda-list-table .clickable-row:hover td:first-child>span,
+html[data-theme="light"] .calendar-panel .agenda-list-table .clickable-row:hover .agenda-list-color{color:#684657}
+html[data-theme="dark"] .calendar-panel .agenda-colored-event:hover{background:color-mix(in srgb,var(--appointment-color) 48%,#241c25);border-color:var(--appointment-color);box-shadow:0 0 0 2px color-mix(in srgb,var(--appointment-color) 36%,transparent)}
+html[data-theme="light"] .calendar-panel .agenda-colored-event:hover{background:color-mix(in srgb,var(--appointment-color) 42%,#fff);border-color:var(--appointment-color);box-shadow:0 0 0 2px color-mix(in srgb,var(--appointment-color) 30%,transparent)}
+
+/* Appointment details inherit the active theme instead of hard-coded white cards. */
+html[data-theme="dark"] .appointment-reminder-card,
+html[data-theme="dark"] .appointment-payment-card{background:#2d232e;border-color:#493843;color:#f1e8ef}
+html[data-theme="dark"] .appointment-reminder-heading,
+html[data-theme="dark"] .appointment-payment-heading{border-color:#493843}
+html[data-theme="dark"] .appointment-reminder-heading strong,
+html[data-theme="dark"] .appointment-payment-heading strong{color:#f1e8ef}
+html[data-theme="dark"] .appointment-reminder-heading span{background:#3b2d3a;color:#e8c6d7}
+html[data-theme="dark"] .appointment-reminder-row,
+html[data-theme="dark"] .appointment-payment-row{border-color:#493843;color:#d6c1cf}
+html[data-theme="dark"] .appointment-reminder-row strong,
+html[data-theme="dark"] .appointment-payment-row strong{color:#f0dce7}
+html[data-theme="dark"] .appointment-reminder-card p,
+html[data-theme="dark"] .appointment-payment-heading span,
+html[data-theme="dark"] .appointment-payment-empty{color:#bda9b8}
+html[data-theme="light"] .appointment-reminder-card,
+html[data-theme="light"] .appointment-payment-card{background:#f7edf3;border-color:#e4cbd8}
+html[data-theme="light"] .appointment-reminder-heading,
+html[data-theme="light"] .appointment-payment-heading,
+html[data-theme="light"] .appointment-reminder-row,
+html[data-theme="light"] .appointment-payment-row{border-color:#e4cbd8}
+html[data-theme="light"] .appointment-reminder-heading strong,
+html[data-theme="light"] .appointment-payment-heading strong{color:#493746}
+html[data-theme="light"] .appointment-reminder-row,
+html[data-theme="light"] .appointment-payment-row{color:#5d4b56}
+html[data-theme="light"] .appointment-reminder-card p,
+html[data-theme="light"] .appointment-payment-heading span,
+html[data-theme="light"] .appointment-payment-empty{color:#66505f}
+
+/* Use a clear appointment-color focus treatment on agenda hover in both themes. */
+html[data-theme="dark"] .calendar-panel .agenda-event-card.agenda-colored-event:hover,
+html[data-theme="light"] .calendar-panel .agenda-event-card.agenda-colored-event:hover{background:color-mix(in srgb,var(--appointment-color) 56%,var(--paper));outline:2px solid var(--appointment-color);outline-offset:1px;box-shadow:0 5px 14px color-mix(in srgb,var(--appointment-color) 38%,transparent);filter:saturate(1.15);z-index:3}
+
+/* Week view uses the same warm active-day and appointment hover states. */
+html[data-theme="dark"] .calendar-panel .agenda-week{background:#241c25}
+html[data-theme="dark"] .calendar-panel .week-day,
+html[data-theme="dark"] .calendar-panel .week-day:last-child{border-color:#403440}
+html[data-theme="dark"] .calendar-panel .week-day.selected{background:#493040}
+html[data-theme="dark"] .calendar-panel .week-day-heading{border-color:#493843;color:#d6c1cf}
+html[data-theme="dark"] .calendar-panel .week-day-heading strong{color:#f1e8ef}
+html[data-theme="dark"] .calendar-panel .week-day.selected .week-day-heading strong{background:#a65d7e;color:#fff5fa}
+html[data-theme="light"] .calendar-panel .agenda-week{background:#f9f0f5}
+html[data-theme="light"] .calendar-panel .week-day,
+html[data-theme="light"] .calendar-panel .week-day:last-child{border-color:#e4cbd8}
+html[data-theme="light"] .calendar-panel .week-day.selected{background:#e7c3d3}
+html[data-theme="light"] .calendar-panel .week-day-heading{border-color:#e4cbd8;color:#604452}
+html[data-theme="light"] .calendar-panel .week-day-heading strong{color:#493746}
+html[data-theme="light"] .calendar-panel .week-day.selected .week-day-heading strong{background:#8d3f64;color:#fff}
+html[data-theme="dark"] .calendar-panel .week-event.agenda-event-card.agenda-colored-event:hover,
+html[data-theme="light"] .calendar-panel .week-event.agenda-event-card.agenda-colored-event:hover{background:color-mix(in srgb,var(--appointment-color) 56%,var(--paper));outline:2px solid var(--appointment-color);outline-offset:1px;box-shadow:0 5px 14px color-mix(in srgb,var(--appointment-color) 38%,transparent);filter:saturate(1.15);z-index:3}
+
+/* Month view grid and selected-day state follow the warm agenda palette. */
+html[data-theme="dark"] .calendar-panel .agenda-month{background:#241c25}
+html[data-theme="dark"] .calendar-panel .month-weekdays span{background:#241c25;border-color:#403440;color:#c4b2c0}
+html[data-theme="dark"] .calendar-panel .month-cell{background:#2d232e;border-color:#403440}
+html[data-theme="dark"] .calendar-panel .month-cell.outside{background:#211a23}
+html[data-theme="dark"] .calendar-panel .month-cell>strong{color:#d6c1cf}
+html[data-theme="dark"] .calendar-panel .month-cell>small{color:#bda9b8}
+html[data-theme="dark"] .calendar-panel .month-cell.selected{background:#493040}
+html[data-theme="dark"] .calendar-panel .month-cell.selected>strong{color:#fff5fa}
+html[data-theme="dark"] .calendar-panel .month-cell:not(:disabled):hover{background:#3b2a39}
+html[data-theme="dark"] .calendar-panel .month-cell.selected:hover{background:#56354a}
+html[data-theme="light"] .calendar-panel .agenda-month{background:#f9f0f5}
+html[data-theme="light"] .calendar-panel .month-weekdays span{background:#f9f0f5;border-color:#e4cbd8;color:#604452}
+html[data-theme="light"] .calendar-panel .month-cell{background:#f9f0f5;border-color:#e4cbd8}
+html[data-theme="light"] .calendar-panel .month-cell.outside{background:#f3e8ef}
+html[data-theme="light"] .calendar-panel .month-cell>strong{color:#493746}
+html[data-theme="light"] .calendar-panel .month-cell>small{color:#66505f}
+html[data-theme="light"] .calendar-panel .month-cell.selected{background:#e7c3d3}
+html[data-theme="light"] .calendar-panel .month-cell.selected>strong{color:#452738}
+html[data-theme="light"] .calendar-panel .month-cell:not(:disabled):hover{background:#f0dbe5}
+html[data-theme="light"] .calendar-panel .month-cell.selected:hover{background:#dfb2c6}
+html[data-theme="dark"] .calendar-panel .month-event.agenda-colored-event:hover,
+html[data-theme="light"] .calendar-panel .month-event.agenda-colored-event:hover{position:relative;background:color-mix(in srgb,var(--appointment-color) 56%,var(--paper));outline:2px solid var(--appointment-color);outline-offset:-1px;box-shadow:0 5px 14px color-mix(in srgb,var(--appointment-color) 38%,transparent);filter:saturate(1.15);z-index:3}
+
+/* Year view month cards follow the same neutral and active agenda surfaces. */
+html[data-theme="dark"] .calendar-panel .year-month{background:#2d232e;border-color:#493843}
+html[data-theme="dark"] .calendar-panel .year-month strong{color:#f1e8ef}
+html[data-theme="dark"] .calendar-panel .year-month span{color:#e8bed0}
+html[data-theme="dark"] .calendar-panel .year-month i{color:#bda9b8}
+html[data-theme="dark"] .calendar-panel .year-month:hover{background:#493040;border-color:#71455c}
+html[data-theme="light"] .calendar-panel .year-month{background:#f9f0f5;border-color:#e4cbd8}
+html[data-theme="light"] .calendar-panel .year-month strong{color:#493746}
+html[data-theme="light"] .calendar-panel .year-month span{color:#6c4257}
+html[data-theme="light"] .calendar-panel .year-month i{color:#66505f}
+html[data-theme="light"] .calendar-panel .year-month:hover{background:#e7c3d3;border-color:#d5a7bc}
+
+.agenda-print-sheet{display:none}
+@media print{
+  @page{size:landscape;margin:6mm}
+  html,body{width:auto!important;min-width:0!important;min-height:0!important;background:#fff!important}
+  body{margin:0!important;color:#182127!important;font:8px/1.2 Arial,sans-serif!important;print-color-adjust:exact;-webkit-print-color-adjust:exact}
+  .sidebar,.topbar,.mobile-nav-backdrop,.page-title,.calendar-toolbar,.agenda-identity-filters,.agenda-filter-panel,.agenda-account-note,.agenda-summary,.calendar-grid,.agenda-week,.agenda-month,.agenda-year,.agenda-list-wrap,.calendar-bottom,.toast,.modal-backdrop,.nextjs-portal{display:none!important}
+  .app-shell,.main-shell,.content-area{display:block!important;width:auto!important;max-width:none!important;min-height:0!important;margin:0!important;padding:0!important;background:#fff!important}
+  .calendar-panel{display:block!important;width:100%!important;margin:0!important;padding:0!important;border:0!important;border-radius:0!important;background:#fff!important;box-shadow:none!important;overflow:visible!important}
+  .agenda-print-sheet{display:block!important;width:100%!important;color:#182127!important;background:#fff!important}
+  .agenda-print-heading{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin:0 0 8px;padding:0 0 6px;border-bottom:2px solid #7d375a}
+  .agenda-print-heading>div>span{display:block;margin-bottom:2px;color:#7d375a;font-size:7px;font-weight:700;letter-spacing:.12em;text-transform:uppercase}
+  .agenda-print-heading h1{margin:0;color:#20151c;font-size:16px;line-height:1.1}
+  .agenda-print-heading p{margin:3px 0 0;color:#54444e;font-size:9px}
+  .agenda-print-heading>strong{padding:4px 7px;border-radius:10px;background:#f1e3eb;color:#65334f;font-size:8px;white-space:nowrap}
+  .agenda-print-table{width:100%;border-collapse:collapse;table-layout:fixed;color:#182127}
+  .agenda-print-table th{padding:4px 5px;background:#f1e3eb;border-bottom:1px solid #cda8bb;color:#503344;text-align:left;font-size:7px;font-weight:700;letter-spacing:.04em;text-transform:uppercase}
+  .agenda-print-table td{height:auto!important;min-height:0!important;padding:3px 5px;border-bottom:1px solid #e6dce2;color:#242027;font-size:8px;line-height:1.15;vertical-align:middle;white-space:normal!important;overflow-wrap:anywhere}
+  .agenda-print-table tbody tr:nth-child(even){background:#fbf7fa}
+  .agenda-print-table tbody tr{break-inside:avoid;page-break-inside:avoid}
+  .agenda-print-table th:nth-child(1){width:13%}.agenda-print-table th:nth-child(2){width:17%}.agenda-print-table th:nth-child(3){width:20%}.agenda-print-table th:nth-child(4){width:15%}.agenda-print-table th:nth-child(5){width:14%}.agenda-print-table th:nth-child(6){width:7%}.agenda-print-table th:nth-child(7){width:7%}.agenda-print-table th:nth-child(8){width:7%}
+  .agenda-print-table td:first-child strong,.agenda-print-table td:first-child span{display:block}
+  .agenda-print-table td:first-child strong{color:#20151c;font-size:7.5px}
+  .agenda-print-table td:first-child span{margin-top:2px;color:#665560;font-size:7px}
+  .agenda-print-color{display:inline-block;width:6px;height:6px;margin-right:4px;border-radius:50%;background:var(--appointment-color);print-color-adjust:exact;-webkit-print-color-adjust:exact}
+  .agenda-print-empty{padding:20px;border:1px solid #e6dce2;color:#54444e;text-align:center}
+}
