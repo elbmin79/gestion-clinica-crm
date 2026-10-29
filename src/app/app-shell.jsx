@@ -16,12 +16,16 @@ import { buildClinicGroups, filterByWorkspace, normalizeWorkspaceSelection } fro
 import { openDemoRecordFile, saveDemoRecordFile, validatePatientRecordFile, validatePatientRecordFileContent } from '../lib/patient-record-files';
 import { signOut } from './login/actions';
 import { createClient as createSupabaseBrowserClient } from '../lib/supabase/client';
+import { profileBirthCountries, profileStaffTypes } from '../lib/profile-options';
+import ClinicAccessManager from './clinic-access/manager';
+import NotificationCenter, { useNotificationFeed } from './notification-center';
 import {
   Activity, ArrowDown, ArrowDownRight, ArrowLeft, ArrowRight, ArrowUpRight, Building2,
   Bell, CalendarDays, CalendarPlus, Check, CheckCircle2, ChevronDown, ChevronLeft,
   ChevronRight, CircleHelp, ClipboardCheck, Clock3, Command, FileCheck2,
   FilePlus2, FileText, Filter, LayoutDashboard, ListFilter, MoreHorizontal,
   Plus, Search, Settings2, ShieldCheck, SlidersHorizontal, Sparkles,
+  Download, Maximize2, PenLine, Trash2, Upload,
   UserRound, UsersRound, X, Menu, Printer, Video, DollarSign, Moon, Sun
 } from 'lucide-react';
 
@@ -265,7 +269,9 @@ function latestDocumentRecord(patient, kind) {
   return records.find(record => record.status !== 'Reemplazado') || records[0] || null;
 }
 function IconButton({ children, className = '', ...props }) { return <button className={`icon-button ${className}`} {...props}>{children}</button>; }
-function Avatar({ initials, tone = 'violet', size = '' }) { return <span className={`avatar ${tone} ${size}`}>{initials}</span>; }
+function Avatar({ initials, tone = 'violet', size = '', imageUrl = '' }) {
+  return <span className={`avatar ${tone} ${size}${imageUrl ? ' has-image' : ''}`} style={imageUrl ? { backgroundImage: `url("${imageUrl}")` } : undefined} aria-hidden="true">{imageUrl ? '' : initials}</span>;
+}
 function Badge({ children, variant = '' }) { return <span className={`badge ${variant}`}>{children}</span>; }
 function PageTitle({ eyebrow, title, description, action }) {
   return <div className="page-title"><div>{eyebrow && <div className="eyebrow">{eyebrow}</div>}<h1>{title}</h1>{description && <p>{description}</p>}</div>{action && <div className="page-title-action">{action}</div>}</div>;
@@ -320,7 +326,7 @@ function App({ children }) {
     if (!sharedMode) {
       try {
         const stored = JSON.parse(window.localStorage.getItem('crm-demo-user-profile-v1') || '{}');
-      setUserProfile({ name: stored.name || 'Equipo clínico', email: stored.email || '', metadata: stored, userId: '' });
+      setUserProfile({ name: stored.name || 'Equipo clínico', email: stored.email || '', metadata: stored, userId: '', avatarUrl: stored.avatarUrl || '', signatureUrl: stored.signatureUrl || '' });
       } catch { setUserProfile({ name: 'Equipo clínico', email: '', metadata: {}, userId: '' }); }
       setProfileLoaded(true);
       return;
@@ -332,7 +338,10 @@ function App({ children }) {
       const user = data?.user;
       const metadata = user?.user_metadata || {};
       const name = [metadata.names, metadata.firstLastName, metadata.secondLastName].filter(Boolean).join(' ') || metadata.full_name || metadata.name || user?.email || 'Usuario';
-      setUserProfile({ name, email: user?.email || '', metadata, userId: user?.id || '' });
+      const avatarPath = typeof metadata.avatar_path === 'string' ? metadata.avatar_path : '';
+      const avatarUrl = avatarPath ? supabase.storage.from('profile-avatars').getPublicUrl(avatarPath).data.publicUrl : '';
+      const signaturePath = typeof metadata.signature_path === 'string' ? metadata.signature_path : '';
+      setUserProfile({ name, email: user?.email || '', metadata, userId: user?.id || '', avatarPath, avatarUrl, signaturePath, signatureUrl: '' });
       setProfileLoaded(true);
     }).catch(() => { if (active) setProfileLoaded(true); });
     return () => { active = false; };
@@ -511,6 +520,8 @@ function App({ children }) {
   const setAppointments = setDemoAppointments;
   const [modal, setModal] = useState(null);
   const [toast, setToast] = useState('');
+  const notificationScope = sharedMode ? `${userProfile.userId}:${sharedDirectory.clinicId || 'pending'}` : 'demo';
+  const notificationFeed = useNotificationFeed(notificationScope);
   const [selectedPatient, setSelectedPatient] = useState(null);
   const [selectedProvider, setSelectedProvider] = useState(null);
   const [selectedBranchRecord, setSelectedBranchRecord] = useState(null);
@@ -519,6 +530,11 @@ function App({ children }) {
   const [selectedConsentRecordId, setSelectedConsentRecordId] = useState('');
   const [selectedContractRecordId, setSelectedContractRecordId] = useState('');
   const [modalReturn, setModalReturn] = useState(null);
+  useEffect(() => {
+    if (!isStandaloneRoute) return;
+    setModal(null);
+    setModalReturn(null);
+  }, [isStandaloneRoute]);
 
   const openNewAppointment = (date = agendaDate, time = '17:00', patientId = '', providerId = '') => {
     setAppointmentDefaults({ date, time, patientId, providerId });
@@ -588,7 +604,7 @@ function App({ children }) {
     });
   }, [appointments, payments, patients, setPayments]);
 
-  const notify = (message) => { setToast(message); window.setTimeout(() => setToast(''), 2800); };
+  const notify = (message) => { notificationFeed.add(message); setToast(message); window.setTimeout(() => setToast(''), 2800); };
   const saveClinicName = (event) => {
     event.preventDefault();
     const nextName = String(new FormData(event.currentTarget).get('clinicName') || '').trim();
@@ -1365,15 +1381,15 @@ function App({ children }) {
         </div>}
       </div>
       <nav className="side-nav">{nav.map(group=><div className="nav-group" key={group.section}><div className="nav-caption">{group.section}</div>{group.links.map(item=><button key={item.id} className={`nav-item ${page===item.id?'active':''}`} onClick={()=>setPage(item.id)}><item.icon size={17}/><span>{item.label}</span>{item.count&&<span className="nav-count">{item.count}</span>}</button>)}</div>)}</nav>
-      <div className="sidebar-bottom"><button className={`nav-item ${page==='settings'?'active':''}`} onClick={()=>setPage('settings')}><Settings2 size={17}/><span>Configuración</span></button><div className="profile-row"><button type="button" className="profile-identity" onClick={()=>setPage('profile')} aria-label="Abrir mi perfil"><Avatar initials={profileInitials(displayUserName)} tone="navy"/><span className="profile-copy"><strong>{profileLoaded?displayUserName:'Cargando perfil…'}</strong></span></button><button type="button" className="profile-logout" onClick={()=>setModal('confirm-logout')}>Cerrar sesión</button></div></div>
+      <div className="sidebar-bottom"><button className={`nav-item ${page==='settings'?'active':''}`} onClick={()=>setPage('settings')}><Settings2 size={17}/><span>Configuración</span></button><div className="profile-row"><button type="button" className="profile-identity" onClick={()=>setPage('profile')} aria-label="Abrir mi perfil"><Avatar initials={profileInitials(displayUserName)} tone="navy" imageUrl={userProfile.avatarUrl}/><span className="profile-copy"><strong>{profileLoaded?displayUserName:'Cargando perfil…'}</strong></span></button><button type="button" className="profile-logout" onClick={()=>setModal('confirm-logout')}>Cerrar sesión</button></div></div>
     </aside>
     {mobileNavOpen&&<button className="mobile-nav-backdrop" aria-label="Cerrar navegación" onClick={()=>setMobileNavOpen(false)}/>}
     <main className="main-shell">
-      <header className="topbar"><button className="mobile-menu-button" aria-label="Abrir navegación" aria-expanded={mobileNavOpen} onClick={()=>setMobileNavOpen(open=>!open)}><Menu size={18}/></button><div className="breadcrumbs"><span>{activeClinicName}</span><ChevronRight size={14}/><strong>{({overview:'Resumen',agenda:'Agenda',payments:'Pagos',reminders:'Recordatorios',patients:'Pacientes',consents:'Consentimientos',contracts:'Contratos',team:'Equipo y sucursales',settings:'Configuración',profile:'Mi perfil'})[page]}</strong></div><div className="topbar-actions"><button className="search-shortcut" onClick={openPatientSearch}><Search size={15}/><span>Buscar</span><kbd>⌘ K</kbd></button><span className="topbar-divider"/><IconButton className="theme-toggle-button" aria-label={theme==='dark'?'Activar modo claro':'Activar modo oscuro'} aria-pressed={theme==='dark'} title={theme==='dark'?'Cambiar a modo claro':'Cambiar a modo oscuro'} onClick={()=>setTheme(current=>current==='dark'?'light':'dark')}>{theme==='dark'?<Sun size={18}/>:<Moon size={18}/>}</IconButton><IconButton aria-label="Ayuda" onClick={()=>notify('Centro de ayuda')}><CircleHelp size={18}/></IconButton><IconButton className="notification-button" aria-label="Notificaciones" onClick={()=>notify('No tienes notificaciones nuevas')}><Bell size={18}/><i/></IconButton><button type="button" className="topbar-profile-button" aria-label="Abrir mi perfil" onClick={()=>setPage('profile')}><Avatar initials={profileInitials(displayUserName)} tone="navy"/></button></div></header>
+      <header className="topbar"><button className="mobile-menu-button" aria-label="Abrir navegación" aria-expanded={mobileNavOpen} onClick={()=>setMobileNavOpen(open=>!open)}><Menu size={18}/></button><div className="breadcrumbs"><span>{activeClinicName}</span><ChevronRight size={14}/><strong>{({overview:'Resumen',agenda:'Agenda',payments:'Pagos',reminders:'Recordatorios',patients:'Pacientes',consents:'Consentimientos',contracts:'Contratos',team:'Equipo y sucursales',settings:'Configuración',profile:'Mi perfil'})[page]}</strong></div><div className="topbar-actions"><button className="search-shortcut" onClick={openPatientSearch}><Search size={15}/><span>Buscar</span><kbd>⌘ K</kbd></button><span className="topbar-divider"/><IconButton className="theme-toggle-button" aria-label={theme==='dark'?'Activar modo claro':'Activar modo oscuro'} aria-pressed={theme==='dark'} title={theme==='dark'?'Cambiar a modo claro':'Cambiar a modo oscuro'} onClick={()=>setTheme(current=>current==='dark'?'light':'dark')}>{theme==='dark'?<Sun size={18}/>:<Moon size={18}/>}</IconButton><IconButton aria-label="Ayuda" onClick={()=>notify('Centro de ayuda')}><CircleHelp size={18}/></IconButton><NotificationCenter key={notificationScope} {...notificationFeed}/><button type="button" className="topbar-profile-button" aria-label="Abrir mi perfil" onClick={()=>setPage('profile')}><Avatar initials={profileInitials(displayUserName)} tone="navy" imageUrl={userProfile.avatarUrl}/></button></div></header>
     <div className="content-area">
         {!sharedMode && <div className="demo-storage-banner" role="status"><ShieldCheck size={15}/> Modo de demostración: usa solo datos ficticios. Los cambios se guardan en este navegador; no es un sistema seguro para información real de pacientes. Conecta el proyecto Supabase de la clínica antes de usarlo en operación.</div>}
         {sharedMode && <SharedDataStatus status={sharedPageStatus} memberships={sharedDirectory.memberships} chooseClinic={sharedDirectory.chooseClinic} retry={sharedPageRetry}/>}
-        <div className="shared-page-content" aria-busy={sharedMode && sharedPageStatus === 'loading'} inert={sharedMode && sharedPageStatus !== 'ready'}>
+        <div className="shared-page-content" aria-busy={sharedMode && page !== 'profile' && sharedPageStatus === 'loading'} inert={sharedMode && page !== 'profile' && sharedPageStatus !== 'ready'}>
         {page==='overview' && <Overview sharedMode={sharedMode} timeZone={clinicTimeZone} patients={workspacePatients} appointments={workspaceAppointments} patientActivities={workspacePatientActivities} pendingDocs={pendingDocs} setPage={setPage} setModal={setModal} notify={notify} onNewAppointment={openNewAppointment} onOpenPatient={patient=>{setSelectedPatient(patient);setModalReturn(null);setModal('patient')}} onOpenDocument={openPatientDocument}/>}
         {page==='patients' && <PatientsPage key={`${activeWorkspaceSelection.businessId}:${activeWorkspaceSelection.branchId}`} patients={filteredPatients} allPatients={workspacePatients} query={query} setQuery={setQuery} searchRef={patientSearchRef} setModal={setModal} onOpen={p=>{setSelectedPatient(p);setModalReturn(null);setModal('patient')}}/>}
         {!sharedMode&&page==='agenda' && <AgendaPage timeZone={clinicTimeZone} appointments={filteredAppointments} payments={workspacePayments} providerFilter={providerFilter} setProviderFilter={setProviderFilter} providerOptions={providerOptions} branchFilter={branchFilter} setBranchFilter={updateAgendaBranchFilter} branchOptions={branchOptions} businessFilter={businessFilter} setBusinessFilter={updateAgendaBusinessFilter} businessOptions={businessOptions} period={period} setPeriod={setPeriod} onNewAppointment={openNewAppointment} notify={notify} agendaDate={agendaDate} setAgendaDate={setAgendaDate} onOpenAppointment={appointment=>{setSelectedAppointment(appointment);setModal('appointment')}}/>}
@@ -1385,7 +1401,7 @@ function App({ children }) {
         {page==='consents'&&<ConsentsPage patients={workspacePatients} templates={consentTemplatesForPage} notify={notify} onOpenDocument={openPatientDocument} onPrepareConsent={template=>openConsentPreparation('',null,template?.id||template?.title||'')} onNewTemplate={()=>openConsentTemplateCreation()} onNewVersion={template=>openConsentTemplateCreation(null, template)} sharedMode={sharedMode} canPrepare={!sharedMode||['admin','clinician'].includes(sharedDirectory.role)} canManageTemplates={!sharedMode||sharedDirectory.role==='admin'}/>}
         {page==='contracts'&&<ContractsPage patients={workspacePatients} templates={contractTemplatesForPage} setModal={setModal} notify={notify} onOpenDocument={openPatientDocument} onNewContract={()=>openContractPreparation()} onNewTemplate={()=>openContractTemplateCreation()} sharedMode={sharedMode} canPrepare={!sharedMode||['admin','clinician'].includes(sharedDirectory.role)} canManageTemplates={!sharedMode||sharedDirectory.role==='admin'}/>}
         {!sharedMode&&page==='team' && <TeamPage businesses={businesses} branches={branches} providers={providers} setModal={setModal} notify={notify} onEditBranch={branch=>{setSelectedBranchRecord(branch);setModal('edit-branch')}} onEditProvider={provider=>{setSelectedProvider(provider);setModal('edit-provider')}}/>}
-        {sharedMode&&page==='team'&&<TeamPage sharedMode businesses={businesses} branches={branches} providers={providers} setModal={setModal} notify={notify} onEditBranch={branch=>{setSelectedBranchRecord(branch);setModal('edit-branch')}} onEditProvider={provider=>{setSelectedProvider(provider);setModal('edit-provider')}} canManageBusinesses={['admin','receptionist'].includes(sharedDirectory.role)} canManageProviders={sharedDirectory.role==='admin'}/>}
+        {sharedMode&&page==='team'&&<><TeamPage sharedMode businesses={businesses} branches={branches} providers={providers} setModal={setModal} notify={notify} onEditBranch={branch=>{setSelectedBranchRecord(branch);setModal('edit-branch')}} onEditProvider={provider=>{setSelectedProvider(provider);setModal('edit-provider')}} canManageBusinesses={['admin','receptionist'].includes(sharedDirectory.role)} canManageProviders={sharedDirectory.role==='admin'}/>{sharedDirectory.role==='admin'&&<ClinicAccessManager clinicId={sharedDirectory.clinicId}/>}</>}
         {page==='settings'&&<SettingsPage clinicName={activeClinicName} sharedMode={sharedMode} onSaveClinicName={saveClinicName}/>}
         {page==='profile'&&<ProfilePage profile={{...userProfile,name:displayUserName}} clinicName={activeClinicName} memberships={sharedDirectory.memberships} clinicId={sharedDirectory.clinicId} onSelectClinic={sharedDirectory.chooseClinic} sharedMode={sharedMode} onProfileChange={setUserProfile} notify={notify}/>}
         </div>
@@ -1437,28 +1453,348 @@ function profileInitials(name = '') {
   return parts.slice(0, 2).map(part => Array.from(part)[0]?.toLocaleUpperCase('es-MX') || '').join('') || 'U';
 }
 
+function SignaturePad({ onSave, onCancel, saving }) {
+  const canvasRef = useRef(null);
+  const drawingRef = useRef(false);
+  const [hasInk, setHasInk] = useState(false);
+  const position = event => {
+    const canvas = canvasRef.current;
+    const rect = canvas.getBoundingClientRect();
+    return { x: (event.clientX - rect.left) * canvas.width / rect.width, y: (event.clientY - rect.top) * canvas.height / rect.height };
+  };
+  const start = event => {
+    const canvas = canvasRef.current;
+    const context = canvas.getContext('2d');
+    const point = position(event);
+    drawingRef.current = true;
+    canvas.setPointerCapture(event.pointerId);
+    context.beginPath();
+    context.moveTo(point.x, point.y);
+    context.lineWidth = 4;
+    context.lineCap = 'round';
+    context.lineJoin = 'round';
+    context.strokeStyle = '#17141a';
+    setHasInk(true);
+  };
+  const draw = event => {
+    if (!drawingRef.current) return;
+    const point = position(event);
+    const context = canvasRef.current.getContext('2d');
+    context.lineTo(point.x, point.y);
+    context.stroke();
+  };
+  const stop = () => { drawingRef.current = false; };
+  const clear = () => {
+    const canvas = canvasRef.current;
+    canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
+    setHasInk(false);
+  };
+  const save = () => {
+    if (!hasInk || saving) return;
+    canvasRef.current.toBlob(blob => {
+      if (blob) onSave(new File([blob], 'firma.png', { type: 'image/png' }));
+    }, 'image/png');
+  };
+  return <div className="signature-pad-wrap">
+    <p>Dibuja tu firma en el recuadro. Puedes usar el mouse, el dedo o un lápiz táctil.</p>
+    <canvas ref={canvasRef} className="signature-pad" width="1200" height="360" aria-label="Área para dibujar la firma" onPointerDown={start} onPointerMove={draw} onPointerUp={stop} onPointerCancel={stop}/>
+    <div className="signature-pad-actions"><button type="button" className="button secondary" onClick={clear} disabled={!hasInk || saving}>Limpiar</button><span/><button type="button" className="button secondary" onClick={onCancel} disabled={saving}>Cancelar</button><button type="button" className="button primary" onClick={save} disabled={!hasInk || saving}>{saving?'Guardando…':'Guardar firma'}</button></div>
+  </div>;
+}
+
 function ProfilePage({ profile, clinicName, memberships, clinicId, onSelectClinic, sharedMode, onProfileChange, notify }) {
+  const photoInputRef = useRef(null);
+  const signatureInputRef = useRef(null);
   const [form, setForm] = useState(() => ({
     names: profile.metadata?.names || '', firstLastName: profile.metadata?.firstLastName || '',
     secondLastName: profile.metadata?.secondLastName || '', rfc: profile.metadata?.rfc || '',
     phone: profile.metadata?.phone || '', specialty: profile.metadata?.specialty || '',
     university: profile.metadata?.university || '', certificationNumber: profile.metadata?.certificationNumber || '',
+    tipoPersonal: profile.metadata?.tipoPersonal || '', specialtyCertificationNumber: profile.metadata?.specialtyCertificationNumber || '',
+    curp: profile.metadata?.curp || '', paisNacimiento: profile.metadata?.paisNacimiento || '',
     timezone: profile.metadata?.timezone || 'America/Tijuana', email: profile.email || '', newPassword: '',
   }));
   const [saving, setSaving] = useState(false);
+  const [noChangesMessageVisible, setNoChangesMessageVisible] = useState(false);
+  const noChangesTimerRef = useRef(null);
   const [error, setError] = useState('');
+  const [photoBusy, setPhotoBusy] = useState(false);
+  const [photoError, setPhotoError] = useState('');
+  const [signatureBusy, setSignatureBusy] = useState(false);
+  const [signatureError, setSignatureError] = useState('');
+  const [signatureModal, setSignatureModal] = useState('');
+  const [signaturePreviewError, setSignaturePreviewError] = useState(false);
+  const [signatureLoading, setSignatureLoading] = useState(Boolean(sharedMode && profile.signaturePath && !profile.signatureUrl));
+  const [additionalOpen, setAdditionalOpen] = useState(true);
+  const curpValidationMessage = 'El CURP debe tener exactamente 18 caracteres.';
+  const dismissNoChangesMessage = () => {
+    window.clearTimeout(noChangesTimerRef.current);
+    setNoChangesMessageVisible(false);
+  };
+  const showNoChangesMessage = () => {
+    window.clearTimeout(noChangesTimerRef.current);
+    setNoChangesMessageVisible(true);
+    noChangesTimerRef.current = window.setTimeout(() => setNoChangesMessageVisible(false), 3200);
+  };
+  useEffect(() => () => window.clearTimeout(noChangesTimerRef.current), []);
   useEffect(() => {
-    setForm(current => ({ ...current, ...Object.fromEntries(['names','firstLastName','secondLastName','rfc','phone','specialty','university','certificationNumber','timezone'].map(key => [key, profile.metadata?.[key] || current[key] || ''])), email: profile.email || current.email }));
+    if (!sharedMode || !profile.signaturePath) { setSignatureLoading(false); return undefined; }
+    let active = true;
+    const supabase = createSupabaseBrowserClient();
+    setSignatureLoading(true);
+    supabase?.storage.from('profile-signatures').createSignedUrl(profile.signaturePath, 3600).then(({ data, error: signedUrlError }) => {
+      if (!active) return;
+      setSignatureLoading(false);
+      if (signedUrlError || !data?.signedUrl) {
+        setSignatureError('No se pudo cargar la firma guardada. Recarga el perfil para intentarlo de nuevo.');
+      } else if (data.signedUrl !== profile.signatureUrl) {
+        onProfileChange({ ...profile, signatureUrl: data.signedUrl });
+      }
+    }).catch(() => {
+      if (active) { setSignatureLoading(false); setSignatureError('No se pudo cargar la firma guardada. Recarga el perfil para intentarlo de nuevo.'); }
+    });
+    return () => { active = false; };
+  }, [sharedMode, profile.signaturePath]);
+  useEffect(() => {
+    setForm(current => ({ ...current, ...Object.fromEntries(['names','firstLastName','secondLastName','rfc','phone','specialty','university','certificationNumber','timezone','tipoPersonal','specialtyCertificationNumber','curp','paisNacimiento'].map(key => [key, profile.metadata?.[key] || current[key] || ''])), email: profile.email || current.email }));
   }, [profile]);
-  const update = event => setForm(current => ({ ...current, [event.target.name]: event.target.value }));
-  const save = async event => {
-    event.preventDefault(); setSaving(true); setError('');
-    const { newPassword, email, ...metadata } = form;
+  const update = event => {
+    dismissNoChangesMessage();
+    setForm(current => ({ ...current, [event.target.name]: event.target.name === 'curp' ? event.target.value.toLocaleUpperCase('es-MX') : event.target.value }));
+  };
+  const updateCurp = event => {
+    const value = event.currentTarget.value.toLocaleUpperCase('es-MX');
+    event.currentTarget.setCustomValidity(!value || value.length === 18 ? '' : curpValidationMessage);
+    dismissNoChangesMessage();
+    setForm(current => ({ ...current, curp: value }));
+  };
+  const updateProfilePhoto = async event => {
+    const file = event.currentTarget.files?.[0];
+    event.currentTarget.value = '';
+    if (!file) return;
+    setPhotoError('');
+    const extension = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' }[file.type];
+    const maxBytes = (sharedMode ? 5 : 1) * 1024 * 1024;
+    if (!extension) { setPhotoError('Elige una imagen JPG, PNG o WebP.'); return; }
+    if (file.size > maxBytes) { setPhotoError(`La imagen debe pesar menos de ${sharedMode ? '5' : '1'} MB.`); return; }
+    setPhotoBusy(true);
     try {
       if (sharedMode) {
         const supabase = createSupabaseBrowserClient();
         if (!supabase) throw new Error('La sesión no está disponible.');
-        const { error: profileError } = await supabase.auth.updateUser({ data: metadata });
+        const { data: userData, error: userError } = await supabase.auth.getUser();
+        if (userError || !userData.user) throw new Error('Inicia sesión de nuevo para cambiar la foto de perfil.');
+        const user = userData.user;
+        if (profile.userId && profile.userId !== user.id) throw new Error('La sesión cambió. Recarga la página e inténtalo de nuevo.');
+        const previousPath = typeof profile.metadata?.avatar_path === 'string' ? profile.metadata.avatar_path : '';
+        const path = `${user.id}/${crypto.randomUUID()}.${extension}`;
+        const { error: uploadError } = await supabase.storage.from('profile-avatars').upload(path, file, {
+          cacheControl: '31536000',
+          contentType: file.type,
+          upsert: false,
+        });
+        if (uploadError) throw new Error('No se pudo subir la foto. Verifica tu conexión e inténtalo otra vez.');
+        const metadata = { ...profile.metadata, avatar_path: path };
+        const { data: updatedUser, error: metadataError } = await supabase.auth.updateUser({ data: metadata });
+        if (metadataError) {
+          await supabase.storage.from('profile-avatars').remove([path]);
+          throw new Error('La foto se subió, pero no se pudo guardar en tu perfil. Inténtalo de nuevo.');
+        }
+        const avatarUrl = supabase.storage.from('profile-avatars').getPublicUrl(path).data.publicUrl;
+        onProfileChange({ ...profile, metadata: updatedUser.user?.user_metadata || metadata, avatarPath: path, avatarUrl, userId: user.id });
+        if (previousPath.startsWith(`${user.id}/`) && previousPath !== path) {
+          await supabase.storage.from('profile-avatars').remove([previousPath]);
+        }
+      } else {
+        const avatarUrl = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => typeof reader.result === 'string' ? resolve(reader.result) : reject(new Error('No se pudo leer la imagen.'));
+          reader.onerror = () => reject(new Error('No se pudo leer la imagen.'));
+          reader.readAsDataURL(file);
+        });
+        const stored = JSON.parse(window.localStorage.getItem('crm-demo-user-profile-v1') || '{}');
+        window.localStorage.setItem('crm-demo-user-profile-v1', JSON.stringify({ ...stored, avatarUrl }));
+        onProfileChange({ ...profile, avatarUrl });
+      }
+      notify('Foto de perfil actualizada.');
+    } catch (photoSaveError) {
+      setPhotoError(photoSaveError.message || 'No se pudo guardar la foto de perfil.');
+    } finally { setPhotoBusy(false); }
+  };
+  const removeProfilePhoto = async () => {
+    if (!profile.avatarUrl) return;
+    setPhotoBusy(true);
+    setPhotoError('');
+    try {
+      if (sharedMode) {
+        const supabase = createSupabaseBrowserClient();
+        if (!supabase) throw new Error('La sesión no está disponible.');
+        const { data: userData, error: userError } = await supabase.auth.getUser();
+        if (userError || !userData.user) throw new Error('Inicia sesión de nuevo para cambiar la foto de perfil.');
+        const user = userData.user;
+        const previousPath = typeof profile.metadata?.avatar_path === 'string' ? profile.metadata.avatar_path : '';
+        if (profile.userId && profile.userId !== user.id) throw new Error('La sesión cambió. Recarga la página e inténtalo de nuevo.');
+        const metadata = { ...profile.metadata, avatar_path: null };
+        const { data: updatedUser, error: metadataError } = await supabase.auth.updateUser({ data: metadata });
+        if (metadataError) throw new Error('No se pudo quitar la foto del perfil. Inténtalo de nuevo.');
+        onProfileChange({ ...profile, metadata: updatedUser.user?.user_metadata || metadata, avatarPath: '', avatarUrl: '', userId: user.id });
+        if (previousPath.startsWith(`${user.id}/`)) {
+          await supabase.storage.from('profile-avatars').remove([previousPath]);
+        }
+      } else {
+        const stored = JSON.parse(window.localStorage.getItem('crm-demo-user-profile-v1') || '{}');
+        delete stored.avatarUrl;
+        window.localStorage.setItem('crm-demo-user-profile-v1', JSON.stringify(stored));
+        onProfileChange({ ...profile, avatarUrl: '' });
+      }
+      notify('Foto de perfil quitada.');
+    } catch (photoRemoveError) {
+      setPhotoError(photoRemoveError.message || 'No se pudo quitar la foto de perfil.');
+    } finally { setPhotoBusy(false); }
+  };
+  const saveSignatureFile = async file => {
+    setSignatureError('');
+    const extensionFromName = file.name.split('.').pop()?.toLowerCase();
+    const extensionByType = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/gif': 'gif', 'image/webp': 'webp', 'image/heic': 'heic', 'image/heif': 'heif' };
+    const extension = extensionByType[file.type] || (['jpg','jpeg','png','gif','webp','heic','heif'].includes(extensionFromName) ? extensionFromName : '');
+    const mimeType = file.type || ({ jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp', heic: 'image/heic', heif: 'image/heif' }[extension]);
+    const maxBytes = (sharedMode ? 10 : 1) * 1024 * 1024;
+    if (!extension || !mimeType?.startsWith('image/')) throw new Error('Elige una imagen JPG, PNG, GIF, WebP o HEIC.');
+    if (file.size > maxBytes) throw new Error(`La firma debe pesar menos de ${sharedMode ? '10' : '1'} MB.`);
+    setSignatureBusy(true);
+    try {
+      if (sharedMode) {
+        const supabase = createSupabaseBrowserClient();
+        if (!supabase) throw new Error('La sesión no está disponible.');
+        const { data: userData, error: userError } = await supabase.auth.getUser();
+        if (userError || !userData.user) throw new Error('Inicia sesión de nuevo para guardar tu firma.');
+        const user = userData.user;
+        if (profile.userId && profile.userId !== user.id) throw new Error('La sesión cambió. Recarga la página e inténtalo de nuevo.');
+        const path = `${user.id}/${crypto.randomUUID()}.${extension}`;
+        const bucket = supabase.storage.from('profile-signatures');
+        const { error: uploadError } = await bucket.upload(path, file, { contentType: mimeType, cacheControl: '3600', upsert: false });
+        if (uploadError) throw new Error('No se pudo subir la firma. Verifica tu conexión e inténtalo otra vez.');
+        const { data: signedData, error: signedError } = await bucket.createSignedUrl(path, 3600);
+        if (signedError || !signedData?.signedUrl) {
+          await bucket.remove([path]);
+          throw new Error('La firma se subió, pero no se pudo preparar su vista previa. Inténtalo otra vez.');
+        }
+        const metadata = { ...profile.metadata, signature_path: path };
+        const { data: updatedUser, error: metadataError } = await supabase.auth.updateUser({ data: metadata });
+        if (metadataError) {
+          await bucket.remove([path]);
+          throw new Error('La firma se subió, pero no se pudo guardar en tu perfil. Inténtalo de nuevo.');
+        }
+        const previousPath = typeof profile.metadata?.signature_path === 'string' ? profile.metadata.signature_path : '';
+        onProfileChange({ ...profile, metadata: updatedUser.user?.user_metadata || metadata, signaturePath: path, signatureUrl: signedData.signedUrl, userId: user.id });
+        if (previousPath.startsWith(`${user.id}/`) && previousPath !== path) await bucket.remove([previousPath]);
+      } else {
+        const signatureUrl = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => typeof reader.result === 'string' ? resolve(reader.result) : reject(new Error('No se pudo leer la firma.'));
+          reader.onerror = () => reject(new Error('No se pudo leer la firma.'));
+          reader.readAsDataURL(file);
+        });
+        const stored = JSON.parse(window.localStorage.getItem('crm-demo-user-profile-v1') || '{}');
+        window.localStorage.setItem('crm-demo-user-profile-v1', JSON.stringify({ ...stored, signatureUrl }));
+        onProfileChange({ ...profile, signatureUrl });
+      }
+      setSignaturePreviewError(false);
+      setSignatureModal('');
+      notify('Firma de perfil actualizada.');
+    } catch (signatureSaveError) {
+      throw signatureSaveError;
+    } finally { setSignatureBusy(false); }
+  };
+  const selectSignatureFile = async event => {
+    const file = event.currentTarget.files?.[0];
+    event.currentTarget.value = '';
+    if (!file) return;
+    try { await saveSignatureFile(file); }
+    catch (signatureSaveError) { setSignatureError(signatureSaveError.message || 'No se pudo guardar la firma.'); }
+  };
+  const removeSignature = async () => {
+    if (!profile.signatureUrl) return;
+    setSignatureBusy(true);
+    setSignatureError('');
+    try {
+      if (sharedMode) {
+        const supabase = createSupabaseBrowserClient();
+        if (!supabase) throw new Error('La sesión no está disponible.');
+        const { data: userData, error: userError } = await supabase.auth.getUser();
+        if (userError || !userData.user) throw new Error('Inicia sesión de nuevo para quitar tu firma.');
+        const user = userData.user;
+        const previousPath = typeof profile.metadata?.signature_path === 'string' ? profile.metadata.signature_path : '';
+        if (profile.userId && profile.userId !== user.id) throw new Error('La sesión cambió. Recarga la página e inténtalo de nuevo.');
+        const metadata = { ...profile.metadata, signature_path: null };
+        const { data: updatedUser, error: metadataError } = await supabase.auth.updateUser({ data: metadata });
+        if (metadataError) throw new Error('No se pudo quitar la firma del perfil. Inténtalo de nuevo.');
+        onProfileChange({ ...profile, metadata: updatedUser.user?.user_metadata || metadata, signaturePath: '', signatureUrl: '', userId: user.id });
+        if (previousPath.startsWith(`${user.id}/`)) await supabase.storage.from('profile-signatures').remove([previousPath]);
+      } else {
+        const stored = JSON.parse(window.localStorage.getItem('crm-demo-user-profile-v1') || '{}');
+        delete stored.signatureUrl;
+        window.localStorage.setItem('crm-demo-user-profile-v1', JSON.stringify(stored));
+        onProfileChange({ ...profile, signatureUrl: '' });
+      }
+      setSignaturePreviewError(false);
+      notify('Firma de perfil quitada.');
+    } catch (signatureRemoveError) {
+      setSignatureError(signatureRemoveError.message || 'No se pudo quitar la firma.');
+    } finally { setSignatureBusy(false); }
+  };
+  const downloadSignature = async () => {
+    try {
+      let blob;
+      if (sharedMode) {
+        const supabase = createSupabaseBrowserClient();
+        const { data, error: downloadError } = await supabase.storage.from('profile-signatures').download(profile.signaturePath);
+        if (downloadError || !data) throw new Error('No se pudo descargar la firma.');
+        blob = data;
+      } else {
+        const response = await fetch(profile.signatureUrl);
+        if (!response.ok) throw new Error('No se pudo descargar la firma.');
+        blob = await response.blob();
+      }
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = `firma.${profile.signaturePath?.split('.').pop() || blob.type.split('/').pop() || 'png'}`;
+      anchor.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (downloadError) { setSignatureError(downloadError.message || 'No se pudo descargar la firma.'); }
+  };
+  const savedFormValues = {
+    names: profile.metadata?.names || '',
+    firstLastName: profile.metadata?.firstLastName || '',
+    secondLastName: profile.metadata?.secondLastName || '',
+    rfc: profile.metadata?.rfc || '',
+    phone: profile.metadata?.phone || '',
+    specialty: profile.metadata?.specialty || '',
+    university: profile.metadata?.university || '',
+    certificationNumber: profile.metadata?.certificationNumber || '',
+    tipoPersonal: profile.metadata?.tipoPersonal || '',
+    specialtyCertificationNumber: profile.metadata?.specialtyCertificationNumber || '',
+    curp: profile.metadata?.curp || '',
+    paisNacimiento: profile.metadata?.paisNacimiento || '',
+    timezone: profile.metadata?.timezone || 'America/Tijuana',
+    email: profile.email || '',
+    newPassword: '',
+  };
+  const hasUnsavedChanges = Object.entries(savedFormValues).some(([key, value]) => form[key] !== value);
+  const save = async event => {
+    event.preventDefault();
+    if (!hasUnsavedChanges) { showNoChangesMessage(); return; }
+    if (saving) return;
+    dismissNoChangesMessage();
+    setSaving(true); setError('');
+    const { newPassword, email, ...metadata } = form;
+    const savedMetadata = { ...profile.metadata, ...metadata };
+    try {
+      if (sharedMode) {
+        const supabase = createSupabaseBrowserClient();
+        if (!supabase) throw new Error('La sesión no está disponible.');
+        const { error: profileError } = await supabase.auth.updateUser({ data: savedMetadata });
         if (profileError) throw profileError;
         if (email.trim() && email.trim() !== profile.email) {
           const { error: emailError } = await supabase.auth.updateUser({ email: email.trim() });
@@ -1469,10 +1805,10 @@ function ProfilePage({ profile, clinicName, memberships, clinicId, onSelectClini
           if (passwordError) throw passwordError;
         }
       } else {
-        window.localStorage.setItem('crm-demo-user-profile-v1', JSON.stringify({ ...metadata, email }));
+        window.localStorage.setItem('crm-demo-user-profile-v1', JSON.stringify({ ...savedMetadata, email, avatarUrl: profile.avatarUrl || '', signatureUrl: profile.signatureUrl || '' }));
       }
-      const name = [metadata.names, metadata.firstLastName, metadata.secondLastName].filter(Boolean).join(' ') || email || 'Equipo clínico';
-      onProfileChange({ name, email: email || profile.email, metadata });
+      const name = [savedMetadata.names, savedMetadata.firstLastName, savedMetadata.secondLastName].filter(Boolean).join(' ') || email || 'Equipo clínico';
+      onProfileChange({ ...profile, name, email: email || profile.email, metadata: savedMetadata });
       setForm(current => ({ ...current, newPassword: '' }));
       notify(email && email !== profile.email ? 'Cambios guardados. Confirma el correo desde tu bandeja de entrada.' : 'Perfil guardado.');
     } catch (saveError) { setError(saveError.message || 'No se pudieron guardar los cambios.'); }
@@ -1481,11 +1817,19 @@ function ProfilePage({ profile, clinicName, memberships, clinicId, onSelectClini
   return <div className="profile-page">
     <PageTitle title="Mi perfil" description="Administra la información personal y profesional de tu cuenta."/>
     <form className="profile-form" onSubmit={save}>
-      <section className="panel profile-section"><div className="panel-heading padded"><div><div className="panel-title">Cuenta</div><p className="panel-subtitle">Correo y acceso a tu cuenta.</p></div></div><div className="profile-section-content"><label className="profile-avatar-setting"><Avatar initials={profileInitials(profile.name)} tone="navy" size="large"/><span><strong>Foto de perfil</strong><small>Subir una foto de perfil estará disponible próximamente.</small></span><button className="button outline compact" type="button" disabled>Agregar foto</button></label><div className="form-grid"><label>Correo electrónico<input name="email" type="email" value={form.email} onChange={update} autoComplete="email"/></label><label>Contraseña nueva<input name="newPassword" type="password" value={form.newPassword} onChange={update} autoComplete="new-password" placeholder="Deja en blanco para conservarla" minLength="8"/></label><label>Clínica actual{memberships.length?<select aria-label="Clínica actual" value={clinicId} onChange={event=>onSelectClinic(event.target.value)}>{memberships.map(membership=><option key={membership.clinicId} value={membership.clinicId}>{membership.name}</option>)}</select>:<input value={clinicName} readOnly/>}</label><label>Zona horaria<select name="timezone" value={form.timezone} onChange={update}><option value="America/Tijuana">Tijuana (UTC−8/UTC−7)</option><option value="America/Mexico_City">Ciudad de México</option><option value="America/Hermosillo">Hermosillo</option></select></label></div></div></section>
+      <section className="panel profile-section"><div className="panel-heading padded"><div><div className="panel-title">Cuenta</div><p className="panel-subtitle">Correo y acceso a tu cuenta.</p></div></div><div className="profile-section-content"><div className="profile-avatar-setting"><Avatar initials={profileInitials(profile.name)} tone="navy" size="large" imageUrl={profile.avatarUrl}/><div className="profile-avatar-copy"><strong>Foto de perfil</strong><small>JPG, PNG o WebP · Hasta {sharedMode?'5':'1'} MB.</small><input ref={photoInputRef} className="profile-photo-input" type="file" accept="image/jpeg,image/png,image/webp" aria-label="Seleccionar foto de perfil" onChange={updateProfilePhoto}/>{photoError&&<small className="profile-error" role="alert">{photoError}</small>}</div><div className="profile-avatar-actions"><button className="button outline compact" type="button" onClick={()=>photoInputRef.current?.click()} disabled={photoBusy}>{photoBusy?'Subiendo…':profile.avatarUrl?'Cambiar foto':'Agregar foto'}</button>{profile.avatarUrl&&<button className="profile-photo-remove" type="button" onClick={removeProfilePhoto} disabled={photoBusy}>Quitar</button>}</div></div><div className="form-grid"><label>Correo electrónico<input name="email" type="email" value={form.email} onChange={update} autoComplete="email"/></label><label>Contraseña nueva<input name="newPassword" type="password" value={form.newPassword} onChange={update} autoComplete="new-password" placeholder="Deja en blanco para conservarla" minLength="8"/></label><label>Clínica actual{memberships.length?<select aria-label="Clínica actual" value={clinicId} onChange={event=>onSelectClinic(event.target.value)}>{memberships.map(membership=><option key={membership.clinicId} value={membership.clinicId}>{membership.name}</option>)}</select>:<input value={clinicName} readOnly/>}</label><label>Zona horaria<select name="timezone" value={form.timezone} onChange={update}><option value="America/Tijuana">Tijuana (UTC−8/UTC−7)</option><option value="America/Mexico_City">Ciudad de México</option><option value="America/Hermosillo">Hermosillo</option></select></label></div></div></section>
       <section className="panel profile-section"><div className="panel-heading padded"><div><div className="panel-title">Datos personales</div><p className="panel-subtitle">Tu información básica de contacto.</p></div></div><div className="profile-section-content"><div className="form-grid"><label>Nombre(s)<input name="names" value={form.names} onChange={update} autoComplete="given-name" required/></label><label>Primer apellido<input name="firstLastName" value={form.firstLastName} onChange={update} autoComplete="family-name" required/></label><label>Segundo apellido<input name="secondLastName" value={form.secondLastName} onChange={update}/></label><label>RFC<input name="rfc" value={form.rfc} onChange={update} autoCapitalize="characters"/></label><label>Teléfono<input name="phone" type="tel" value={form.phone} onChange={update} autoComplete="tel"/></label></div></div></section>
-      <section className="panel profile-section"><div className="panel-heading padded"><div><div className="panel-title">Datos profesionales</div><p className="panel-subtitle">Credenciales que aparecen en el perfil clínico.</p></div></div><div className="profile-section-content"><div className="form-grid"><label>Especialidad<input name="specialty" value={form.specialty} onChange={update} placeholder="Ej. Medicina estética"/></label><label>Universidad<input name="university" value={form.university} onChange={update}/></label><label>Cédula profesional<input name="certificationNumber" value={form.certificationNumber} onChange={update}/></label></div><label className="profile-avatar-setting"><span><strong>Firma</strong><small>La firma manuscrita y la carga de archivos estarán disponibles próximamente.</small></span><button className="button outline compact" type="button" disabled>Agregar firma</button></label><details className="profile-extra"><summary>Datos adicionales</summary><p>Los campos complementarios del perfil estarán disponibles próximamente.</p></details><div className="profile-note">La clínica y el rol de acceso se administran desde las membresías del equipo.</div></div></section>
-      {error&&<p className="profile-error" role="alert">{error}</p>}<div className="profile-save-row"><button className="button primary" disabled={saving}>{saving?'Guardando…':'Guardar cambios'}</button></div>
-    </form>
+      <section className="panel profile-section"><div className="panel-heading padded"><div><div className="panel-title">Datos profesionales</div><p className="panel-subtitle">Credenciales que aparecen en el perfil clínico.</p></div></div><div className="profile-section-content"><div className="form-grid"><label>Especialidad<input name="specialty" value={form.specialty} onChange={update} placeholder="Ej. Medicina estética"/></label><label>Universidad<input name="university" value={form.university} onChange={update}/></label><label>Cédula profesional<input name="certificationNumber" value={form.certificationNumber} onChange={update}/></label></div><div className="profile-signature-setting">
+        <div className="profile-signature-heading"><strong>Firma (como aparece en la INE)</strong>{profile.signatureUrl&&<button type="button" className="profile-signature-expand" onClick={()=>setSignatureModal('preview')}>Clic para ampliar</button>}</div>
+        <input ref={signatureInputRef} className="profile-photo-input" type="file" accept="image/jpeg,image/png,image/gif,image/webp,image/heic,image/heif,.heic,.heif" aria-label="Seleccionar imagen de firma" onChange={selectSignatureFile}/>
+        {profile.signatureUrl?<div className="profile-signature-preview">{signaturePreviewError?<div className="profile-signature-unavailable">La vista previa no está disponible en este navegador. Puedes descargar la firma o reemplazarla.</div>:<img src={profile.signatureUrl} alt="Firma guardada en el perfil" onError={()=>setSignaturePreviewError(true)}/>}<div className="profile-signature-quick-actions"><IconButton type="button" aria-label="Ampliar firma" title="Ampliar firma" onClick={()=>setSignatureModal('preview')}><Maximize2 size={16}/></IconButton><IconButton type="button" aria-label="Descargar firma" title="Descargar firma" onClick={downloadSignature}><Download size={16}/></IconButton></div><button type="button" className="profile-signature-replace" onClick={()=>signatureInputRef.current?.click()} disabled={signatureBusy}><Upload size={13}/>{signatureBusy?'Subiendo…':'Reemplazar'}</button></div>:signatureLoading?<div className="profile-signature-empty">Cargando firma…</div>:<div className="profile-signature-empty"><PenLine size={19}/><span>Aún no has agregado tu firma</span></div>}
+        <small className="profile-signature-help">JPG, PNG, GIF, WebP o HEIC · Hasta {sharedMode?'10':'1'} MB</small>
+        {signatureError&&<p className="profile-error" role="alert">{signatureError}</p>}
+        <div className="profile-signature-actions"><button className="button outline compact" type="button" onClick={()=>signatureInputRef.current?.click()} disabled={signatureBusy}><Upload size={15}/>{signatureBusy?'Subiendo…':profile.signatureUrl?'Subir otra imagen':'Subir firma'}</button><button className="button outline compact" type="button" onClick={()=>{setSignatureError('');setSignatureModal('draw')}} disabled={signatureBusy}><PenLine size={15}/>Firmar a mano</button>{profile.signatureUrl&&<button className="profile-photo-remove" type="button" onClick={removeSignature} disabled={signatureBusy}><Trash2 size={14}/>Quitar firma</button>}</div>
+      </div><details className="profile-extra profile-additional-details" open={additionalOpen} onToggle={event=>setAdditionalOpen(event.currentTarget.open)}><summary><ChevronRight size={16}/> Datos adicionales</summary><div className="form-grid profile-additional-grid"><label>Tipo de personal<select name="tipoPersonal" value={form.tipoPersonal} onChange={update}><option value="">Sin especificar</option>{profileStaffTypes.map(type=><option key={type} value={type}>{type}</option>)}</select></label><label>Cédula de especialidad<input name="specialtyCertificationNumber" value={form.specialtyCertificationNumber} onChange={update} placeholder="Número de cédula de especialidad"/></label><label>CURP<input name="curp" value={form.curp} onChange={updateCurp} onInvalid={event=>event.currentTarget.setCustomValidity(event.currentTarget.value ? curpValidationMessage : '')} placeholder="CURP de 18 caracteres" minLength="18" maxLength="18" autoCapitalize="characters"/></label><label>País de nacimiento<select name="paisNacimiento" value={form.paisNacimiento} onChange={update}><option value="">Sin especificar</option>{profileBirthCountries.map(country=><option key={country} value={country}>{country}</option>)}</select></label></div></details>{error&&<p className="profile-error" role="alert">{error}</p>}<div className="profile-save-row"><span className={`profile-save-feedback${noChangesMessageVisible?' is-visible':''}`} aria-live="polite" aria-hidden={!noChangesMessageVisible}>Sin cambios que guardar.</span><button className="button primary" data-no-changes={!hasUnsavedChanges} disabled={saving} onClick={event=>{if(!hasUnsavedChanges){event.preventDefault();showNoChangesMessage();}}}>{saving?'Guardando…':'Guardar cambios'}</button></div></div></section>
+      </form>
+    {signatureModal==='draw'&&<Modal title="Firmar a mano" subtitle="Dibuja tu firma para guardarla en tu perfil." close={()=>!signatureBusy&&setSignatureModal('')} className="signature-draw-modal"><SignaturePad saving={signatureBusy} onCancel={()=>setSignatureModal('')} onSave={async file=>{try{await saveSignatureFile(file)}catch(signatureSaveError){setSignatureError(signatureSaveError.message||'No se pudo guardar la firma.')}}}/></Modal>}
+    {signatureModal==='preview'&&profile.signatureUrl&&<Modal title="Firma del perfil" subtitle="Firma guardada para tu perfil profesional." close={()=>setSignatureModal('')} className="signature-viewer-modal"><img className="profile-signature-viewer" src={profile.signatureUrl} alt="Firma guardada en el perfil"/><div className="modal-actions"><button type="button" className="button secondary" onClick={()=>setSignatureModal('')}>Cerrar</button><button type="button" className="button outline" onClick={downloadSignature}><Download size={15}/> Descargar firma</button></div></Modal>}
   </div>;
 }
 

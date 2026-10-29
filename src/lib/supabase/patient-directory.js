@@ -1,4 +1,5 @@
 import { createClient } from './client.js';
+import { visibleProviderFilter } from '../account-visibility.js';
 
 const statusToUi = {
   active: 'Activo',
@@ -67,7 +68,7 @@ async function fetchDirectory(client, clinicId, role) {
     client.from('patients').select('id, record_number, full_name, email, phone, service_summary, status, primary_branch_id, primary_provider_id, appointment_whatsapp_opt_in, appointment_whatsapp_opt_in_at, appointment_whatsapp_opt_in_source, created_at, updated_at').eq('clinic_id', clinicId).order('created_at', { ascending: false }),
     client.from('businesses').select('id, name, active').eq('clinic_id', clinicId).order('name'),
     client.from('branches').select('id, business_id, name, address, phone, hours, active').eq('clinic_id', clinicId).order('name'),
-    client.from('clinic_providers').select(canReadDiagnoses ? 'id, user_id, name, role_title, active' : 'id, name, role_title, active').eq('clinic_id', clinicId).order('name'),
+    client.from('clinic_providers').select(canReadDiagnoses ? 'id, user_id, name, role_title, active' : 'id, name, role_title, active').eq('clinic_id', clinicId).or(visibleProviderFilter).order('name'),
     client.from('provider_branches').select('provider_id, branch_id').eq('clinic_id', clinicId),
     canReadDiagnoses
       ? client.from('patient_diagnoses').select('id, patient_id, summary, status, accepted_at, accepted_by, created_at').eq('clinic_id', clinicId).order('created_at', { ascending: false })
