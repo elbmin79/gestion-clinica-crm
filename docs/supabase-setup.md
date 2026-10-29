@@ -69,25 +69,28 @@ current schedule generation, retaining prior sends when an appointment is
 rescheduled or cancelled and later confirmed again. The queue reports delivery
 eligibility only when the patient has explicit WhatsApp authorization and a
 valid international E.164 phone number, without returning the contact number to
-the display. The dispatcher rechecks authorization at dispatch time, but has
-not been activated because no clinic-owned provider credentials, approved
-templates, database, or scheduler are configured.
+the display. The dispatcher rechecks authorization at dispatch time. External
+scheduler activation remains a separate deployment step.
 
 Patient WhatsApp appointment-message authorization is stored independently
 from clinical consent. A security-definer patient-update RPC writes each grant or
 revocation to the patient_messaging_consent_history table in the same transaction
 as the profile edit, while the patient row holds current status and source. A
-server-only dispatcher is implemented for Meta's WhatsApp Cloud API. It claims
-due rows through service-role-only RPCs, rechecks consent, appointment status,
-current schedule generation, and E.164 phone format before sending, then saves
-the provider result. A lost request or ambiguous provider response is marked
-`unknown` and never automatically retried to avoid duplicate messages. No
-messages are sent unless the provider and scheduler are configured.
+server-only dispatcher claims due rows through service-role-only RPCs and
+rechecks consent, appointment status, current schedule generation, and E.164
+phone format before saving a result. This phase supports only a mock provider:
+accepted, failed, and uncertain results are simulated locally and never sent to
+WhatsApp. Uncertain results are never automatically retried. Production dispatch
+fails closed; legacy Meta environment variables do not enable sending. Clinic
+administrators configure simulated senders, branch routing, explicit default
+fallback, and template readiness under Configuración > Notificaciones WhatsApp.
+Apply `20261029210000_clinic_whatsapp_mock_setup.sql` only to a local or test
+database for this mock setup; do not apply it to production.
 
-No Supabase project is currently configured in this workspace: only the blank
-.env.example exists. The migrations have not been applied or validated against a
-live or local Supabase/PostgreSQL project, so shared operations cannot yet be
-verified end to end. Contracts and consents can be prepared and retained as
+Shared operations require configured Supabase keys and the applicable migrations.
+The mock WhatsApp migration is not applied to the connected project; do not use
+that project to test this migration unless it is confirmed to be disposable.
+Contracts and consents can be prepared and retained as
 pending documents with immutable template snapshots; there is no electronic
 signature provider, delivery workflow, or real-signature action. Do not enter real
 patient information until the migration, access policies, backups, and
@@ -131,41 +134,22 @@ delivery settings are incomplete.
 6. Add a trusted delivery and signing integration before moving a document
    status to signed. The client currently cannot update a stored document's
    status in the schema.
-7. Configure reminders and two-way confirmation only after the clinic has selected and approved
-   its WhatsApp Business account, phone number, Meta message templates, and
-   hosting region. Apply every migration, including
+7. For local/test use, apply migrations in filename order to a disposable
+   Supabase project, sign in as a clinic administrator, and configure simulated
+   senders under Configuración > Notificaciones WhatsApp. Set
+   `WHATSAPP_PROVIDER_MODE=mock`; no Meta credentials or network calls are used.
+   Do not apply the mock setup migration to a production database. Live WhatsApp
+   delivery is not implemented in this phase. The historical live-provider
+   configuration is deferred: it requires an approved provider/security design,
+   server-side secret storage, clinic-specific number routing, approved templates,
+   webhook registration, and a trusted scheduler. Do not configure Meta
+   credentials, register a webhook, or enable a scheduler for this mock setup.
+   Existing reminder migrations include
    `20261028221512_202610260013_whatsapp_reminder_dispatch.sql`,
    `20261028221529_202610270001_patient_encounters_and_files.sql`, and
-   `20261028221533_202610270002_appointment_confirmation_responses.sql` before enabling the worker.
-   In the server's secret manager (never browser-visible variables), configure
-   `SUPABASE_SERVICE_ROLE_KEY`, `REMINDER_DISPATCH_SECRET`,
-   `WHATSAPP_CLOUD_API_VERSION`, `WHATSAPP_PHONE_NUMBER_ID`,
-   `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_TEMPLATE_LANGUAGE`, and the three
-   `WHATSAPP_TEMPLATE_*` names. The confirmation template must be approved with
-   three quick-reply buttons in this order: Confirmar, Cancelar, Reagendar; its
-   body still has the two parameters described above. Configure `WHATSAPP_APP_SECRET`
-   and a random `WHATSAPP_WEBHOOK_VERIFY_TOKEN` in the server secret manager, then
-   register `GET/POST /api/webhooks/whatsapp` in Meta. Configure `CLINIC_TIME_ZONE` to the clinic's
-   IANA timezone. Each approved template must be a utility template whose body
-   has exactly two text parameters in this order: patient first name and
-   appointment date/time. Appointment messages intentionally omit treatment or
-   service details. Keep the language and template names exactly as
-   approved by Meta. Store `REMINDER_DISPATCH_SECRET` separately in a trusted
-   scheduler and call `POST /api/reminders/dispatch` with
-   `Authorization: Bearer <secret>` every minute. The route claims at most three
-   messages per invocation and declares a 60-second maximum duration; configure
-   the chosen host/scheduler to allow that runtime. Do not expose the service-role
-   key or Meta access token to browser code. Start with a clinic test number and
-   verify delivery, opt-out, provider rejection, and uncertain outcomes before
-   enabling patient traffic. Schedule `POST /api/confirmations/dispatch` with the
-   same bearer secret every minute as well. New pending appointments request a
-   confirmation 48 hours before start (immediately for short-notice bookings).
-   Confirm/cancel replies update appointment status; a confirmation blocked by
-   the required deposit is surfaced for staff. Reagendar creates a follow-up for
-   staff to answer manually. These paths cannot be live-tested until Supabase,
-   Meta templates/webhooks, credentials, and a trusted scheduler are configured.
-   Deposit amounts are entered per appointment and
-   enforced by the app and database.
+   `20261028221533_202610270002_appointment_confirmation_responses.sql`.
+   Deposit amounts are entered per appointment and enforced by the app and
+   database.
 
 Do not import the Velka database or real patient records as part of this setup.
 The current reverse-engineering evidence is limited to the agenda screen and

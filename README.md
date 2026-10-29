@@ -93,10 +93,8 @@ professionals, follow-up notes, appointments, diagnoses, document templates,
 prepared contract/consent snapshots, and append-only payments to clinic-scoped
 tables through authenticated Supabase access and row-level security. The
 overview dashboard reads clinic-shared patients, appointments, and follow-up
-notes when Supabase is configured. No Supabase project is configured here,
-so shared-data operations cannot yet be verified end to end. Do not enter real
-patient information until the migration and access policies are applied and
-reviewed.
+notes when Supabase is configured. Apply and review every pending migration and
+access policy in the intended environment before using real patient information.
 Consent and contract preparation stores a copy for review; shared preparation
 replaces an older pending version atomically, and contracts require an accepted
 diagnosis. Demo-mode signatures are simulated, and shared mode has no
@@ -104,9 +102,9 @@ electronic-signature provider.
 Clinic-provided document copy must be reviewed before production use.
 
 Supabase/PostgreSQL schema migrations are available in `supabase/migrations/`.
-They have not been applied or validated against a live database. See
-`docs/supabase-setup.md` for setup requirements and the current module boundary.
-After applying the migrations, the clinic owner can provision the initial
+Compare migration history and apply only pending migrations in filename order.
+See `docs/supabase-setup.md` for setup requirements and the current module
+boundary. After applying the migrations, the clinic owner can provision the initial
 clinic/admin/business/branch with `supabase/bootstrap/clinic-admin.sql`.
 
 In demo mode, patient records include a local follow-up timeline for call, message, administrative, and other internal notes. These demo notes use browser storage; do not enter real or sensitive clinical information.
@@ -124,21 +122,21 @@ recorded against the appointment before staff can confirm or complete it; the
 shared database enforces the same rule. The Recordatorios page schedules
 one-day and five-hour reminders for confirmed appointments; pending
 appointments have a separate two-day confirmation request.
-Demo reminders are illustrative only. Shared-mode delivery has a server-only
-WhatsApp Cloud API dispatcher, but it remains disabled until the clinic
-configures approved templates, credentials, the database migration, and a
-trusted scheduler. The queue marks items eligible only when the patient has
+Demo reminders are illustrative only. Shared-mode dispatch currently uses a
+server-only mock WhatsApp provider; it simulates accepted, failed, and uncertain
+results without sending messages or contacting Meta. Production dispatch fails
+closed. The queue marks items eligible only when the patient has
 explicit WhatsApp authorization and an E.164 phone number; no contact number is
 returned to the queue display.
 
 WhatsApp appointment-message authorization is recorded separately from clinical
 consent. The patient directory shows the current opt-in state and captures its
 source; shared-mode grants and revocations are written to an append-only audit
-history. The server-only dispatcher sends only configured WhatsApp templates
-and rechecks current authorization, confirmed appointment status, schedule
-version, and phone validity immediately before sending. Ambiguous provider
-outcomes are marked uncertain and are not automatically retried. No messages
-are sent until the clinic configures the provider and scheduler described in
+history. The mock dispatcher rechecks current authorization, confirmed
+appointment status, schedule version, and phone validity before simulating a
+result. Uncertain outcomes are not automatically retried. Clinic administrators
+can configure simulated senders and branch routing under Configuración >
+Notificaciones WhatsApp. Live provider setup remains deferred; see
 `docs/supabase-setup.md`.
 
 Contracts has a clinic-managed template library. Saving a revision creates a
@@ -172,6 +170,6 @@ Demo-mode file attachments are stored in browser IndexedDB; all demo data is
 synthetic and must not include real patient or clinical information.
 
 Pending appointments queue a two-day WhatsApp confirmation request. The
-confirmation dispatcher and signed inbound webhook support confirm, cancel, and
-manual reschedule follow-up. They require the migrations and Meta configuration
-in `docs/supabase-setup.md`; they do not send messages in the current workspace.
+confirmation dispatcher simulates delivery outcomes. Signed inbound webhook
+verification and clinic-aware reply routing are prepared for a future provider;
+no Meta webhook is registered in this phase.

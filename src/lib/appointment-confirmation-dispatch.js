@@ -1,4 +1,6 @@
 import { timingSafeEqual } from 'node:crypto';
+import { loadClinicWhatsAppRoute } from './whatsapp/clinic-routing.js';
+import { createWhatsAppProvider } from './whatsapp/provider.js';
 
 const MAX_CLAIM = 10;
 
@@ -10,81 +12,64 @@ function authorized(request, expected) {
   return supplied.length === secret.length && timingSafeEqual(supplied, secret);
 }
 
-function payloadFor(row, templateName, env) {
-  const appointmentLabel = new Intl.DateTimeFormat('es-MX', {
-    timeZone: env.CLINIC_TIME_ZONE?.trim() || 'America/Tijuana',
-    dateStyle: 'long', timeStyle: 'short',
-  }).format(new Date(row.appointment_at));
-  const firstName = String(row.patient_name || '').trim().split(/\s+/)[0] || 'Paciente';
-  return {
-    messaging_product: 'whatsapp', recipient_type: 'individual', to: row.phone, type: 'template',
-    template: {
-      name: templateName, language: { code: env.WHATSAPP_TEMPLATE_LANGUAGE?.trim() || 'es_MX' },
-      components: [
-        { type: 'body', parameters: [{ type: 'text', text: firstName }, { type: 'text', text: appointmentLabel }] },
-        ...['confirm', 'cancel', 'reschedule'].map((payload, index) => ({
-          type: 'button', sub_type: 'quick_reply', index: String(index), parameters: [{ type: 'payload', payload }],
-        })),
-      ],
-    },
-  };
+async function settle(client, requestId, status, messageId, error) {
+  const { data, error: settleError } = await client.rpc('settle_appointment_confirmation', {
+    target_request_id: requestId,
+    target_status: status,
+    target_message_id: messageId,
+    target_error: error,
+  });
+  return !settleError && data === true;
 }
 
-export function createConfirmationDispatchHandler({ createServiceClient, env = process.env, fetchImpl = fetch }) {
+export function createConfirmationDispatchHandler({
+  createServiceClient,
+  env = process.env,
+  loadRoute = loadClinicWhatsAppRoute,
+  createProvider = createWhatsAppProvider,
+}) {
   return async function POST(request) {
     const secret = env.REMINDER_DISPATCH_SECRET?.trim();
-    if (!secret) return Response.json({ error: 'Confirmation delivery is not configured.' }, { status: 503 });
+    if (!secret) return Response.json({ error: 'Confirmation dispatch is not configured.' }, { status: 503 });
     if (!authorized(request, secret)) return Response.json({ error: 'Unauthorized.' }, { status: 401 });
-    const templateName = env.WHATSAPP_TEMPLATE_CONFIRMATION_2D?.trim();
-    const apiVersion = env.WHATSAPP_CLOUD_API_VERSION?.trim() || '';
-    const phoneNumberId = env.WHATSAPP_PHONE_NUMBER_ID?.trim() || '';
-    const accessToken = env.WHATSAPP_ACCESS_TOKEN?.trim() || '';
-    if (!templateName || !/^v\d+\.\d+$/.test(apiVersion) || !/^\d+$/.test(phoneNumberId) || !accessToken) {
-      return Response.json({ error: 'WhatsApp confirmation delivery is not configured.' }, { status: 503 });
+
+    const provider = createProvider({ env });
+    if (provider.mode !== 'mock' || provider.available === false) {
+      return Response.json({ error: provider.error || 'Only the simulated WhatsApp provider is enabled.' }, { status: 503 });
     }
     const client = createServiceClient();
     if (!client) return Response.json({ error: 'Server-side Supabase configuration is incomplete.' }, { status: 503 });
-    const { data: claimed, error } = await client.rpc('claim_due_appointment_confirmations', { target_limit: MAX_CLAIM });
-    if (error) return Response.json({ error: 'Could not claim confirmation requests.' }, { status: 503 });
+
+    const { data: claimed, error: claimError } = await client.rpc('claim_due_appointment_confirmations', { target_limit: MAX_CLAIM });
+    if (claimError) return Response.json({ error: 'Could not claim confirmation requests.' }, { status: 503 });
     const counts = { claimed: (claimed || []).length, sent: 0, failed: 0, unknown: 0, skipped: 0 };
     for (const item of claimed || []) {
-      const check = await client.rpc('get_claimed_appointment_confirmation', { target_request_id: item.request_id });
-      if (check.error) {
-        const settled = await client.rpc('settle_appointment_confirmation', {
-          target_request_id: item.request_id, target_status: 'failed', target_error: 'Eligibility could not be rechecked; no provider request was made.',
-        });
-        if (settled.error || settled.data !== true) counts.unknown++;
-        else counts.failed++;
+      const { data: rows, error: checkError } = await client.rpc('get_claimed_appointment_confirmation_v2', { target_request_id: item.request_id });
+      if (checkError) {
+        counts[await settle(client, item.request_id, 'failed', null, 'Eligibility could not be rechecked; no provider call was made.') ? 'failed' : 'unknown'] += 1;
         continue;
       }
-      if (!check.data?.length) {
-        const settled = await client.rpc('settle_appointment_confirmation', { target_request_id: item.request_id, target_status: 'skipped', target_error: 'Appointment is no longer eligible for confirmation.' });
-        if (settled.error || settled.data !== true) counts.unknown++;
-        else counts.skipped++;
+      if (!rows?.length) {
+        counts[await settle(client, item.request_id, 'skipped', null, 'Appointment is no longer eligible for confirmation.') ? 'skipped' : 'unknown'] += 1;
         continue;
       }
-      const row = check.data[0];
-      let outcome = { status: 'unknown', messageId: null, error: 'WhatsApp outcome is uncertain.' };
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 10000);
-      try {
-        const response = await fetchImpl(`https://graph.facebook.com/${apiVersion}/${phoneNumberId}/messages`, {
-          method: 'POST', headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify(payloadFor(row, templateName, env)), signal: controller.signal, cache: 'no-store',
-        });
-        const data = await response.json().catch(() => null);
-        if (response.ok && data?.messages?.[0]?.id) outcome = { status: 'sent', messageId: data.messages[0].id, error: null };
-        else if (response.status < 500) outcome = { status: 'failed', messageId: null, error: `WhatsApp API returned HTTP ${response.status}.` };
-      } catch (error) {
-        outcome = { status: 'unknown', messageId: null, error: error?.name === 'AbortError' ? 'WhatsApp request timed out; delivery is uncertain.' : 'WhatsApp connection failed; delivery is uncertain.' };
-      } finally { clearTimeout(timeout); }
-      const settled = await client.rpc('settle_appointment_confirmation', {
-        target_request_id: item.request_id, target_status: outcome.status,
-        target_message_id: outcome.messageId, target_error: outcome.error,
+      const appointment = rows[0];
+      const route = await loadRoute(client, appointment.clinic_id, appointment.branch_id, 'confirmation_2d');
+      if (!route.ok) {
+        counts[await settle(client, item.request_id, 'failed', null, route.reason) ? 'failed' : 'unknown'] += 1;
+        continue;
+      }
+      const result = await provider.sendTemplate({
+        sender: route.sender,
+        templateKind: 'confirmation_2d',
+        recipient: appointment.phone,
+        context: { patientName: appointment.patient_name, appointmentAt: appointment.appointment_at },
       });
-      const status = settled.error || settled.data !== true ? 'unknown' : outcome.status;
-      counts[status] = (counts[status] || 0) + 1;
+      const status = result.status === 'accepted' ? 'sent' : result.status;
+      const error = result.error ? `Resultado simulado: ${result.error.replace(/^Resultado simulado:\s*/i, '')}` : null;
+      const settled = await settle(client, item.request_id, status, result.messageId, error);
+      counts[settled ? (result.status === 'accepted' ? 'sent' : result.status) : 'unknown'] += 1;
     }
-    return Response.json({ processed: counts.claimed, counts }, { headers: { 'Cache-Control': 'no-store' } });
+    return Response.json({ processed: counts.claimed, mode: 'mock', simulated: true, counts }, { headers: { 'Cache-Control': 'no-store' } });
   };
 }

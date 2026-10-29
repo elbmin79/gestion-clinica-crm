@@ -27,6 +27,7 @@ function mapReminder(row, timeZone) {
     status: row.status === 'pending' && !deliveryEligible ? 'blocked' : row.status,
     deliveryEligible,
     deliveryBlockReason: row.delivery_block_reason || '',
+    simulated: row.simulated === true,
     attemptCount: row.attempt_count || 0,
     patientName: row.patient_name,
     appointmentAt: row.appointment_at,
@@ -43,7 +44,7 @@ export function createClinicRemindersStore() {
       const client = createClient();
       if (!client) throw new Error('La conexión con Supabase no está configurada.');
       const now = Date.now();
-      const result = await client.rpc('get_appointment_reminders', {
+      const result = await client.rpc('get_appointment_reminders_v2', {
         target_clinic_id: clinicId,
         window_start: new Date(now - 30 * 24 * 60 * 60 * 1000).toISOString(),
         window_end: new Date(now + 90 * 24 * 60 * 60 * 1000).toISOString(),
@@ -88,6 +89,7 @@ export function createDemoAppointmentReminders(appointments, patients = [], now 
         attemptCount: 0,
         deliveryEligible,
         deliveryBlockReason,
+        simulated: false,
         patientName: appointment.patient,
         appointmentAt: appointmentAt.toISOString(),
         appointmentLabel: formatDateTime(appointmentAt, Intl.DateTimeFormat().resolvedOptions().timeZone),

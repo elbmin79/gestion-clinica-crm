@@ -4,6 +4,7 @@ const sections = [
   "agenda",
   "pagos",
   "recordatorios",
+  "whatsapp",
   "pacientes",
   "consentimientos",
   "contratos",

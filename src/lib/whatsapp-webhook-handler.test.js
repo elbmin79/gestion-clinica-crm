@@ -21,20 +21,34 @@ test('verifies WhatsApp webhook subscriptions only with the configured token', a
   assert.equal(bad.status, 403);
 });
 
-test('forwards a signed reschedule reply without context to the database for safe phone matching', async () => {
-  const body = JSON.stringify({ entry: [{ changes: [{ value: { messages: [{ id: 'wamid.reschedule', from: '5215550102030', text: { body: 'Reagendar' } }] } }] }] });
+test('routes a signed reschedule reply using phone-number metadata and clinic scope', async () => {
+  const body = JSON.stringify({ entry: [{ changes: [{ value: { metadata: { phone_number_id: '123456789' }, messages: [{ id: 'wamid.reschedule', from: '5215550102030', text: { body: 'Reagendar' } }] } }] }] });
   const calls = [];
   const handlers = createWhatsAppWebhookHandlers({
     env,
+    resolveSender: async (_client, id) => id === '123456789' ? { clinicId: 'clinic-1', branchId: 'branch-1' } : null,
     createServiceClient: () => ({ rpc: async (name, args) => { calls.push({ name, args }); return { data: 'staff_follow_up', error: null }; } }),
   });
   const response = await handlers.POST(signedRequest(body));
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), { received: 1, processed: 1 });
   assert.deepEqual(calls, [{
-    name: 'apply_appointment_confirmation_reply',
-    args: { target_context_message_id: null, target_inbound_message_id: 'wamid.reschedule', target_from: '5215550102030', target_action: 'reschedule' },
+    name: 'apply_appointment_confirmation_reply_v2',
+    args: { target_clinic_id: 'clinic-1', target_branch_id: 'branch-1', target_context_message_id: null, target_inbound_message_id: 'wamid.reschedule', target_from: '5215550102030', target_action: 'reschedule' },
   }]);
+});
+
+test('does not process a reply when the signed sender metadata has no clinic mapping', async () => {
+  const body = JSON.stringify({ entry: [{ changes: [{ value: { metadata: { phone_number_id: '123456789' }, messages: [{ id: 'wamid.unknown', from: '5215550102030', text: { body: 'Confirmar' } }] } }] }] });
+  let rpcCalls = 0;
+  const handlers = createWhatsAppWebhookHandlers({
+    env,
+    resolveSender: async () => null,
+    createServiceClient: () => ({ rpc: async () => { rpcCalls++; return { data: null, error: null }; } }),
+  });
+  const response = await handlers.POST(signedRequest(body));
+  assert.deepEqual(await response.json(), { received: 1, processed: 0 });
+  assert.equal(rpcCalls, 0);
 });
 
 test('rejects unsigned webhook requests without constructing the service client', async () => {

@@ -1,6 +1,7 @@
-import { confirmationMessages, confirmationReplyForMessage, validWhatsAppSignature } from './whatsapp-confirmation.js';
+import { confirmationEvents, confirmationReplyForMessage, validWhatsAppSignature } from './whatsapp-confirmation.js';
+import { resolveInboundWhatsAppSender } from './whatsapp/clinic-routing.js';
 
-export function createWhatsAppWebhookHandlers({ createServiceClient, env = process.env }) {
+export function createWhatsAppWebhookHandlers({ createServiceClient, env = process.env, resolveSender = resolveInboundWhatsAppSender }) {
   async function GET(request) {
     const url = new URL(request.url);
     const mode = url.searchParams.get('hub.mode');
@@ -21,12 +22,17 @@ export function createWhatsAppWebhookHandlers({ createServiceClient, env = proce
     try { payload = JSON.parse(rawBody); } catch { return Response.json({ error: 'Invalid JSON.' }, { status: 400 }); }
     const client = createServiceClient();
     if (!client) return Response.json({ error: 'Server-side Supabase configuration is incomplete.' }, { status: 503 });
-    const messages = confirmationMessages(payload);
+    const events = confirmationEvents(payload);
     let processed = 0;
-    for (const message of messages) {
+    for (const event of events) {
+      const message = event.message;
       const reply = confirmationReplyForMessage(message);
       if (!reply) continue;
-      const result = await client.rpc('apply_appointment_confirmation_reply', {
+      const route = await resolveSender(client, event.phoneNumberId);
+      if (!route?.clinicId) continue;
+      const result = await client.rpc('apply_appointment_confirmation_reply_v2', {
+        target_clinic_id: route.clinicId,
+        target_branch_id: route.branchId || null,
         target_context_message_id: reply.contextMessageId,
         target_inbound_message_id: reply.inboundMessageId,
         target_from: reply.from,
@@ -35,7 +41,7 @@ export function createWhatsAppWebhookHandlers({ createServiceClient, env = proce
       if (result.error) return Response.json({ error: 'Could not apply appointment response.' }, { status: 503 });
       processed++;
     }
-    return Response.json({ received: messages.length, processed }, { headers: { 'Cache-Control': 'no-store' } });
+    return Response.json({ received: events.length, processed }, { headers: { 'Cache-Control': 'no-store' } });
   }
 
   return { GET, POST };

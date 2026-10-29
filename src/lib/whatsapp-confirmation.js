@@ -26,6 +26,21 @@ export function confirmationMessages(payload) {
     .flatMap(change => change.value?.messages || []);
 }
 
+export function confirmationEvents(payload) {
+  if (!payload || !Array.isArray(payload.entry)) return [];
+  const events = [];
+  for (const entry of payload.entry) {
+    for (const change of Array.isArray(entry?.changes) ? entry.changes : []) {
+      const value = change?.value;
+      const phoneNumberId = typeof value?.metadata?.phone_number_id === 'string' ? value.metadata.phone_number_id : '';
+      for (const message of Array.isArray(value?.messages) ? value.messages : []) {
+        events.push({ phoneNumberId, message });
+      }
+    }
+  }
+  return events;
+}
+
 export function confirmationReplyForMessage(message) {
   const action = actionFromWhatsAppMessage(message);
   if (!action || !message?.id || !message?.from) return null;
