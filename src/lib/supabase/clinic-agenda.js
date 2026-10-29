@@ -1,4 +1,4 @@
-import { createClient } from './client';
+import { createClient } from './client.js';
 
 const statusToDatabase = {
   'Por confirmar': 'pending',
@@ -106,6 +106,9 @@ function mapAppointment(row, catalogs, timeZone) {
     depositRequired: row.deposit_required || false,
     depositAmount: Number(row.deposit_amount || 0),
     note: row.note || '',
+    serviceId: row.service_id || '',
+    serviceIds: row.service_ids || (row.service_id ? [row.service_id] : []),
+    serviceSnapshot: row.service_snapshot || null,
   };
 }
 
@@ -117,20 +120,34 @@ function throwDatabaseError(result, label) {
   throw error;
 }
 
-export function createClinicAgendaStore() {
+export function agendaQueryRange(date, period, timeZone, listEnd) {
+  const range = rangeFor(date, period, timeZone);
+  if (period === 'Lista' && listEnd >= date) range.to = rangeFor(listEnd, 'Día', timeZone).to;
+  return range;
+}
+
+export function createClinicAgendaStore({ clientFactory = createClient } = {}) {
   return {
-    async load(clinicId, date, period, timeZone, catalogs) {
-      const client = createClient();
+    async load(clinicId, date, period, timeZone, catalogs, listEnd) {
+      const client = clientFactory();
       if (!client) throw new Error('La conexión con Supabase no está configurada.');
-      const range = rangeFor(date, period, timeZone);
-      const result = await client.from('appointments')
-        .select('id, patient_id, business_id, branch_id, provider_id, starts_at, ends_at, service, modality, status, deposit_required, deposit_amount, note')
-        .eq('clinic_id', clinicId)
-        .gte('starts_at', range.from)
-        .lt('starts_at', range.to)
-        .order('starts_at', { ascending: true });
-      throwDatabaseError(result, 'No se pudo cargar la agenda.');
-      return (result.data || []).map(row => mapAppointment(row, catalogs, timeZone));
+      const range = agendaQueryRange(date, period, timeZone, listEnd);
+      const rows = [];
+      const pageSize = 500;
+      for (let offset = 0; ; offset += pageSize) {
+        const result = await client.from('appointments')
+          .select('id, patient_id, business_id, branch_id, provider_id, starts_at, ends_at, service, service_id, service_ids, service_snapshot, modality, status, deposit_required, deposit_amount, note')
+          .eq('clinic_id', clinicId)
+          .gte('starts_at', range.from)
+          .lt('starts_at', range.to)
+          .order('starts_at', { ascending: true })
+          .order('id', { ascending: true })
+          .range(offset, offset + pageSize - 1);
+        throwDatabaseError(result, 'No se pudo cargar la agenda.');
+        rows.push(...(result.data || []));
+        if ((result.data || []).length < pageSize) break;
+      }
+      return rows.map(row => mapAppointment(row, catalogs, timeZone));
     },
 
     async create(clinicId, input, timeZone) {
@@ -146,6 +163,9 @@ export function createClinicAgendaStore() {
         starts_at: startsAt,
         ends_at: new Date(new Date(startsAt).getTime() + input.durationMinutes * 60000).toISOString(),
         service: input.service.trim(),
+        service_id: input.serviceId || null,
+        service_ids: input.serviceIds || (input.serviceId ? [input.serviceId] : []),
+        service_snapshot: input.serviceSnapshot || {},
         modality: input.modality === 'Virtual' ? 'virtual' : 'in_person',
         status: 'pending',
         deposit_required: input.depositRequired === true,
@@ -168,6 +188,9 @@ export function createClinicAgendaStore() {
         starts_at: startsAt,
         ends_at: new Date(new Date(startsAt).getTime() + durationMinutes * 60000).toISOString(),
         service: input.service.trim(),
+        service_id: input.serviceId !== undefined ? (input.serviceId || null) : (appointment.serviceId || null),
+        service_ids: input.serviceIds !== undefined ? input.serviceIds : (appointment.serviceIds || (appointment.serviceId ? [appointment.serviceId] : [])),
+        service_snapshot: input.serviceSnapshot || appointment.serviceSnapshot || {},
         modality: input.modality === 'Virtual' ? 'virtual' : 'in_person',
         status: statusToDatabase[input.status] || 'pending',
       }).eq('clinic_id', clinicId).eq('id', appointment.id).select('id').single();

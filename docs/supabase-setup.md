@@ -134,9 +134,9 @@ delivery settings are incomplete.
 7. Configure reminders and two-way confirmation only after the clinic has selected and approved
    its WhatsApp Business account, phone number, Meta message templates, and
    hosting region. Apply every migration, including
-   `202610260013_whatsapp_reminder_dispatch.sql`,
-   `202610270001_patient_encounters_and_files.sql`, and
-   `202610270002_appointment_confirmation_responses.sql` before enabling the worker.
+   `20261028221512_202610260013_whatsapp_reminder_dispatch.sql`,
+   `20261028221529_202610270001_patient_encounters_and_files.sql`, and
+   `20261028221533_202610270002_appointment_confirmation_responses.sql` before enabling the worker.
    In the server's secret manager (never browser-visible variables), configure
    `SUPABASE_SERVICE_ROLE_KEY`, `REMINDER_DISPATCH_SECRET`,
    `WHATSAPP_CLOUD_API_VERSION`, `WHATSAPP_PHONE_NUMBER_ID`,

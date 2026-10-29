@@ -68,8 +68,8 @@ async function fetchDirectory(client, clinicId, role) {
     client.from('patients').select('id, record_number, full_name, email, phone, service_summary, status, primary_branch_id, primary_provider_id, appointment_whatsapp_opt_in, appointment_whatsapp_opt_in_at, appointment_whatsapp_opt_in_source, created_at, updated_at').eq('clinic_id', clinicId).order('created_at', { ascending: false }),
     client.from('businesses').select('id, name, active').eq('clinic_id', clinicId).order('name'),
     client.from('branches').select('id, business_id, name, address, phone, hours, active').eq('clinic_id', clinicId).order('name'),
-    client.from('clinic_providers').select(canReadDiagnoses ? 'id, user_id, name, role_title, active' : 'id, name, role_title, active').eq('clinic_id', clinicId).or(visibleProviderFilter).order('name'),
-    client.from('provider_branches').select('provider_id, branch_id').eq('clinic_id', clinicId),
+    client.from('clinic_providers').select('id, user_id, name, role_title, active').eq('clinic_id', clinicId).or(visibleProviderFilter).order('name'),
+    client.from('provider_branches').select('provider_id, branch_id, agenda_color, agenda_service_colors').eq('clinic_id', clinicId),
     canReadDiagnoses
       ? client.from('patient_diagnoses').select('id, patient_id, summary, status, accepted_at, accepted_by, created_at').eq('clinic_id', clinicId).order('created_at', { ascending: false })
       : Promise.resolve({ data: [], error: null }),
@@ -136,6 +136,7 @@ async function fetchDirectory(client, clinicId, role) {
     role: provider.role_title,
     userId: provider.user_id || '',
     branchIds: providerBranches.get(provider.id) || [],
+    branchSettings: Object.fromEntries((assignmentResult.data || []).filter(item => item.provider_id === provider.id).map(item => [item.branch_id, { color: item.agenda_color || '', serviceColors: item.agenda_service_colors || {} }])),
     initials: initialsFor(provider.name),
     tone: 'lavender',
     active: provider.active,
@@ -487,55 +488,27 @@ export function createPatientDirectoryStore({ clientFactory = createClient } = {
     },
 
     async createProvider(clinicId, input) {
-      const client = clientFactory();
-      if (!client) throw new Error('La conexión con Supabase no está configurada.');
-      const result = await client.from('clinic_providers').insert({
-        clinic_id: clinicId,
-        name: input.name.trim(),
-        role_title: input.role.trim() || 'Profesional',
-      }).select('id, name, role_title, active').single();
-      resultError(result, 'No se pudo guardar el profesional. Revisa tus permisos de administración.');
-      if (input.branchIds.length) {
-        const assignments = await client.from('provider_branches').insert(input.branchIds.map(branchId => ({ clinic_id: clinicId, provider_id: result.data.id, branch_id: branchId })));
-        if (assignments.error) {
-          const rollback = await client.from('clinic_providers').delete().eq('clinic_id', clinicId).eq('id', result.data.id);
-          const error = new Error('No se pudo asignar el profesional a las sucursales. El alta se revirtió.');
-          error.cause = assignments.error;
-          if (rollback.error) error.message = 'El profesional se creó, pero falló la asignación de sucursales y no se pudo revertir. Revisa el equipo.';
-          throw error;
-        }
-      }
-      return result.data;
+      return saveProfessional(clientFactory(), clinicId, null, input);
     },
 
     async updateProvider(clinicId, provider, input) {
-      const client = clientFactory();
-      if (!client) throw new Error('La conexión con Supabase no está configurada.');
-      const uniqueBranchIds = [...new Set(input.branchIds)];
-      const priorAssignments = await client.from('provider_branches').select('branch_id').eq('clinic_id', clinicId).eq('provider_id', provider.id);
-      resultError(priorAssignments, 'No se pudo revisar la asignación actual del profesional.');
-      const updated = await client.from('clinic_providers').update({ name: input.name.trim(), role_title: input.role.trim() || 'Profesional' }).eq('clinic_id', clinicId).eq('id', provider.id).select('id, name, role_title, active').single();
-      resultError(updated, 'No se pudo actualizar el profesional. Revisa tus permisos de administración.');
-      const removed = await client.from('provider_branches').delete().eq('clinic_id', clinicId).eq('provider_id', provider.id);
-      if (removed.error) {
-        await client.from('clinic_providers').update({ name: provider.name, role_title: provider.role }).eq('clinic_id', clinicId).eq('id', provider.id);
-        resultError(removed, 'No se pudieron actualizar las sucursales del profesional.');
-      }
-      if (uniqueBranchIds.length) {
-        const assignments = await client.from('provider_branches').insert(uniqueBranchIds.map(branchId => ({ clinic_id: clinicId, provider_id: provider.id, branch_id: branchId })));
-        if (assignments.error) {
-          const restoreAssignments = priorAssignments.data?.length
-            ? await client.from('provider_branches').insert(priorAssignments.data.map(row => ({ clinic_id: clinicId, provider_id: provider.id, branch_id: row.branch_id })))
-            : { error: null };
-          const restoreProvider = await client.from('clinic_providers').update({ name: provider.name, role_title: provider.role }).eq('clinic_id', clinicId).eq('id', provider.id);
-          const error = new Error(restoreAssignments.error || restoreProvider.error
-            ? 'Falló la asignación y no se pudo restaurar por completo el perfil anterior. Revisa el equipo.'
-            : 'No se pudo asignar el profesional a esas sucursales. El cambio se revirtió.');
-          error.cause = assignments.error;
-          throw error;
-        }
-      }
-      return { ...updated.data, branchIds: uniqueBranchIds };
+      return saveProfessional(clientFactory(), clinicId, provider.id, input);
     },
   };
+}
+
+async function saveProfessional(client, clinicId, providerId, input) {
+  if (!client) throw new Error('La conexión con Supabase no está configurada.');
+  const result = await client.rpc('save_clinic_professional_with_colors', {
+    p_clinic_id: clinicId, p_provider_id: providerId, p_user_id: input.userId || null,
+    p_name: input.name.trim(), p_role_title: input.role.trim() || 'Profesional',
+    p_branch_ids: [...new Set(input.branchIds)], p_branch_settings: input.branchSettings || null,
+  });
+  if (result.error) {
+    if (result.error.code === 'PGRST202') throw new Error('Falta aplicar la actualización de profesionales en la base de datos. Contacta a la persona administradora.');
+    const known = ['Solo una persona administradora', 'Revisa el nombre', 'Revisa los colores', 'Selecciona al menos', 'Revisa las sucursales', 'El profesional ya no', 'La cuenta vinculada', 'Esta cuenta', 'La cuenta ya no'];
+    const message = result.error.message || '';
+    throw new Error(known.some(prefix => message.startsWith(prefix)) ? message : 'No se pudo guardar el profesional. Inténtalo de nuevo.');
+  }
+  return { id: result.data };
 }

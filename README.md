@@ -37,6 +37,42 @@ and document counts reflect the records in this demo.
 
 ## Run locally
 
+### Agenda colors and filters
+
+Agenda colors belong to the professional's branch assignment, independently of
+patient avatars and appointment status. Administrators can edit each branch's
+default color and service-name rules from the professional editor. Matching is
+case- and accent-insensitive; reviews take priority over procedure names, then
+more specific rules take priority. Morpheus and Morpheus8 share the same rule.
+Appointments without configured colors appear neutral. The palette and matching
+helpers live in `src/lib/agenda-colors.js`.
+
+Migration `20261029182052_agenda_professional_colors.sql` adds validated color
+settings and an atomic save RPC. Older callers retain existing colors when
+updating branch assignments. The agenda supports combined professional and
+color selections, search, location/status filters, and day/week/month/year/list
+views. List date ranges include both selected dates in the clinic timezone and
+can be sorted by date, patient, or professional. Colors are calculated from the
+current assignment and service; editing these settings also changes how existing
+appointments are displayed.
+
+### Professional accounts
+
+Equipo clínico has one add action within its panel. Administrators can link an
+existing clinic member or add a professional without login access. Existing
+manual records can be linked later without replacing their IDs or patient and
+appointment assignments. A matching name suggests reviewing the existing record;
+it never links accounts automatically. Account permissions remain managed in
+Acceso a la clínica, separately from the professional's clinical title and branches.
+
+Shared saves require migration `20261029180738_professional_account_links.sql`.
+It saves the professional and branch assignments atomically, validates clinic
+membership and administrator permissions, rejects duplicate account links, and
+keeps linked names synchronized with account profiles. Linking an account does
+not grant clinic access. Existing account links cannot be replaced through this
+form. Local PostgreSQL regression tests run with `npm test` using PGlite; they do
+not connect to or modify the configured Supabase database.
+
 ```sh
 npm install
 npm run dev
@@ -131,7 +167,7 @@ Consent formats support revisions: creating a new version starts from the select
 
 Patient expediente views now include a structured clinical consultation timeline
 and attachments for signed consent/contract copies. Shared-mode uploads require
-the private Storage bucket and policies from migrations `202610270001` onward.
+the private Storage bucket and policies from migrations `20261028221529` onward.
 Demo-mode file attachments are stored in browser IndexedDB; all demo data is
 synthetic and must not include real patient or clinical information.
 
