@@ -66,7 +66,7 @@ async function fetchDirectory(client, clinicId, role) {
   const [patientResult, businessResult, branchResult, providerResult, assignmentResult, diagnosisResult, documentResult, activityResult, templateResult, encounterResult, fileResult, botoxResult] = await Promise.all([
     client.from('patients').select('id, record_number, full_name, email, phone, service_summary, status, primary_branch_id, primary_provider_id, appointment_whatsapp_opt_in, appointment_whatsapp_opt_in_at, appointment_whatsapp_opt_in_source, created_at, updated_at').eq('clinic_id', clinicId).order('created_at', { ascending: false }),
     client.from('businesses').select('id, name, active').eq('clinic_id', clinicId).order('name'),
-    client.from('branches').select('id, business_id, name, address, active').eq('clinic_id', clinicId).order('name'),
+    client.from('branches').select('id, business_id, name, address, phone, hours, active').eq('clinic_id', clinicId).order('name'),
     client.from('clinic_providers').select(canReadDiagnoses ? 'id, user_id, name, role_title, active' : 'id, name, role_title, active').eq('clinic_id', clinicId).order('name'),
     client.from('provider_branches').select('provider_id, branch_id').eq('clinic_id', clinicId),
     canReadDiagnoses
@@ -236,7 +236,7 @@ async function fetchDirectory(client, clinicId, role) {
   return {
     patients,
     businesses: businesses.map(item => ({ ...item, active: item.active })),
-    branches: branches.map(item => ({ id: item.id, name: item.name, businessId: item.business_id, address: item.address || '', active: item.active })),
+    branches: branches.map(item => ({ id: item.id, name: item.name, businessId: item.business_id, address: item.address || '', phone: item.phone || '', hours: item.hours || '', active: item.active })),
     providers,
     activities,
     templates: (templateResult.data || []).map(template => ({
@@ -468,7 +468,9 @@ export function createPatientDirectoryStore({ clientFactory = createClient } = {
         business_id: input.businessId,
         name: input.name.trim(),
         address: input.address.trim() || null,
-      }).select('id, business_id, name, address, active').single();
+        phone: input.phone.trim() || null,
+        hours: input.hours.trim() || null,
+      }).select('id, business_id, name, address, phone, hours, active').single();
       resultError(result, 'No se pudo guardar la sucursal. Revisa el negocio seleccionado y tus permisos.');
       return result.data;
     },
@@ -476,9 +478,9 @@ export function createPatientDirectoryStore({ clientFactory = createClient } = {
     async updateBranch(clinicId, branch, input) {
       const client = clientFactory();
       if (!client) throw new Error('La conexión con Supabase no está configurada.');
-      const result = await client.from('branches').update({ name: input.name.trim(), address: input.address.trim() || null })
+      const result = await client.from('branches').update({ name: input.name.trim(), address: input.address.trim() || null, phone: input.phone.trim() || null, hours: input.hours.trim() || null })
         .eq('clinic_id', clinicId).eq('id', branch.id)
-        .select('id, business_id, name, address, active').single();
+        .select('id, business_id, name, address, phone, hours, active').single();
       resultError(result, 'No se pudo actualizar la sucursal. Revisa tus permisos.');
       return result.data;
     },

@@ -8,6 +8,8 @@ const sections = [
   "consentimientos",
   "contratos",
   "equipo",
+  "configuracion",
+  "perfil",
   "login",
 ];
 
