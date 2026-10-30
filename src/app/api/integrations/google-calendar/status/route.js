@@ -19,17 +19,6 @@ export async function GET(request) {
     if (providerError) throw providerError;
     const visibleProviders = providerRows || [];
     const providerIds = visibleProviders.map(provider => provider.id);
-    let clinicConnection = null;
-    if (access.role === 'admin') {
-      const { data, error } = await service
-        .from('clinic_google_calendar_connections')
-        .select('google_email, calendar_id, connected_at, last_synced_at, last_sync_status, last_sync_error, connected_by')
-        .eq('clinic_id', clinicId)
-        .eq('connected_by', access.user.id)
-        .maybeSingle();
-      if (error) throw error;
-      clinicConnection = data || null;
-    }
     let providerConnections = [];
     if (providerIds.length) {
       const { data, error } = await service
@@ -81,11 +70,9 @@ export async function GET(request) {
     }));
     return NextResponse.json({
       connected: Boolean(providerConnections.length),
-      clinicConnection,
       providers,
       history,
       queued,
-      canManageClinicConnection: false,
     }, { headers: { 'Cache-Control': 'no-store' } });
   } catch {
     return NextResponse.json({ error: 'No se pudo cargar el estado de Google Calendar. Revisa que la migración esté aplicada.' }, { status: 503 });

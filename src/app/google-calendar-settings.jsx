@@ -105,7 +105,6 @@ export default function GoogleCalendarSettings({ clinicId, role, sharedMode }) {
   const [busy, setBusy] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncingProviderId, setSyncingProviderId] = useState('');
-  const [clinicConnection, setClinicConnection] = useState(null);
   const [providers, setProviders] = useState([]);
   const [history, setHistory] = useState([]);
   const [error, setError] = useState('');
@@ -122,7 +121,6 @@ export default function GoogleCalendarSettings({ clinicId, role, sharedMode }) {
       const response = await fetch(`/api/integrations/google-calendar/status?clinicId=${encodeURIComponent(clinicId)}`, { cache: 'no-store' });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || 'No se pudo consultar la conexión.');
-      setClinicConnection(result.clinicConnection || null);
       setProviders(result.providers || []);
       setHistory(result.history || []);
       setNotice(callbackMessage());
@@ -138,19 +136,21 @@ export default function GoogleCalendarSettings({ clinicId, role, sharedMode }) {
   const connect = (providerId = '', replacing = false) => {
     if (!clinicId) return;
     if (replacing && !window.confirm('Al cambiar la cuenta, los eventos ya creados en el calendario anterior permanecerán allí. ¿Continuar?')) return;
-    const providerQuery = providerId ? `&providerId=${encodeURIComponent(providerId)}` : '';
+    if (!providerId) return;
+    const providerQuery = `&providerId=${encodeURIComponent(providerId)}`;
     window.location.assign(`/api/integrations/google-calendar/connect?clinicId=${encodeURIComponent(clinicId)}${providerQuery}`);
   };
 
   const disconnect = async (providerId = '', providerName = '') => {
-    const label = providerId ? `el calendario de ${providerName}` : 'tu cuenta de Google';
+    if (!providerId) return;
+    const label = `el calendario de ${providerName}`;
     if (!window.confirm(`¿Desconectar ${label}? Los eventos ya creados permanecerán en Google Calendar.`)) return;
     setBusy(true); setError(''); setNotice('');
     try {
       const response = await fetch('/api/integrations/google-calendar/disconnect', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ clinicId, ...(providerId ? { providerId } : {}) }),
+        body: JSON.stringify({ clinicId, providerId }),
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || 'No se pudo desconectar Google Calendar.');
@@ -164,14 +164,15 @@ export default function GoogleCalendarSettings({ clinicId, role, sharedMode }) {
   };
 
   const sync = async (providerId = '', initial = false) => {
+    if (!providerId) return;
     setSyncing(true);
-    if (providerId) setSyncingProviderId(providerId);
+    setSyncingProviderId(providerId);
     setError(''); setNotice('');
     try {
       const response = await fetch('/api/integrations/google-calendar/sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ clinicId, ...(providerId ? { providerId } : {}), initial }),
+        body: JSON.stringify({ clinicId, providerId, initial }),
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || 'No se pudo sincronizar Google Calendar.');
@@ -197,14 +198,6 @@ export default function GoogleCalendarSettings({ clinicId, role, sharedMode }) {
     {error && <p className="professional-error" role="alert"><CircleAlert size={15}/>{error}</p>}
     <div className="settings-preview-banner"><CalendarDays size={17}/><div><strong>Conecta tu calendario de Google</strong><span>Solo verás y administrarás el calendario vinculado a tu cuenta CRM. Puedes elegir un calendario compartido si tu cuenta Google tiene permiso de edición. Los eventos usan títulos genéricos y no incluyen datos del paciente.</span></div></div>
     {loading ? <p className="whatsapp-settings-loading"><LoaderCircle size={16}/> Consultando conexiones…</p> : <>
-      {role === 'admin' && clinicConnection && <section className="google-clinic-calendar-section">
-        <div className="google-calendar-section-heading"><div><strong>Conexión antigua de la clínica</strong><span>Esta cuenta ya no recibe citas nuevas; cada perfil debe conectar su propio calendario.</span></div><span className="settings-option-status">Sincronización desactivada</span></div>
-        <div className="google-clinic-calendar-account"><span>{clinicConnection.google_email}</span><small>Los eventos que ya están en Google Calendar se conservan. Puedes desvincular esta conexión antigua.</small></div>
-        <div className="google-provider-calendar-actions">
-          <a className="button outline compact" href="https://calendar.google.com" target="_blank" rel="noreferrer"><ExternalLink size={14}/> Abrir Google Calendar</a>
-          <button className="button secondary compact" type="button" onClick={() => disconnect()} disabled={busy || syncing}><Unlink size={14}/> Desvincular conexión antigua</button>
-        </div>
-      </section>}
       {(providers.length > 0 || ['admin', 'clinician'].includes(role)) && <section className="google-provider-calendar-section">
         <div className="google-calendar-section-heading"><div><strong>Mi perfil profesional</strong><span>Aquí solo aparecen los perfiles profesionales vinculados a tu cuenta.</span></div></div>
         {providers.length ? providers.map(provider => <ProviderCalendarRow
