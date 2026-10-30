@@ -526,8 +526,8 @@ create trigger audit_diagnoses after insert or update or delete on public.patien
   for each row execute function private.capture_audit_event();
 create trigger audit_activities after insert on public.patient_activities
   for each row execute function private.capture_audit_event();
--- <<< END 20261028221430_202610260001_clinic_crm.sql
 
+-- <<< END 20261028221430_202610260001_clinic_crm.sql
 -- >>> BEGIN 20261028221433_202610260002_finance_workspace.sql
 -- Minimal finance workspace access for admin, receptionist, and billing roles.
 -- Patient identity is limited to the fields required to reconcile payments.
@@ -626,7 +626,6 @@ create trigger payments_validate_refund
   before insert on public.payments
   for each row execute function private.validate_payment_refund();
 -- <<< END 20261028221433_202610260002_finance_workspace.sql
-
 -- >>> BEGIN 20261028221436_202610260003_appointment_deposits.sql
 -- Clinic-configured booking deposits must be received before confirmation.
 alter table public.appointments
@@ -681,7 +680,6 @@ create trigger appointments_require_deposit_before_confirmation
   before insert or update of status, deposit_required, deposit_amount on public.appointments
   for each row execute function private.enforce_appointment_deposit();
 -- <<< END 20261028221436_202610260003_appointment_deposits.sql
-
 -- >>> BEGIN 20261028221438_202610260004_appointment_reminders.sql
 -- Durable schedule for the clinic's three appointment messages. Delivery is
 -- handled by a separately configured messaging worker; this migration sends
@@ -841,7 +839,6 @@ $$;
 revoke all on function public.get_appointment_reminders(uuid, timestamptz, timestamptz) from public, anon;
 grant execute on function public.get_appointment_reminders(uuid, timestamptz, timestamptz) to authenticated;
 -- <<< END 20261028221438_202610260004_appointment_reminders.sql
-
 -- >>> BEGIN 20261028221441_202610260005_reschedule_appointment_reminders.sql
 -- Keep a new reminder set when a confirmed appointment is rescheduled or
 -- cancelled and then confirmed again. Earlier sends remain auditable.
@@ -1010,7 +1007,6 @@ $$;
 revoke all on function public.get_appointment_reminders(uuid, timestamptz, timestamptz) from public, anon;
 grant execute on function public.get_appointment_reminders(uuid, timestamptz, timestamptz) to authenticated;
 -- <<< END 20261028221441_202610260005_reschedule_appointment_reminders.sql
-
 -- >>> BEGIN 20261028221447_202610260006_document_template_versioning.sql
 -- Keep one active version per clinic, document type, and normalized title.
 with ranked_active_templates as (
@@ -1113,7 +1109,6 @@ $$;
 revoke all on function public.save_clinic_document_template(uuid, text, text, text, text) from public, anon;
 grant execute on function public.save_clinic_document_template(uuid, text, text, text, text) to authenticated;
 -- <<< END 20261028221447_202610260006_document_template_versioning.sql
-
 -- >>> BEGIN 20261028221449_202610260007_diagnosis_contract_consistency.sql
 -- A patient can have only one currently accepted diagnosis. Keep earlier
 -- accepted records as superseded history rather than deleting them.
@@ -1214,7 +1209,6 @@ $$;
 revoke all on function public.accept_patient_diagnosis(uuid, uuid, text) from public, anon;
 grant execute on function public.accept_patient_diagnosis(uuid, uuid, text) to authenticated;
 -- <<< END 20261028221449_202610260007_diagnosis_contract_consistency.sql
-
 -- >>> BEGIN 20261028221452_202610260008_payment_deposit_consistency.sql
 -- Serialize appointment confirmation and refund checks for the same patient.
 -- A refund may not leave an already confirmed appointment below its
@@ -1317,7 +1311,6 @@ end;
 $$;
 revoke all on function private.validate_payment_refund() from public, anon, authenticated;
 -- <<< END 20261028221452_202610260008_payment_deposit_consistency.sql
-
 -- >>> BEGIN 20261028221455_202610260009_appointment_schedule_bounds.sql
 -- Keep shared bookings inside the day view's 06:00–00:00 schedule and on
 -- quarter-hour starts, using the clinic's timezone rather than the server's.
@@ -1374,7 +1367,6 @@ create trigger appointments_enforce_schedule_bounds
   before insert or update of clinic_id, starts_at, ends_at, status on public.appointments
   for each row execute function private.enforce_appointment_schedule_bounds();
 -- <<< END 20261028221455_202610260009_appointment_schedule_bounds.sql
-
 -- >>> BEGIN 20261028221458_202610260010_patient_whatsapp_consent.sql
 -- Reminder delivery must never infer WhatsApp consent from clinical consent.
 -- Keep the current state on the patient and append every grant/revocation.
@@ -1519,7 +1511,6 @@ $$;
 revoke all on function public.update_patient_directory_record(uuid, uuid, text, text, text, text, uuid, uuid, text, boolean, text) from public, anon;
 grant execute on function public.update_patient_directory_record(uuid, uuid, text, text, text, text, uuid, uuid, text, boolean, text) to authenticated;
 -- <<< END 20261028221458_202610260010_patient_whatsapp_consent.sql
-
 -- >>> BEGIN 20261028221505_202610260011_reminder_delivery_eligibility.sql
 -- Expose delivery eligibility without returning contact details to the queue UI.
 drop function public.get_appointment_reminders(uuid, timestamptz, timestamptz);
@@ -1595,7 +1586,6 @@ $$;
 revoke all on function public.get_appointment_reminders(uuid, timestamptz, timestamptz) from public, anon;
 grant execute on function public.get_appointment_reminders(uuid, timestamptz, timestamptz) to authenticated;
 -- <<< END 20261028221505_202610260011_reminder_delivery_eligibility.sql
-
 -- >>> BEGIN 20261028221508_202610260012_patient_document_preparation.sql
 -- Clients may only create documents through the atomic preparation RPC.
 revoke insert on public.patient_documents from authenticated;
@@ -1712,7 +1702,6 @@ $$;
 revoke all on function public.prepare_patient_document(uuid, uuid, uuid, text, text) from public, anon;
 grant execute on function public.prepare_patient_document(uuid, uuid, uuid, text, text) to authenticated;
 -- <<< END 20261028221508_202610260012_patient_document_preparation.sql
-
 -- >>> BEGIN 20261028221512_202610260013_whatsapp_reminder_dispatch.sql
 -- Server-side WhatsApp delivery. This migration creates no credentials and
 -- sends no messages; only the service-role worker may claim or settle rows.
@@ -2085,13 +2074,11 @@ begin
 end;
 $$;
 -- <<< END 20261028221512_202610260013_whatsapp_reminder_dispatch.sql
-
 -- >>> BEGIN 20261028221515_202610260014_preserve_patient_appointment_history.sql
 -- Staff workflows deactivate patients and cancel appointments; they do not
 -- hard-delete clinical or scheduling records from a browser session.
 revoke delete on public.patients, public.appointments from public, anon, authenticated;
 -- <<< END 20261028221515_202610260014_preserve_patient_appointment_history.sql
-
 -- >>> BEGIN 20261028221517_202610260015_protect_confirmed_deposits_from_patient_refunds.sql
 -- A patient-level refund has no appointment association, so it must not be
 -- allowed to consume the funds reserved for any confirmed appointment deposit.
@@ -2168,14 +2155,12 @@ $$;
 
 revoke all on function private.validate_payment_refund() from public, anon, authenticated;
 -- <<< END 20261028221517_202610260015_protect_confirmed_deposits_from_patient_refunds.sql
-
 -- >>> BEGIN 20261028221523_202610260016_align_clinic_timezone_default.sql
 -- Keep new clinic records aligned with the clinic's Tijuana UI and reminder
 -- defaults. Existing clinics retain their explicitly stored timezone.
 alter table public.clinics
   alter column timezone set default 'America/Tijuana';
 -- <<< END 20261028221523_202610260016_align_clinic_timezone_default.sql
-
 -- >>> BEGIN 20261028221526_202610260017_include_deposit_reserves_in_finance_appointments.sql
 -- Finance-only appointment lookups must include deposit fields so refund
 -- workflows can display the amount reserved by confirmed bookings.
@@ -2220,7 +2205,6 @@ $$;
 revoke all on function public.get_finance_appointments(uuid, timestamptz, timestamptz, uuid[]) from public, anon;
 grant execute on function public.get_finance_appointments(uuid, timestamptz, timestamptz, uuid[]) to authenticated;
 -- <<< END 20261028221526_202610260017_include_deposit_reserves_in_finance_appointments.sql
-
 -- >>> BEGIN 20261028221529_202610270001_patient_encounters_and_files.sql
 -- Structured clinical encounters and patient-linked copies of signed documents.
 -- The storage bucket is private; files are served only through short-lived URLs.
@@ -2294,7 +2278,6 @@ create policy patient_record_files_insert on storage.objects for insert to authe
     and (storage.foldername(name))[2] is not null
   );
 -- <<< END 20261028221529_202610270001_patient_encounters_and_files.sql
-
 -- >>> BEGIN 20261028221533_202610270002_appointment_confirmation_responses.sql
 -- Two-way appointment confirmation requests. No outbound message is sent by
 -- this migration; a separately configured service worker dispatches the queue.
@@ -2525,7 +2508,6 @@ select a.clinic_id,a.id,a.reminder_schedule_version,greatest(a.starts_at-interva
  where a.status='pending' and a.starts_at>now()
 on conflict(appointment_id,schedule_version) do nothing;
 -- <<< END 20261028221533_202610270002_appointment_confirmation_responses.sql
-
 -- >>> BEGIN 20261028221536_202610270003_botox_treatment_records.sql
 -- Separate, clinician-only audit trail for Botox treatment sessions.
 create table public.botox_treatment_records (
@@ -2566,7 +2548,6 @@ create policy botox_records_clinician_insert on public.botox_treatment_records
     and (select private.has_clinic_access(clinic_id, array['admin','clinician']))
   );
 -- <<< END 20261028221536_202610270003_botox_treatment_records.sql
-
 -- >>> BEGIN 20261028221549_202610270004_botox_consent_links.sql
 -- Tie a Botox treatment record to the signed consent record or uploaded copy.
 alter table public.patient_documents
@@ -2586,13 +2567,11 @@ alter table public.botox_treatment_records
     foreign key (consent_file_id, patient_id, clinic_id)
     references public.patient_document_files(id, patient_id, clinic_id) on delete restrict;
 -- <<< END 20261028221549_202610270004_botox_consent_links.sql
-
 -- >>> BEGIN 20261028234726_enable_rls_appointment_confirmation_replies.sql
 -- Defense in depth for the service-role-only inbound confirmation table.
 -- Client roles have no table grants; service_role bypasses RLS.
 alter table public.appointment_confirmation_replies enable row level security;
 -- <<< END 20261028234726_enable_rls_appointment_confirmation_replies.sql
-
 -- >>> BEGIN 20261029000507_branch_contact_and_hours.sql
 alter table public.branches
   add column phone text,
@@ -2633,7 +2612,6 @@ set address = 'Avenida General Ignacio Zaragoza 1747 Col. Nueva 21100, Mexicali,
     hours = 'Lunes a sábados de 9:00 am a 7:00 pm'
 where name = 'Zaragoza - Florezen';
 -- <<< END 20261029000507_branch_contact_and_hours.sql
-
 -- >>> BEGIN 20261029040726_clinic_business_areas.sql
 -- Split the two clinic brands out of their encoded branch names so the CRM
 -- can switch between clinic and area using business_id / branch_id.
@@ -2704,7 +2682,6 @@ alter table public.appointments
 
 commit;
 -- <<< END 20261029040726_clinic_business_areas.sql
-
 -- >>> BEGIN 20261029050010_profile_avatars.sql
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 values (
@@ -2741,7 +2718,6 @@ using (
   and (storage.foldername(name))[1] = (select auth.uid()::text)
 );
 -- <<< END 20261029050010_profile_avatars.sql
-
 -- >>> BEGIN 20261029050539_profile_signatures.sql
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 values (
@@ -2778,7 +2754,6 @@ using (
   and (storage.foldername(name))[1] = (select auth.uid()::text)
 );
 -- <<< END 20261029050539_profile_signatures.sql
-
 -- >>> BEGIN 20261029064027_admin_clinic_membership_insert.sql
 -- Let clinic admins grant an existing account access to their clinic.
 -- Membership changes keep RLS and the membership audit trigger in effect.
@@ -2788,7 +2763,6 @@ create policy memberships_admin_insert on public.clinic_memberships
   for insert to authenticated
   with check ((select private.has_clinic_access(clinic_id, array['admin'])));
 -- <<< END 20261029064027_admin_clinic_membership_insert.sql
-
 -- >>> BEGIN 20261029080207_admin_manage_clinic_memberships.sql
 -- Allow clinic admins to update roles and revoke access while keeping the audit trigger active.
 grant update (role), delete on public.clinic_memberships to authenticated;
@@ -2848,7 +2822,6 @@ create trigger prevent_last_clinic_admin_removal
   before update of role or delete on public.clinic_memberships
   for each row execute function private.prevent_last_clinic_admin_removal();
 -- <<< END 20261029080207_admin_manage_clinic_memberships.sql
-
 -- >>> BEGIN 20261029180738_professional_account_links.sql
 -- Identity comes from the account; clinical title and branch assignments stay clinic-owned.
 create or replace function private.enforce_provider_account_identity()
@@ -2928,7 +2901,6 @@ $$;
 revoke all on function public.save_clinic_professional(uuid,uuid,uuid,text,text,uuid[]) from public, anon;
 grant execute on function public.save_clinic_professional(uuid,uuid,uuid,text,text,uuid[]) to authenticated;
 -- <<< END 20261029180738_professional_account_links.sql
-
 -- >>> BEGIN 20261029182052_agenda_professional_colors.sql
 -- Agenda identity belongs to a professional at a branch, independently of patient avatars and appointment status.
 create or replace function private.valid_agenda_color_config(color text, service_colors jsonb)
@@ -3001,7 +2973,6 @@ create or replace function public.save_clinic_professional(
 $$;
 notify pgrst, 'reload schema';
 -- <<< END 20261029182052_agenda_professional_colors.sql
-
 -- >>> BEGIN 20261029191404_clinic_services_catalog.sql
 create table public.clinic_services (
   id uuid primary key default gen_random_uuid(),
@@ -3176,7 +3147,6 @@ revoke all on function private.validate_appointment_catalog_service() from publi
 create trigger appointments_catalog_service_guard before insert or update of service_id, service_snapshot, branch_id, provider_id
   on public.appointments for each row execute function private.validate_appointment_catalog_service();
 -- <<< END 20261029191404_clinic_services_catalog.sql
-
 -- >>> BEGIN 20261029192115_preserve_service_snapshots.sql
 create or replace function private.validate_appointment_catalog_service()
 returns trigger language plpgsql security definer set search_path = '' as $$
@@ -3217,7 +3187,6 @@ drop trigger if exists appointments_catalog_service_guard on public.appointments
 create trigger appointments_catalog_service_guard before insert or update of service_id, service_snapshot, service, branch_id, provider_id
   on public.appointments for each row execute function private.validate_appointment_catalog_service();
 -- <<< END 20261029192115_preserve_service_snapshots.sql
-
 -- >>> BEGIN 20261029192455_multi_service_appointments.sql
 alter table public.appointments add column service_ids uuid[] not null default array[]::uuid[];
 update public.appointments set service_ids = array[service_id] where service_id is not null;
@@ -3304,7 +3273,6 @@ drop trigger if exists appointments_catalog_service_guard on public.appointments
 create trigger appointments_catalog_service_guard before insert or update of service_id, service_ids, service_snapshot, service, branch_id, provider_id, starts_at, ends_at
   on public.appointments for each row execute function private.validate_appointment_catalog_service();
 -- <<< END 20261029192455_multi_service_appointments.sql
-
 -- >>> BEGIN 20261029193937_clarify_lipolaser_assessment_currency.sql
 update public.clinic_services
 set offers = jsonb_set(offers, '{0,currency}', '"MXN"'::jsonb, false),
@@ -3315,7 +3283,6 @@ where code = 'lipo-assessment'
   and (offers #>> '{0,amount}')::numeric = 500
   and offers #>> '{0,currency}' = 'UNRESOLVED';
 -- <<< END 20261029193937_clarify_lipolaser_assessment_currency.sql
-
 -- >>> BEGIN 20261029194320_empty_service_scope_is_clinic_wide.sql
 create or replace function private.validate_appointment_catalog_service()
 returns trigger language plpgsql security definer set search_path = '' as $$
@@ -3396,8 +3363,7 @@ begin
 end;
 $$;
 -- <<< END 20261029194320_empty_service_scope_is_clinic_wide.sql
-
--- >>> BEGIN 20261029210000_clinic_whatsapp_mock_setup.sql
+-- >>> BEGIN 20261029225620_clinic_whatsapp_mock_setup.sql
 -- Clinic-scoped WhatsApp setup metadata for a simulated provider only.
 -- No credentials, Meta connection, webhook registration, or message delivery.
 create table public.clinic_whatsapp_configurations (
@@ -3800,4 +3766,940 @@ end;
 $$;
 revoke all on function public.get_appointment_reminders_v2(uuid, timestamptz, timestamptz) from public, anon;
 grant execute on function public.get_appointment_reminders_v2(uuid, timestamptz, timestamptz) to authenticated;
--- <<< END 20261029210000_clinic_whatsapp_mock_setup.sql
+-- <<< END 20261029225620_clinic_whatsapp_mock_setup.sql
+-- >>> BEGIN 20261030034458_google_calendar_oauth.sql
+-- Server-only OAuth credentials for a clinic's Google Calendar connection.
+-- The refresh token is encrypted by the application before it is stored.
+create table public.clinic_google_calendar_connections (
+  clinic_id uuid primary key references public.clinics(id) on delete cascade,
+  google_email text not null check (length(trim(google_email)) between 3 and 320),
+  calendar_id text not null default 'primary' check (length(trim(calendar_id)) between 1 and 1024),
+  refresh_token_ciphertext text not null,
+  connected_by uuid references auth.users(id) on delete set null,
+  connected_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  last_synced_at timestamptz,
+  last_sync_status text check (last_sync_status in ('success', 'partial', 'error')),
+  last_sync_error text check (last_sync_error is null or length(last_sync_error) <= 500)
+);
+
+alter table public.clinic_google_calendar_connections enable row level security;
+revoke all on public.clinic_google_calendar_connections from public, anon, authenticated;
+grant select, insert, update, delete on public.clinic_google_calendar_connections to service_role;
+
+create table public.clinic_google_calendar_sync_jobs (
+  id uuid primary key default gen_random_uuid(),
+  clinic_id uuid not null references public.clinics(id) on delete cascade,
+  appointment_id uuid not null,
+  status text not null default 'queued' check (status in ('queued', 'processing', 'succeeded', 'failed')),
+  attempts integer not null default 0 check (attempts >= 0),
+  next_attempt_at timestamptz not null default now(),
+  last_error text check (last_error is null or length(last_error) <= 500),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  completed_at timestamptz,
+  foreign key (appointment_id, clinic_id) references public.appointments(id, clinic_id) on delete cascade
+);
+
+create unique index clinic_google_calendar_active_job_unique
+  on public.clinic_google_calendar_sync_jobs (clinic_id, appointment_id)
+  where status in ('queued', 'processing');
+create index clinic_google_calendar_queued_jobs_idx
+  on public.clinic_google_calendar_sync_jobs (next_attempt_at, created_at)
+  where status = 'queued';
+
+alter table public.clinic_google_calendar_sync_jobs enable row level security;
+revoke all on public.clinic_google_calendar_sync_jobs from public, anon, authenticated;
+grant select, insert, update, delete on public.clinic_google_calendar_sync_jobs to service_role;
+
+create function private.enqueue_google_calendar_appointment_sync()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if tg_op = 'UPDATE'
+     and old.starts_at is not distinct from new.starts_at
+     and old.ends_at is not distinct from new.ends_at
+     and old.status is not distinct from new.status then
+    return new;
+  end if;
+  if new.status <> 'completed' and exists (
+    select 1 from public.clinic_google_calendar_connections as connection
+    where connection.clinic_id = new.clinic_id
+  ) then
+    insert into public.clinic_google_calendar_sync_jobs (clinic_id, appointment_id)
+    values (new.clinic_id, new.id)
+    on conflict do nothing;
+  end if;
+  return new;
+end;
+$$;
+
+create trigger appointments_enqueue_google_calendar_sync
+  after insert or update of starts_at, ends_at, status on public.appointments
+  for each row execute function private.enqueue_google_calendar_appointment_sync();
+
+revoke all on function private.enqueue_google_calendar_appointment_sync() from public, anon, authenticated;
+
+create function public.queue_google_calendar_initial_sync(target_clinic_id uuid)
+returns integer
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare queued_count integer;
+begin
+  if coalesce(auth.jwt() ->> 'role', '') <> 'service_role' then
+    raise exception 'Google Calendar queueing is restricted to the server.' using errcode = '42501';
+  end if;
+  if not exists (
+    select 1 from public.clinic_google_calendar_connections as connection
+    where connection.clinic_id = target_clinic_id
+  ) then
+    raise exception 'Google Calendar is not connected for this clinic.' using errcode = '22023';
+  end if;
+  insert into public.clinic_google_calendar_sync_jobs (clinic_id, appointment_id)
+  select appointment.clinic_id, appointment.id
+    from public.appointments as appointment
+   where appointment.clinic_id = target_clinic_id
+     and appointment.status in ('pending', 'confirmed')
+     and appointment.starts_at >= now()
+     and appointment.starts_at < now() + interval '90 days'
+     and not exists (
+       select 1 from public.clinic_google_calendar_sync_jobs as prior
+       where prior.clinic_id = appointment.clinic_id
+         and prior.appointment_id = appointment.id
+         and prior.status = 'succeeded'
+     )
+  on conflict do nothing;
+  get diagnostics queued_count = row_count;
+  return queued_count;
+end;
+$$;
+
+create function public.claim_google_calendar_sync_jobs(target_clinic_id uuid default null, target_limit integer default 10)
+returns table(job_id uuid, clinic_id uuid, appointment_id uuid, attempts integer)
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if coalesce(auth.jwt() ->> 'role', '') <> 'service_role' then
+    raise exception 'Google Calendar dispatch is restricted to the server.' using errcode = '42501';
+  end if;
+  return query
+    with picked as (
+      select job.id
+        from public.clinic_google_calendar_sync_jobs as job
+       where ((job.status = 'queued' and job.next_attempt_at <= now())
+          or (job.status = 'processing' and job.updated_at < now() - interval '10 minutes'))
+         and (target_clinic_id is null or job.clinic_id = target_clinic_id)
+       order by job.created_at
+       for update skip locked
+       limit least(greatest(coalesce(target_limit, 10), 1), 50)
+    )
+    update public.clinic_google_calendar_sync_jobs as job
+       set status = 'processing', attempts = job.attempts + 1, updated_at = now(), last_error = null
+      from picked
+     where job.id = picked.id
+    returning job.id, job.clinic_id, job.appointment_id, job.attempts;
+end;
+$$;
+
+revoke all on function public.queue_google_calendar_initial_sync(uuid) from public, anon, authenticated;
+revoke all on function public.claim_google_calendar_sync_jobs(uuid, integer) from public, anon, authenticated;
+grant execute on function public.queue_google_calendar_initial_sync(uuid) to service_role;
+grant execute on function public.claim_google_calendar_sync_jobs(uuid, integer) to service_role;
+-- <<< END 20261030034458_google_calendar_oauth.sql
+-- >>> BEGIN 20261030052342_google_calendar_provider_connections.sql
+begin;
+
+create table public.clinic_provider_google_calendar_connections (
+  clinic_id uuid not null references public.clinics(id) on delete cascade,
+  provider_id uuid not null,
+  google_email text not null check (length(trim(google_email)) between 3 and 320),
+  calendar_id text not null default 'primary' check (length(trim(calendar_id)) between 1 and 1024),
+  refresh_token_ciphertext text not null,
+  connected_by uuid references auth.users(id) on delete set null,
+  connected_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  last_synced_at timestamptz,
+  last_sync_status text check (last_sync_status in ('success', 'partial', 'error')),
+  last_sync_error text check (last_sync_error is null or length(last_sync_error) <= 500),
+  primary key (clinic_id, provider_id),
+  foreign key (provider_id, clinic_id)
+    references public.clinic_providers(id, clinic_id) on delete cascade
+);
+
+alter table public.clinic_provider_google_calendar_connections enable row level security;
+revoke all on public.clinic_provider_google_calendar_connections from public, anon, authenticated;
+grant select, insert, update, delete on public.clinic_provider_google_calendar_connections to service_role;
+
+create table public.clinic_google_calendar_event_links (
+  clinic_id uuid not null references public.clinics(id) on delete cascade,
+  appointment_id uuid not null,
+  provider_id uuid,
+  calendar_id text not null,
+  google_email text not null,
+  updated_at timestamptz not null default now(),
+  primary key (clinic_id, appointment_id),
+  foreign key (appointment_id, clinic_id)
+    references public.appointments(id, clinic_id) on delete cascade
+);
+
+create index clinic_google_calendar_event_links_provider_idx
+  on public.clinic_google_calendar_event_links (clinic_id, provider_id);
+alter table public.clinic_google_calendar_event_links enable row level security;
+revoke all on public.clinic_google_calendar_event_links from public, anon, authenticated;
+grant select, insert, update, delete on public.clinic_google_calendar_event_links to service_role;
+
+-- Preserve the known destination for events already created by the clinic-wide connection.
+insert into public.clinic_google_calendar_event_links
+  (clinic_id, appointment_id, provider_id, calendar_id, google_email, updated_at)
+select distinct on (job.clinic_id, job.appointment_id)
+  job.clinic_id, job.appointment_id, null, connection.calendar_id,
+  connection.google_email, coalesce(job.completed_at, job.updated_at)
+from public.clinic_google_calendar_sync_jobs as job
+join public.clinic_google_calendar_connections as connection
+  on connection.clinic_id = job.clinic_id
+where job.status = 'succeeded'
+order by job.clinic_id, job.appointment_id, job.completed_at desc nulls last, job.updated_at desc
+on conflict (clinic_id, appointment_id) do nothing;
+
+create or replace function private.enqueue_google_calendar_appointment_sync()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if tg_op = 'UPDATE'
+     and old.starts_at is not distinct from new.starts_at
+     and old.ends_at is not distinct from new.ends_at
+     and old.status is not distinct from new.status
+     and old.provider_id is not distinct from new.provider_id then
+    return new;
+  end if;
+
+  if new.status <> 'completed' and (
+    exists (
+      select 1 from public.clinic_google_calendar_connections as connection
+      where connection.clinic_id = new.clinic_id
+    )
+    or exists (
+      select 1 from public.clinic_provider_google_calendar_connections as connection
+      where connection.clinic_id = new.clinic_id
+        and connection.provider_id = new.provider_id
+    )
+    or exists (
+      select 1 from public.clinic_google_calendar_event_links as event_link
+      where event_link.clinic_id = new.clinic_id
+        and event_link.appointment_id = new.id
+    )
+  ) then
+    insert into public.clinic_google_calendar_sync_jobs (clinic_id, appointment_id)
+    values (new.clinic_id, new.id)
+    on conflict do nothing;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists appointments_enqueue_google_calendar_sync on public.appointments;
+create trigger appointments_enqueue_google_calendar_sync
+  after insert or update of starts_at, ends_at, status, provider_id on public.appointments
+  for each row execute function private.enqueue_google_calendar_appointment_sync();
+
+create or replace function public.queue_google_calendar_initial_sync(target_clinic_id uuid)
+returns integer
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare queued_count integer;
+begin
+  if coalesce(auth.jwt() ->> 'role', '') <> 'service_role' then
+    raise exception 'Google Calendar queueing is restricted to the server.' using errcode = '42501';
+  end if;
+  if not exists (
+    select 1 from public.clinic_google_calendar_connections as connection
+    where connection.clinic_id = target_clinic_id
+  ) and not exists (
+    select 1 from public.clinic_provider_google_calendar_connections as connection
+    where connection.clinic_id = target_clinic_id
+  ) then
+    raise exception 'Google Calendar is not connected for this clinic.' using errcode = '22023';
+  end if;
+
+  insert into public.clinic_google_calendar_sync_jobs (clinic_id, appointment_id)
+  select appointment.clinic_id, appointment.id
+    from public.appointments as appointment
+   where appointment.clinic_id = target_clinic_id
+     and appointment.status in ('pending', 'confirmed')
+     and appointment.starts_at >= now()
+     and appointment.starts_at < now() + interval '90 days'
+     and (
+       exists (
+         select 1 from public.clinic_google_calendar_connections as connection
+         where connection.clinic_id = appointment.clinic_id
+       )
+       or exists (
+         select 1 from public.clinic_provider_google_calendar_connections as connection
+         where connection.clinic_id = appointment.clinic_id
+           and connection.provider_id = appointment.provider_id
+       )
+     )
+     and not exists (
+       select 1 from public.clinic_google_calendar_sync_jobs as prior
+       where prior.clinic_id = appointment.clinic_id
+         and prior.appointment_id = appointment.id
+         and prior.status = 'succeeded'
+     )
+  on conflict do nothing;
+  get diagnostics queued_count = row_count;
+  return queued_count;
+end;
+$$;
+
+create or replace function public.queue_google_calendar_provider_initial_sync(
+  target_clinic_id uuid,
+  target_provider_id uuid
+)
+returns integer
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare queued_count integer;
+begin
+  if coalesce(auth.jwt() ->> 'role', '') <> 'service_role' then
+    raise exception 'Google Calendar queueing is restricted to the server.' using errcode = '42501';
+  end if;
+  if not exists (
+    select 1 from public.clinic_provider_google_calendar_connections as connection
+    where connection.clinic_id = target_clinic_id
+      and connection.provider_id = target_provider_id
+  ) then
+    raise exception 'This professional has no connected Google Calendar.' using errcode = '22023';
+  end if;
+
+  insert into public.clinic_google_calendar_sync_jobs (clinic_id, appointment_id)
+  select appointment.clinic_id, appointment.id
+    from public.appointments as appointment
+   where appointment.clinic_id = target_clinic_id
+     and appointment.provider_id = target_provider_id
+     and appointment.status in ('pending', 'confirmed')
+     and appointment.starts_at >= now()
+     and appointment.starts_at < now() + interval '90 days'
+  on conflict do nothing;
+  get diagnostics queued_count = row_count;
+  return queued_count;
+end;
+$$;
+
+drop function public.claim_google_calendar_sync_jobs(uuid, integer);
+create function public.claim_google_calendar_sync_jobs(
+  target_clinic_id uuid default null,
+  target_limit integer default 10,
+  target_provider_id uuid default null
+)
+returns table(job_id uuid, clinic_id uuid, appointment_id uuid, attempts integer)
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if coalesce(auth.jwt() ->> 'role', '') <> 'service_role' then
+    raise exception 'Google Calendar dispatch is restricted to the server.' using errcode = '42501';
+  end if;
+  return query
+    with picked as (
+      select job.id
+        from public.clinic_google_calendar_sync_jobs as job
+       where ((job.status = 'queued' and job.next_attempt_at <= now())
+          or (job.status = 'processing' and job.updated_at < now() - interval '10 minutes'))
+         and (target_clinic_id is null or job.clinic_id = target_clinic_id)
+         and (target_provider_id is null or exists (
+           select 1 from public.appointments as appointment
+           where appointment.clinic_id = job.clinic_id
+             and appointment.id = job.appointment_id
+             and appointment.provider_id = target_provider_id
+         ) or exists (
+           select 1 from public.clinic_google_calendar_event_links as event_link
+           where event_link.clinic_id = job.clinic_id
+             and event_link.appointment_id = job.appointment_id
+             and event_link.provider_id = target_provider_id
+         ))
+       order by job.created_at
+       for update skip locked
+       limit least(greatest(coalesce(target_limit, 10), 1), 50)
+    )
+    update public.clinic_google_calendar_sync_jobs as job
+       set status = 'processing', attempts = job.attempts + 1, updated_at = now(), last_error = null
+      from picked
+     where job.id = picked.id
+    returning job.id, job.clinic_id, job.appointment_id, job.attempts;
+end;
+$$;
+
+revoke all on function public.queue_google_calendar_initial_sync(uuid) from public, anon, authenticated;
+revoke all on function public.queue_google_calendar_provider_initial_sync(uuid, uuid) from public, anon, authenticated;
+revoke all on function public.claim_google_calendar_sync_jobs(uuid, integer, uuid) from public, anon, authenticated;
+grant execute on function public.queue_google_calendar_initial_sync(uuid) to service_role;
+grant execute on function public.queue_google_calendar_provider_initial_sync(uuid, uuid) to service_role;
+grant execute on function public.claim_google_calendar_sync_jobs(uuid, integer, uuid) to service_role;
+
+commit;
+-- <<< END 20261030052342_google_calendar_provider_connections.sql
+-- >>> BEGIN 20261030062740_google_calendar_disable_clinic_fallback.sql
+begin;
+
+-- Only a professional's own connected Google account receives appointment events.
+create or replace function private.enqueue_google_calendar_appointment_sync()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if tg_op = 'UPDATE'
+     and old.starts_at is not distinct from new.starts_at
+     and old.ends_at is not distinct from new.ends_at
+     and old.status is not distinct from new.status
+     and old.provider_id is not distinct from new.provider_id then
+    return new;
+  end if;
+
+  if new.status <> 'completed' and (
+    exists (
+      select 1 from public.clinic_provider_google_calendar_connections as connection
+      where connection.clinic_id = new.clinic_id
+        and connection.provider_id = new.provider_id
+    )
+    or exists (
+      select 1 from public.clinic_google_calendar_event_links as event_link
+      where event_link.clinic_id = new.clinic_id
+        and event_link.appointment_id = new.id
+        and event_link.provider_id is not null
+    )
+  ) then
+    insert into public.clinic_google_calendar_sync_jobs (clinic_id, appointment_id)
+    values (new.clinic_id, new.id)
+    on conflict do nothing;
+  end if;
+  return new;
+end;
+$$;
+
+create or replace function public.queue_google_calendar_initial_sync(target_clinic_id uuid)
+returns integer
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare queued_count integer;
+begin
+  if coalesce(auth.jwt() ->> 'role', '') <> 'service_role' then
+    raise exception 'Google Calendar queueing is restricted to the server.' using errcode = '42501';
+  end if;
+  if not exists (
+    select 1 from public.clinic_provider_google_calendar_connections as connection
+    where connection.clinic_id = target_clinic_id
+  ) then
+    raise exception 'No professional Google Calendar is connected for this clinic.' using errcode = '22023';
+  end if;
+
+  insert into public.clinic_google_calendar_sync_jobs (clinic_id, appointment_id)
+  select appointment.clinic_id, appointment.id
+    from public.appointments as appointment
+   where appointment.clinic_id = target_clinic_id
+     and appointment.status in ('pending', 'confirmed')
+     and appointment.starts_at >= now()
+     and appointment.starts_at < now() + interval '90 days'
+     and exists (
+       select 1 from public.clinic_provider_google_calendar_connections as connection
+       where connection.clinic_id = appointment.clinic_id
+         and connection.provider_id = appointment.provider_id
+     )
+     and not exists (
+       select 1 from public.clinic_google_calendar_sync_jobs as prior
+       where prior.clinic_id = appointment.clinic_id
+         and prior.appointment_id = appointment.id
+         and prior.status = 'succeeded'
+     )
+  on conflict do nothing;
+  get diagnostics queued_count = row_count;
+  return queued_count;
+end;
+$$;
+
+create or replace function public.claim_google_calendar_sync_jobs(
+  target_clinic_id uuid default null,
+  target_limit integer default 10,
+  target_provider_id uuid default null
+)
+returns table(job_id uuid, clinic_id uuid, appointment_id uuid, attempts integer)
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if coalesce(auth.jwt() ->> 'role', '') <> 'service_role' then
+    raise exception 'Google Calendar dispatch is restricted to the server.' using errcode = '42501';
+  end if;
+  return query
+    with picked as (
+      select job.id
+        from public.clinic_google_calendar_sync_jobs as job
+       where ((job.status = 'queued' and job.next_attempt_at <= now())
+          or (job.status = 'processing' and job.updated_at < now() - interval '10 minutes'))
+         and (target_clinic_id is null or job.clinic_id = target_clinic_id)
+         and (
+           (
+             target_provider_id is not null
+             and (
+               exists (
+                 select 1 from public.appointments as appointment
+                 where appointment.clinic_id = job.clinic_id
+                   and appointment.id = job.appointment_id
+                   and appointment.provider_id = target_provider_id
+                   and exists (
+                     select 1 from public.clinic_provider_google_calendar_connections as connection
+                     where connection.clinic_id = appointment.clinic_id
+                       and connection.provider_id = appointment.provider_id
+                   )
+               )
+               or exists (
+                 select 1 from public.clinic_google_calendar_event_links as event_link
+                 where event_link.clinic_id = job.clinic_id
+                   and event_link.appointment_id = job.appointment_id
+                   and event_link.provider_id = target_provider_id
+               )
+             )
+           )
+           or (
+             target_provider_id is null
+             and (
+               exists (
+                 select 1 from public.appointments as appointment
+                 join public.clinic_provider_google_calendar_connections as connection
+                   on connection.clinic_id = appointment.clinic_id
+                  and connection.provider_id = appointment.provider_id
+                 where appointment.clinic_id = job.clinic_id
+                   and appointment.id = job.appointment_id
+               )
+               or exists (
+                 select 1 from public.clinic_google_calendar_event_links as event_link
+                 where event_link.clinic_id = job.clinic_id
+                   and event_link.appointment_id = job.appointment_id
+                   and event_link.provider_id is not null
+               )
+             )
+           )
+         )
+       order by job.created_at
+       for update skip locked
+       limit least(greatest(coalesce(target_limit, 10), 1), 50)
+    )
+    update public.clinic_google_calendar_sync_jobs as job
+       set status = 'processing', attempts = job.attempts + 1, updated_at = now(), last_error = null
+      from picked
+     where job.id = picked.id
+    returning job.id, job.clinic_id, job.appointment_id, job.attempts;
+end;
+$$;
+
+commit;
+-- <<< END 20261030062740_google_calendar_disable_clinic_fallback.sql
+-- >>> BEGIN 20261030070000_google_calendar_per_crm_account.sql
+-- Google Calendar OAuth connections belong to the CRM account that authorized them.
+-- Each CRM user can independently connect a Google account and sync clinic appointments.
+
+alter table public.clinic_google_calendar_connections
+  drop constraint clinic_google_calendar_connections_pkey;
+alter table public.clinic_google_calendar_connections
+  add primary key (clinic_id, connected_by);
+alter table public.clinic_google_calendar_connections
+  alter column connected_by set not null;
+
+alter table public.clinic_google_calendar_event_links
+  add column connected_by uuid references auth.users(id) on delete cascade;
+update public.clinic_google_calendar_event_links as event_link
+   set connected_by = coalesce(
+     (select connection.connected_by
+        from public.clinic_provider_google_calendar_connections as connection
+       where connection.clinic_id = event_link.clinic_id
+         and connection.provider_id = event_link.provider_id),
+     (select connection.connected_by
+        from public.clinic_google_calendar_connections as connection
+       where connection.clinic_id = event_link.clinic_id
+       order by connection.connected_at
+       limit 1),
+     (select membership.user_id
+        from public.clinic_memberships as membership
+       where membership.clinic_id = event_link.clinic_id
+         and membership.role = 'admin'
+       order by membership.created_at
+       limit 1)
+   );
+delete from public.clinic_google_calendar_event_links where connected_by is null;
+alter table public.clinic_google_calendar_event_links
+  alter column connected_by set not null;
+alter table public.clinic_google_calendar_event_links
+  drop constraint clinic_google_calendar_event_links_pkey;
+alter table public.clinic_google_calendar_event_links
+  add primary key (clinic_id, appointment_id, connected_by);
+
+alter table public.clinic_google_calendar_sync_jobs
+  add column user_id uuid references auth.users(id) on delete cascade;
+update public.clinic_google_calendar_sync_jobs as job
+   set user_id = coalesce(
+     (select event_link.connected_by from public.clinic_google_calendar_event_links as event_link
+       where event_link.clinic_id = job.clinic_id and event_link.appointment_id = job.appointment_id limit 1),
+     (select connection.connected_by from public.clinic_google_calendar_connections as connection
+       where connection.clinic_id = job.clinic_id order by connection.connected_at limit 1),
+     (select connection.connected_by from public.clinic_provider_google_calendar_connections as connection
+       join public.appointments as appointment on appointment.clinic_id = connection.clinic_id and appointment.provider_id = connection.provider_id
+       where appointment.clinic_id = job.clinic_id and appointment.id = job.appointment_id limit 1)
+   );
+delete from public.clinic_google_calendar_sync_jobs where user_id is null;
+alter table public.clinic_google_calendar_sync_jobs alter column user_id set not null;
+drop index if exists public.clinic_google_calendar_active_job_unique;
+create unique index clinic_google_calendar_active_job_unique
+  on public.clinic_google_calendar_sync_jobs (clinic_id, appointment_id, user_id)
+  where status in ('queued', 'processing');
+
+create or replace function private.enqueue_google_calendar_appointment_sync()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if tg_op = 'UPDATE'
+     and old.starts_at is not distinct from new.starts_at
+     and old.ends_at is not distinct from new.ends_at
+     and old.status is not distinct from new.status
+     and old.provider_id is not distinct from new.provider_id then
+    return new;
+  end if;
+
+  if new.status <> 'completed' then
+    insert into public.clinic_google_calendar_sync_jobs (clinic_id, appointment_id, user_id)
+    select new.clinic_id, new.id, connection.connected_by
+      from public.clinic_google_calendar_connections as connection
+     where connection.clinic_id = new.clinic_id
+    on conflict do nothing;
+  end if;
+  return new;
+end;
+$$;
+
+create or replace function public.queue_google_calendar_initial_sync(target_clinic_id uuid)
+returns integer
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare queued_count integer;
+begin
+  if coalesce(auth.jwt() ->> 'role', '') <> 'service_role' then
+    raise exception 'Google Calendar queueing is restricted to the server.' using errcode = '42501';
+  end if;
+  if not exists (
+    select 1 from public.clinic_google_calendar_connections as connection
+    where connection.clinic_id = target_clinic_id
+  ) and not exists (
+    select 1 from public.clinic_provider_google_calendar_connections as connection
+    where connection.clinic_id = target_clinic_id
+  ) then
+    raise exception 'No Google Calendar account is connected for this clinic.' using errcode = '22023';
+  end if;
+
+  insert into public.clinic_google_calendar_sync_jobs (clinic_id, appointment_id, user_id)
+  select appointment.clinic_id, appointment.id, connection.connected_by
+    from public.appointments as appointment
+    join public.clinic_google_calendar_connections as connection on connection.clinic_id = appointment.clinic_id
+   where appointment.clinic_id = target_clinic_id
+     and appointment.status in ('pending', 'confirmed')
+     and appointment.starts_at >= now()
+     and appointment.starts_at < now() + interval '90 days'
+     and not exists (
+       select 1 from public.clinic_google_calendar_sync_jobs as prior
+       where prior.clinic_id = appointment.clinic_id
+         and prior.appointment_id = appointment.id
+         and prior.user_id = connection.connected_by
+         and prior.status = 'succeeded'
+     )
+  on conflict do nothing;
+  get diagnostics queued_count = row_count;
+  return queued_count;
+end;
+$$;
+
+create or replace function public.queue_google_calendar_user_initial_sync(target_clinic_id uuid, target_user_id uuid)
+returns integer
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare queued_count integer;
+begin
+  if coalesce(auth.jwt() ->> 'role', '') <> 'service_role' then
+    raise exception 'Google Calendar queueing is restricted to the server.' using errcode = '42501';
+  end if;
+  if not exists (select 1 from public.clinic_google_calendar_connections as connection
+    where connection.clinic_id = target_clinic_id and connection.connected_by = target_user_id) then
+    raise exception 'This CRM account has no connected Google Calendar.' using errcode = '22023';
+  end if;
+  insert into public.clinic_google_calendar_sync_jobs (clinic_id, appointment_id, user_id)
+  select appointment.clinic_id, appointment.id, target_user_id
+    from public.appointments as appointment
+   where appointment.clinic_id = target_clinic_id
+     and appointment.status in ('pending', 'confirmed')
+     and appointment.starts_at >= now()
+     and appointment.starts_at < now() + interval '90 days'
+  on conflict do nothing;
+  get diagnostics queued_count = row_count;
+  return queued_count;
+end;
+$$;
+
+revoke all on function public.queue_google_calendar_initial_sync(uuid) from public, anon, authenticated;
+grant execute on function public.queue_google_calendar_initial_sync(uuid) to service_role;
+revoke all on function public.queue_google_calendar_user_initial_sync(uuid, uuid) from public, anon, authenticated;
+grant execute on function public.queue_google_calendar_user_initial_sync(uuid, uuid) to service_role;
+drop function public.claim_google_calendar_sync_jobs(uuid, integer, uuid);
+create function public.claim_google_calendar_sync_jobs(
+  target_clinic_id uuid default null,
+  target_limit integer default 10,
+  target_provider_id uuid default null,
+  target_user_id uuid default null
+)
+returns table(job_id uuid, clinic_id uuid, appointment_id uuid, attempts integer, user_id uuid)
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if coalesce(auth.jwt() ->> 'role', '') <> 'service_role' then
+    raise exception 'Google Calendar dispatch is restricted to the server.' using errcode = '42501';
+  end if;
+  return query
+    with picked as (
+      select job.id from public.clinic_google_calendar_sync_jobs as job
+       where ((job.status = 'queued' and job.next_attempt_at <= now())
+          or (job.status = 'processing' and job.updated_at < now() - interval '10 minutes'))
+         and (target_clinic_id is null or job.clinic_id = target_clinic_id)
+         and (target_user_id is null or job.user_id = target_user_id)
+         and exists (select 1 from public.clinic_google_calendar_connections as connection
+           where connection.clinic_id = job.clinic_id and connection.connected_by = job.user_id)
+       order by job.created_at for update skip locked
+       limit least(greatest(coalesce(target_limit, 10), 1), 50)
+    )
+    update public.clinic_google_calendar_sync_jobs as job
+       set status = 'processing', attempts = job.attempts + 1, updated_at = now(), last_error = null
+      from picked where job.id = picked.id
+    returning job.id, job.clinic_id, job.appointment_id, job.attempts, job.user_id;
+end;
+$$;
+revoke all on function public.claim_google_calendar_sync_jobs(uuid, integer, uuid, uuid) from public, anon, authenticated;
+grant execute on function public.claim_google_calendar_sync_jobs(uuid, integer, uuid, uuid) to service_role;
+-- <<< END 20261030070000_google_calendar_per_crm_account.sql
+-- >>> BEGIN 20261030072515_clinic_availability.sql
+-- Clinic availability rules: scoped blocks and configurable provider overlaps.
+
+create table public.clinic_availability_settings (
+  clinic_id uuid primary key references public.clinics(id) on delete cascade,
+  allow_provider_overlaps boolean not null default false,
+  updated_at timestamptz not null default now()
+);
+
+create table public.clinic_availability_blocks (
+  id uuid primary key default gen_random_uuid(),
+  clinic_id uuid not null references public.clinics(id) on delete cascade,
+  title text not null check (length(trim(title)) between 1 and 100),
+  scope text not null default 'clinic' check (scope in ('clinic', 'branch', 'provider')),
+  branch_id uuid,
+  provider_id uuid,
+  starts_at timestamptz not null,
+  ends_at timestamptz not null,
+  created_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  check (ends_at > starts_at),
+  check ((scope = 'clinic' and branch_id is null and provider_id is null)
+      or (scope = 'branch' and branch_id is not null and provider_id is null)
+      or (scope = 'provider' and provider_id is not null and branch_id is null)),
+  foreign key (branch_id, clinic_id) references public.branches(id, clinic_id) on delete cascade,
+  foreign key (provider_id, clinic_id) references public.clinic_providers(id, clinic_id) on delete cascade
+);
+
+create index clinic_availability_blocks_window_idx
+  on public.clinic_availability_blocks (clinic_id, starts_at, ends_at);
+create index clinic_availability_blocks_branch_window_idx
+  on public.clinic_availability_blocks (clinic_id, branch_id, starts_at, ends_at)
+  where scope = 'branch';
+create index clinic_availability_blocks_provider_window_idx
+  on public.clinic_availability_blocks (clinic_id, provider_id, starts_at, ends_at)
+  where scope = 'provider';
+
+alter table public.clinic_availability_settings enable row level security;
+alter table public.clinic_availability_blocks enable row level security;
+revoke all on public.clinic_availability_settings, public.clinic_availability_blocks from anon, authenticated;
+grant select, insert, update on public.clinic_availability_settings to authenticated;
+grant select, insert, delete on public.clinic_availability_blocks to authenticated;
+
+create policy availability_settings_member_read on public.clinic_availability_settings
+  for select to authenticated using ((select private.has_clinic_access(clinic_id, null)));
+create policy availability_settings_admin_write on public.clinic_availability_settings
+  for all to authenticated
+  using ((select private.has_clinic_access(clinic_id, array['admin'])))
+  with check ((select private.has_clinic_access(clinic_id, array['admin'])));
+create policy availability_blocks_member_read on public.clinic_availability_blocks
+  for select to authenticated using ((select private.has_clinic_access(clinic_id, null)));
+create policy availability_blocks_staff_write on public.clinic_availability_blocks
+  for all to authenticated
+  using ((select private.has_clinic_access(clinic_id, array['admin', 'clinician', 'receptionist'])))
+  with check ((select private.has_clinic_access(clinic_id, array['admin', 'clinician', 'receptionist'])));
+
+-- Serialize appointment and block writes within a clinic so a booking cannot race
+-- a newly-created block or another appointment for the same provider.
+create function private.enforce_clinic_availability()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+declare
+  provider_overlaps_allowed boolean;
+begin
+  if new.status = 'cancelled' then
+    return new;
+  end if;
+
+  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('availability:' || new.clinic_id::text, 0));
+
+  if exists (
+    select 1 from public.clinic_availability_blocks as block
+     where block.clinic_id = new.clinic_id
+       and tstzrange(block.starts_at, block.ends_at, '[)') && tstzrange(new.starts_at, new.ends_at, '[)')
+       and (block.scope = 'clinic'
+         or (block.scope = 'branch' and block.branch_id = new.branch_id)
+         or (block.scope = 'provider' and block.provider_id = new.provider_id))
+  ) then
+    raise exception using errcode = '23P01', message = 'La cita coincide con un horario bloqueado.';
+  end if;
+
+  select coalesce(settings.allow_provider_overlaps, false)
+    into provider_overlaps_allowed
+    from public.clinic_availability_settings as settings
+   where settings.clinic_id = new.clinic_id;
+
+  if not coalesce(provider_overlaps_allowed, false) and exists (
+    select 1 from public.appointments as appointment
+     where appointment.clinic_id = new.clinic_id
+       and appointment.provider_id = new.provider_id
+       and appointment.status <> 'cancelled'
+       and appointment.id is distinct from new.id
+       and tstzrange(appointment.starts_at, appointment.ends_at, '[)') && tstzrange(new.starts_at, new.ends_at, '[)')
+  ) then
+    raise exception using errcode = '23P01', message = 'El profesional ya tiene una cita en ese horario.';
+  end if;
+
+  return new;
+end;
+$$;
+
+create function private.protect_clinic_availability_settings()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('availability:' || new.clinic_id::text, 0));
+  if not new.allow_provider_overlaps and exists (
+    select 1 from public.appointments as first_appointment
+    join public.appointments as second_appointment
+      on second_appointment.clinic_id = first_appointment.clinic_id
+     and second_appointment.provider_id = first_appointment.provider_id
+     and second_appointment.id > first_appointment.id
+     and tstzrange(second_appointment.starts_at, second_appointment.ends_at, '[)')
+         && tstzrange(first_appointment.starts_at, first_appointment.ends_at, '[)')
+   where first_appointment.clinic_id = new.clinic_id
+     and first_appointment.status <> 'cancelled'
+     and second_appointment.status <> 'cancelled'
+  ) then
+    raise exception using errcode = '23P01', message = 'No puedes desactivar las citas simultáneas mientras existan citas del mismo profesional que se traslapen.';
+  end if;
+  new.updated_at = now();
+  return new;
+end;
+$$;
+
+create function private.protect_clinic_availability_block()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  if tg_op = 'UPDATE' and old.clinic_id <> new.clinic_id then
+    raise exception using errcode = '23514', message = 'No se puede cambiar la clínica de un horario bloqueado.';
+  end if;
+  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('availability:' || new.clinic_id::text, 0));
+  if exists (
+    select 1 from public.appointments as appointment
+     where appointment.clinic_id = new.clinic_id
+       and appointment.status <> 'cancelled'
+       and tstzrange(appointment.starts_at, appointment.ends_at, '[)') && tstzrange(new.starts_at, new.ends_at, '[)')
+       and (new.scope = 'clinic'
+         or (new.scope = 'branch' and appointment.branch_id = new.branch_id)
+         or (new.scope = 'provider' and appointment.provider_id = new.provider_id))
+  ) then
+    raise exception using errcode = '23P01', message = 'No se puede bloquear un horario que ya tiene citas.';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists appointments_enforce_clinic_availability on public.appointments;
+drop trigger if exists clinic_availability_settings_protect on public.clinic_availability_settings;
+drop trigger if exists clinic_availability_blocks_protect on public.clinic_availability_blocks;
+alter table public.appointments drop constraint if exists appointments_provider_no_overlap;
+
+create trigger appointments_enforce_clinic_availability
+  before insert or update of clinic_id, provider_id, branch_id, starts_at, ends_at, status
+  on public.appointments for each row execute function private.enforce_clinic_availability();
+create trigger clinic_availability_settings_protect
+  before insert or update on public.clinic_availability_settings
+  for each row execute function private.protect_clinic_availability_settings();
+create trigger clinic_availability_blocks_protect
+  before insert or update on public.clinic_availability_blocks
+  for each row execute function private.protect_clinic_availability_block();
+-- <<< END 20261030072515_clinic_availability.sql
+-- >>> BEGIN 20261030072602_clinic_availability_policy_tuneup.sql
+-- Keep read policies single-purpose and index all availability block foreign keys.
+
+drop policy availability_settings_admin_write on public.clinic_availability_settings;
+create policy availability_settings_admin_insert on public.clinic_availability_settings
+  for insert to authenticated with check ((select private.has_clinic_access(clinic_id, array['admin'])));
+create policy availability_settings_admin_update on public.clinic_availability_settings
+  for update to authenticated
+  using ((select private.has_clinic_access(clinic_id, array['admin'])))
+  with check ((select private.has_clinic_access(clinic_id, array['admin'])));
+
+drop policy availability_blocks_staff_write on public.clinic_availability_blocks;
+create policy availability_blocks_staff_insert on public.clinic_availability_blocks
+  for insert to authenticated
+  with check ((select private.has_clinic_access(clinic_id, array['admin', 'clinician', 'receptionist'])));
+create policy availability_blocks_staff_delete on public.clinic_availability_blocks
+  for delete to authenticated
+  using ((select private.has_clinic_access(clinic_id, array['admin', 'clinician', 'receptionist'])));
+
+create index clinic_availability_blocks_branch_fk_idx
+  on public.clinic_availability_blocks (branch_id, clinic_id) where branch_id is not null;
+create index clinic_availability_blocks_provider_fk_idx
+  on public.clinic_availability_blocks (provider_id, clinic_id) where provider_id is not null;
+create index clinic_availability_blocks_created_by_fk_idx
+  on public.clinic_availability_blocks (created_by) where created_by is not null;
+-- <<< END 20261030072602_clinic_availability_policy_tuneup.sql

@@ -6,7 +6,7 @@ import { PGlite } from '@electric-sql/pglite';
 test('mock WhatsApp migration persists clinic and branch settings with admin-only writes', async t => {
   const db = new PGlite();
   t.after(() => db.close());
-  const migration = await readFile(new URL('../../../supabase/migrations/20261029210000_clinic_whatsapp_mock_setup.sql', import.meta.url), 'utf8');
+  const migration = await readFile(new URL('../../../supabase/migrations/20261029225620_clinic_whatsapp_mock_setup.sql', import.meta.url), 'utf8');
   await db.exec(`create role anon; create role authenticated; create role service_role;
     create schema auth; create schema private;
     create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid $$;
