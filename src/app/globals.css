@@ -1402,3 +1402,6 @@ html[data-theme="dark"] .patient-search-options{background:#2b222e;border-color:
 html[data-theme="dark"] .patient-search-options button{color:#f0e5ed}
 html[data-theme="dark"] .patient-search-options button:hover,html[data-theme="dark"] .patient-search-options button.active{background:#463342;color:#f5c9dc}
 html[data-theme="dark"] .patient-search-options button small,html[data-theme="dark"] .patient-search-empty,html[data-theme="dark"] .patient-search-count{color:#b5a4b1}
+/* Keep appointment assignment selects within their two-column modal tracks. */
+.appointment-assignment-grid>label{min-width:0}
+.appointment-assignment-grid select{width:100%;min-width:0;max-width:100%}
