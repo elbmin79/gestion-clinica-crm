@@ -10,7 +10,7 @@ import {
   googleCalendarSettingsUrl,
   GOOGLE_CALENDAR_STATE_COOKIE,
   requireClinicAccess,
-  requireProviderCalendarAccess,
+  getUserGoogleCalendarConnection,
   verifyGoogleCalendarState,
 } from '../../../../../lib/google-calendar.server.js';
 
@@ -46,36 +46,16 @@ export async function GET(request) {
     return clearStateCookie(NextResponse.json({ error: 'La solicitud de autorización venció. Vuelve a conectar Google Calendar.' }, { status: 400 }));
   }
 
-  const access = await requireClinicAccess(state.clinicId, ['admin', 'clinician']);
+  const access = await requireClinicAccess(state.clinicId, ['admin', 'clinician', 'receptionist', 'billing']);
   if (access.error || access.user.id !== state.userId) {
     return clearStateCookie(NextResponse.redirect(googleCalendarSettingsUrl(request.url, 'unauthorized')));
   }
 
   const service = getGoogleServiceClient();
-  if (!state.providerId) {
-    return clearStateCookie(NextResponse.redirect(googleCalendarSettingsUrl(request.url, 'unauthorized')));
-  }
-  const providerAccess = await requireProviderCalendarAccess(service, {
-    clinicId: state.clinicId,
-    providerId: state.providerId,
-    userId: access.user.id,
-    role: access.role,
-  });
-  if (providerAccess.error) {
-    return clearStateCookie(NextResponse.redirect(googleCalendarSettingsUrl(request.url, 'unauthorized')));
-  }
-
   try {
     const token = await exchangeGoogleAuthorizationCode(code, config);
     const account = await getGoogleAccount(token.access_token);
-    const table = 'clinic_provider_google_calendar_connections';
-    const { data: current, error: currentError } = await service
-      .from(table)
-      .select('google_email, refresh_token_ciphertext')
-      .eq('clinic_id', state.clinicId)
-      .eq('provider_id', state.providerId)
-      .maybeSingle();
-    if (currentError) throw new Error('No se pudo leer la conexión anterior de la clínica. Aplica la migración de Google Calendar y vuelve a intentarlo.');
+    const current = await getUserGoogleCalendarConnection(service, state.clinicId, access.user.id);
 
     let encryptedRefreshToken;
     if (token.refresh_token) encryptedRefreshToken = encryptGoogleRefreshToken(token.refresh_token);
@@ -97,15 +77,14 @@ export async function GET(request) {
       connected_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
-    connection.provider_id = state.providerId;
-    const { error: saveError } = await service.from(table).upsert(connection, {
-      onConflict: 'clinic_id,provider_id',
+    const { error: saveError } = await service.from('clinic_google_calendar_connections').upsert(connection, {
+      onConflict: 'clinic_id,connected_by',
     });
     if (saveError) throw new Error('No se pudo guardar la conexión en Supabase. Aplica la migración de Google Calendar y vuelve a intentarlo.');
 
-    const { error: queueError } = await service.rpc('queue_google_calendar_provider_initial_sync', {
+    const { error: queueError } = await service.rpc('queue_google_calendar_user_initial_sync', {
       target_clinic_id: state.clinicId,
-      target_provider_id: state.providerId,
+      target_user_id: access.user.id,
     });
     if (queueError) console.error('Google Calendar initial provider sync could not be queued:', queueError.message);
 
