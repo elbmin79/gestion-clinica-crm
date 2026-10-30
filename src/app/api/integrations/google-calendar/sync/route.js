@@ -9,8 +9,8 @@ export async function POST(request) {
   const clinicId = typeof body?.clinicId === 'string' ? body.clinicId.trim() : '';
   const providerId = typeof body?.providerId === 'string' ? body.providerId.trim() : '';
   const initial = body?.initial === true;
-  if (!clinicId || (initial && !providerId)) return NextResponse.json({ error: 'Falta la clínica o el profesional vinculado a tu cuenta.' }, { status: 400 });
-  const access = await requireClinicAccess(clinicId, providerId ? ['admin', 'clinician'] : ['admin', 'clinician', 'receptionist']);
+  if (!clinicId) return NextResponse.json({ error: 'Falta la clínica.' }, { status: 400 });
+  const access = await requireClinicAccess(clinicId, providerId ? ['admin', 'clinician'] : initial ? ['admin'] : ['admin', 'clinician', 'receptionist']);
   if (access.error) return NextResponse.json({ error: access.error }, { status: access.status });
 
   try {
@@ -21,11 +21,24 @@ export async function POST(request) {
       });
       if (providerAccess.error) return NextResponse.json({ error: providerAccess.error }, { status: providerAccess.status });
     }
+    if (initial && !providerId) {
+      const { data: ownedConnection, error } = await service
+        .from('clinic_google_calendar_connections')
+        .select('connected_by')
+        .eq('clinic_id', clinicId)
+        .eq('connected_by', access.user.id)
+        .maybeSingle();
+      if (error) throw error;
+      if (!ownedConnection) return NextResponse.json({ error: 'No tienes un calendario compartido conectado para sincronizar.' }, { status: 404 });
+    }
     if (initial && providerId) {
       const { error } = await service.rpc('queue_google_calendar_provider_initial_sync', {
         target_clinic_id: clinicId,
         target_provider_id: providerId,
       });
+      if (error) throw new Error('No se pudo preparar la primera sincronización. Aplica la migración de Google Calendar.');
+    } else if (initial) {
+      const { error } = await service.rpc('queue_google_calendar_initial_sync', { target_clinic_id: clinicId });
       if (error) throw new Error('No se pudo preparar la primera sincronización. Aplica la migración de Google Calendar.');
     }
     const result = await runGoogleCalendarSync(service, { clinicId, providerId: providerId || null, limit: initial ? 20 : 8 });

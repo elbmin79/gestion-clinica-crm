@@ -64,6 +64,15 @@ export async function GET(request) {
     }
   } else if (access.role !== 'admin') {
     return clearStateCookie(NextResponse.redirect(googleCalendarSettingsUrl(request.url, 'unauthorized')));
+  } else {
+    const { data: existing, error } = await service
+      .from('clinic_google_calendar_connections')
+      .select('connected_by')
+      .eq('clinic_id', state.clinicId)
+      .maybeSingle();
+    if (error || (existing && existing.connected_by !== access.user.id)) {
+      return clearStateCookie(NextResponse.redirect(googleCalendarSettingsUrl(request.url, 'unauthorized')));
+    }
   }
 
   try {

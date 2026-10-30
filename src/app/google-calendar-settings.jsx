@@ -16,7 +16,7 @@ function formatDate(value, style = 'short') {
   return new Intl.DateTimeFormat('es-MX', { dateStyle: style, timeStyle: 'short' }).format(new Date(value));
 }
 
-function ProviderCalendarRow({ clinicId, provider, connect, disconnect, sync, syncing }) {
+function ProviderCalendarRow({ clinicId, provider, connect, disconnect, sync, syncing, busy }) {
   const connection = provider.connection;
   const [calendars, setCalendars] = useState([]);
   const [loadingCalendars, setLoadingCalendars] = useState(false);
@@ -90,7 +90,7 @@ function ProviderCalendarRow({ clinicId, provider, connect, disconnect, sync, sy
       </> : <span>{provider.active ? 'Conecta tu cuenta para sincronizar las citas asignadas a este profesional.' : 'Profesional inactivo.'}</span>}
     </div>
     <div className="google-provider-calendar-actions">
-      {connection && <button className="button outline compact" type="button" onClick={() => sync(provider.id, true)} disabled={busy || syncing || savingCalendar}><RefreshCw size={14}/>{syncing ? 'Sincronizando…' : 'Sincronizar'}</button>}
+      {connection && <button className="button outline compact" type="button" onClick={() => sync(provider.id, true)} disabled={busy || syncing || savingCalendar}><RefreshCw size={14}/>{syncing ? 'Sincronizando…' : 'Resincronizar citas'}</button>}
       <button className={`button ${connection ? 'secondary' : 'primary'} compact`} type="button" onClick={() => connect(provider.id, Boolean(connection))} disabled={busy || syncing || !provider.active}>
         {connection ? <><Link2 size={14}/> Cambiar cuenta</> : <><Link2 size={14}/> Conectar Google</>}
       </button>
@@ -105,6 +105,7 @@ export default function GoogleCalendarSettings({ clinicId, role, sharedMode }) {
   const [busy, setBusy] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncingProviderId, setSyncingProviderId] = useState('');
+  const [clinicConnection, setClinicConnection] = useState(null);
   const [providers, setProviders] = useState([]);
   const [history, setHistory] = useState([]);
   const [error, setError] = useState('');
@@ -121,6 +122,7 @@ export default function GoogleCalendarSettings({ clinicId, role, sharedMode }) {
       const response = await fetch(`/api/integrations/google-calendar/status?clinicId=${encodeURIComponent(clinicId)}`, { cache: 'no-store' });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || 'No se pudo consultar la conexión.');
+      setClinicConnection(result.clinicConnection || null);
       setProviders(result.providers || []);
       setHistory(result.history || []);
       setNotice(callbackMessage());
@@ -136,14 +138,12 @@ export default function GoogleCalendarSettings({ clinicId, role, sharedMode }) {
   const connect = (providerId = '', replacing = false) => {
     if (!clinicId) return;
     if (replacing && !window.confirm('Al cambiar la cuenta, los eventos ya creados en el calendario anterior permanecerán allí. ¿Continuar?')) return;
-    if (!providerId) return;
-    const providerQuery = `&providerId=${encodeURIComponent(providerId)}`;
+    const providerQuery = providerId ? `&providerId=${encodeURIComponent(providerId)}` : '';
     window.location.assign(`/api/integrations/google-calendar/connect?clinicId=${encodeURIComponent(clinicId)}${providerQuery}`);
   };
 
   const disconnect = async (providerId = '', providerName = '') => {
-    if (!providerId) return;
-    const label = `el calendario de ${providerName}`;
+    const label = providerId ? `el calendario de ${providerName}` : 'tu cuenta de Google';
     if (!window.confirm(`¿Desconectar ${label}? Los eventos ya creados permanecerán en Google Calendar.`)) return;
     setBusy(true); setError(''); setNotice('');
     try {
@@ -164,7 +164,6 @@ export default function GoogleCalendarSettings({ clinicId, role, sharedMode }) {
   };
 
   const sync = async (providerId = '', initial = false) => {
-    if (!providerId) return;
     setSyncing(true);
     if (providerId) setSyncingProviderId(providerId);
     setError(''); setNotice('');
@@ -198,8 +197,26 @@ export default function GoogleCalendarSettings({ clinicId, role, sharedMode }) {
     {error && <p className="professional-error" role="alert"><CircleAlert size={15}/>{error}</p>}
     <div className="settings-preview-banner"><CalendarDays size={17}/><div><strong>Conecta tu calendario de Google</strong><span>Solo verás y administrarás el calendario vinculado a tu cuenta CRM. Puedes elegir un calendario compartido si tu cuenta Google tiene permiso de edición. Los eventos usan títulos genéricos y no incluyen datos del paciente.</span></div></div>
     {loading ? <p className="whatsapp-settings-loading"><LoaderCircle size={16}/> Consultando conexiones…</p> : <>
-      <section className="google-provider-calendar-section">
-        <div className="google-calendar-section-heading"><div><strong>Mi calendario</strong><span>Aquí solo aparece el profesional vinculado a tu cuenta.</span></div></div>
+      {role === 'admin' && <section className="google-clinic-calendar-section">
+        <div className="google-calendar-section-heading"><div><strong>Mi cuenta Google</strong><span>Controla la cuenta de Google conectada por tu usuario.</span></div><span className="settings-option-status">{clinicConnection ? 'Conectada' : 'Sin conectar'}</span></div>
+        {clinicConnection ? <>
+          <div className="google-clinic-calendar-account">
+            <span>{clinicConnection.google_email} · {clinicConnection.calendar_id === 'primary' ? 'Calendario principal' : clinicConnection.calendar_id}</span>
+            {clinicConnection.last_sync_error && <span className="google-provider-calendar-error"><CircleAlert size={13}/>{clinicConnection.last_sync_error}</span>}
+            <small>{clinicConnection.last_synced_at ? `Última sincronización: ${formatDate(clinicConnection.last_synced_at)}` : 'La cuenta está conectada; aún no hay sincronizaciones registradas.'}</small>
+          </div>
+          <div className="google-provider-calendar-actions">
+            <button className="button outline compact" type="button" onClick={() => sync('', true)} disabled={busy || syncing}><RefreshCw size={14}/>{syncing ? 'Sincronizando…' : 'Resincronizar citas'}</button>
+            <button className="button secondary compact" type="button" onClick={() => connect('', true)} disabled={busy || syncing}><Link2 size={14}/> Cambiar cuenta</button>
+            <button className="button secondary compact" type="button" onClick={() => disconnect()} disabled={busy || syncing}><Unlink size={14}/> Desvincular</button>
+            <a className="button outline compact" href="https://calendar.google.com" target="_blank" rel="noreferrer"><ExternalLink size={14}/> Abrir Google Calendar</a>
+          </div>
+        </> : <div className="google-provider-calendar-actions">
+          <button className="button primary compact" type="button" onClick={() => connect()} disabled={busy || syncing}><Link2 size={14}/> Vincular Google Calendar</button>
+        </div>}
+      </section>}
+      {(providers.length > 0 || role === 'clinician') && <section className="google-provider-calendar-section">
+        <div className="google-calendar-section-heading"><div><strong>Mi perfil profesional</strong><span>Aquí solo aparecen los perfiles profesionales vinculados a tu cuenta.</span></div></div>
         {providers.length ? providers.map(provider => <ProviderCalendarRow
           key={provider.id}
           clinicId={clinicId}
@@ -208,8 +225,9 @@ export default function GoogleCalendarSettings({ clinicId, role, sharedMode }) {
           disconnect={disconnect}
           sync={sync}
           syncing={syncingProviderId === provider.id}
-        />) : <p className="google-calendar-empty">{role === 'admin' ? 'Tu cuenta CRM aún no está vinculada a un perfil profesional. Vincúlala en Equipo y sucursales para conectar tu calendario.' : 'Tu cuenta CRM aún no está vinculada a un perfil profesional. Pide a administración que vincule tu usuario para conectar tu calendario.'}</p>}
-      </section>
+          busy={busy}
+        />) : <p className="google-calendar-empty">{role === 'admin' ? 'Tu cuenta CRM aún no está vinculada a un perfil profesional. Vincúlala en Equipo y sucursales si también tienes citas asignadas a un perfil.' : 'Tu cuenta CRM aún no está vinculada a un perfil profesional. Pide a administración que vincule tu usuario para conectar tu calendario.'}</p>}
+      </section>}
 
       {history.length > 0 && <div className="settings-option-list google-calendar-history"><div className="settings-option-row"><div><strong>Últimos intentos</strong><span>{history.slice(0, 5).map((item, index) => <span key={`${item.created_at}-${index}`} className="google-sync-history-item">{item.status === 'succeeded' ? 'Correcta' : item.status === 'failed' ? 'Fallida' : item.status === 'processing' ? 'En curso' : 'Pendiente'} · {formatDate(item.updated_at || item.created_at)}{item.last_error ? ` · ${item.last_error}` : ''}</span>)}</span></div><span className="settings-option-status">Historial</span></div></div>}
     </>}

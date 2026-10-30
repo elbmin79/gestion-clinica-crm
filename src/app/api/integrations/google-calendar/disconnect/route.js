@@ -7,21 +7,34 @@ export async function POST(request) {
   const body = await request.json().catch(() => null);
   const clinicId = typeof body?.clinicId === 'string' ? body.clinicId.trim() : '';
   const providerId = typeof body?.providerId === 'string' ? body.providerId.trim() : '';
-  if (!clinicId || !providerId) return NextResponse.json({ error: 'Falta la clínica o el profesional vinculado a tu cuenta.' }, { status: 400 });
+  if (!clinicId) return NextResponse.json({ error: 'Falta la clínica.' }, { status: 400 });
   const access = await requireClinicAccess(clinicId, ['admin', 'clinician']);
   if (access.error) return NextResponse.json({ error: access.error }, { status: access.status });
   try {
     const service = getGoogleServiceClient();
-    const providerAccess = await requireProviderCalendarAccess(service, {
-      clinicId, providerId, userId: access.user.id, role: access.role,
-    });
-    if (providerAccess.error) return NextResponse.json({ error: providerAccess.error }, { status: providerAccess.status });
-    const table = 'clinic_provider_google_calendar_connections';
+    let table = 'clinic_provider_google_calendar_connections';
+    if (providerId) {
+      const providerAccess = await requireProviderCalendarAccess(service, {
+        clinicId, providerId, userId: access.user.id, role: access.role,
+      });
+      if (providerAccess.error) return NextResponse.json({ error: providerAccess.error }, { status: providerAccess.status });
+    } else {
+      if (access.role !== 'admin') return NextResponse.json({ error: 'Solo administración puede desconectar el calendario compartido de la clínica.' }, { status: 403 });
+      const { data: ownedConnection, error: ownershipError } = await service
+        .from('clinic_google_calendar_connections')
+        .select('connected_by')
+        .eq('clinic_id', clinicId)
+        .eq('connected_by', access.user.id)
+        .maybeSingle();
+      if (ownershipError) throw ownershipError;
+      if (!ownedConnection) return NextResponse.json({ error: 'No tienes una cuenta de Google conectada para esta clínica.' }, { status: 404 });
+      table = 'clinic_google_calendar_connections';
+    }
     let connectionQuery = service
       .from(table)
       .select('refresh_token_ciphertext')
       .eq('clinic_id', clinicId);
-    connectionQuery = connectionQuery.eq('provider_id', providerId);
+    connectionQuery = providerId ? connectionQuery.eq('provider_id', providerId) : connectionQuery.eq('connected_by', access.user.id);
     const { data, error } = await connectionQuery.maybeSingle();
     if (error) throw error;
     if (data?.refresh_token_ciphertext) {
@@ -34,11 +47,11 @@ export async function POST(request) {
       }).catch(() => {});
     }
     let linksQuery = service.from('clinic_google_calendar_event_links').delete().eq('clinic_id', clinicId);
-    linksQuery = linksQuery.eq('provider_id', providerId);
+    linksQuery = providerId ? linksQuery.eq('provider_id', providerId) : linksQuery.is('provider_id', null);
     const { error: linksError } = await linksQuery;
     if (linksError) throw linksError;
     let deleteQuery = service.from(table).delete().eq('clinic_id', clinicId);
-    deleteQuery = deleteQuery.eq('provider_id', providerId);
+    deleteQuery = providerId ? deleteQuery.eq('provider_id', providerId) : deleteQuery.eq('connected_by', access.user.id);
     const { error: deleteError } = await deleteQuery;
     if (deleteError) throw deleteError;
     return NextResponse.json({ ok: true });
