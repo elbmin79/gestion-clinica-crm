@@ -9,8 +9,8 @@ export async function POST(request) {
   const clinicId = typeof body?.clinicId === 'string' ? body.clinicId.trim() : '';
   const providerId = typeof body?.providerId === 'string' ? body.providerId.trim() : '';
   const initial = body?.initial === true;
-  if (!clinicId) return NextResponse.json({ error: 'Falta la clínica.' }, { status: 400 });
-  const access = await requireClinicAccess(clinicId, providerId ? ['admin', 'clinician'] : initial ? ['admin'] : ['admin', 'clinician', 'receptionist']);
+  if (!clinicId || (initial && !providerId)) return NextResponse.json({ error: 'Falta la clínica o el profesional vinculado a tu cuenta.' }, { status: 400 });
+  const access = await requireClinicAccess(clinicId, providerId ? ['admin', 'clinician'] : ['admin', 'clinician', 'receptionist']);
   if (access.error) return NextResponse.json({ error: access.error }, { status: access.status });
 
   try {
@@ -27,16 +27,15 @@ export async function POST(request) {
         target_provider_id: providerId,
       });
       if (error) throw new Error('No se pudo preparar la primera sincronización. Aplica la migración de Google Calendar.');
-    } else if (initial) {
-      const { error } = await service.rpc('queue_google_calendar_initial_sync', { target_clinic_id: clinicId });
-      if (error) throw new Error('No se pudo preparar la primera sincronización. Aplica la migración de Google Calendar.');
     }
     const result = await runGoogleCalendarSync(service, { clinicId, providerId: providerId || null, limit: initial ? 20 : 8 });
-    const { count, error: queueError } = await service
+    let queueQuery = service
       .from('clinic_google_calendar_sync_jobs')
       .select('id', { count: 'exact', head: true })
       .eq('clinic_id', clinicId)
       .eq('status', 'queued');
+    if (providerId) queueQuery = queueQuery.eq('target_provider_id', providerId);
+    const { count, error: queueError } = await queueQuery;
     if (queueError) throw queueError;
     return NextResponse.json({ ok: true, ...result, queued: count || 0 });
   } catch (error) {

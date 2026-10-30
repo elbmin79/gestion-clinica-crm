@@ -14,14 +14,11 @@ export async function GET(request) {
   const access = await requireClinicAccess(clinicId, ['admin', 'clinician']);
   if (access.error) return NextResponse.json({ error: access.error }, { status: access.status });
   const service = getGoogleServiceClient();
-  if (providerId) {
-    const providerAccess = await requireProviderCalendarAccess(service, {
-      clinicId, providerId, userId: access.user.id, role: access.role,
-    });
-    if (providerAccess.error) return NextResponse.json({ error: providerAccess.error }, { status: providerAccess.status });
-  } else if (access.role !== 'admin') {
-    return NextResponse.json({ error: 'Solo una persona administradora puede conectar el calendario compartido de la clínica.' }, { status: 403 });
-  }
+  if (!providerId) return NextResponse.json({ error: 'Selecciona el profesional vinculado a tu cuenta.' }, { status: 400 });
+  const providerAccess = await requireProviderCalendarAccess(service, {
+    clinicId, providerId, userId: access.user.id, role: access.role,
+  });
+  if (providerAccess.error) return NextResponse.json({ error: providerAccess.error }, { status: providerAccess.status });
 
   const nonce = randomBytes(32).toString('base64url');
   const { url, state } = createGoogleOAuthAuthorizationUrl({

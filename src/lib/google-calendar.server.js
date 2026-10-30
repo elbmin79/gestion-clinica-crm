@@ -175,7 +175,7 @@ export async function requireProviderCalendarAccess(service, { clinicId, provide
     .maybeSingle();
   if (error) return { error: 'No se pudo validar el profesional seleccionado.', status: 503 };
   if (!provider) return { error: 'El profesional no pertenece a esta clínica.', status: 404 };
-  if (role !== 'admin' && provider.user_id !== userId) {
+  if (provider.user_id !== userId) {
     return { error: 'Solo puedes conectar el calendario del profesional vinculado a tu cuenta.', status: 403 };
   }
   return { provider };

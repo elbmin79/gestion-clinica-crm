@@ -14,10 +14,10 @@ export async function GET(request) {
       .from('clinic_providers')
       .select('id, name, user_id, active')
       .eq('clinic_id', clinicId)
+      .eq('user_id', access.user.id)
       .order('name');
     if (providerError) throw providerError;
-    const visibleProviders = (providerRows || []).filter(provider =>
-      access.role === 'admin' || provider.user_id === access.user.id);
+    const visibleProviders = providerRows || [];
     const providerIds = visibleProviders.map(provider => provider.id);
     let providerConnections = [];
     if (providerIds.length) {
@@ -29,23 +29,14 @@ export async function GET(request) {
       if (error) throw error;
       providerConnections = data || [];
     }
-    let clinicConnection = null;
-    if (access.role === 'admin') {
-      const { data, error } = await service
-        .from('clinic_google_calendar_connections')
-        .select('google_email, calendar_id, connected_at, last_synced_at, last_sync_status, last_sync_error')
-        .eq('clinic_id', clinicId)
-        .maybeSingle();
-      if (error) throw error;
-      clinicConnection = data || null;
-    }
     let history = [];
     let queued = 0;
-    if (access.role === 'admin') {
+    if (providerIds.length) {
       const { data, error: historyError } = await service
         .from('clinic_google_calendar_sync_jobs')
         .select('status, attempts, last_error, created_at, updated_at, completed_at')
         .eq('clinic_id', clinicId)
+        .in('target_provider_id', providerIds)
         .order('created_at', { ascending: false })
         .limit(8);
       if (historyError) throw historyError;
@@ -54,6 +45,7 @@ export async function GET(request) {
         .from('clinic_google_calendar_sync_jobs')
         .select('id', { count: 'exact', head: true })
         .eq('clinic_id', clinicId)
+        .in('target_provider_id', providerIds)
         .eq('status', 'queued');
       if (queueError) throw queueError;
       queued = count || 0;
@@ -66,12 +58,12 @@ export async function GET(request) {
       connection: connectionByProvider.get(provider.id) || null,
     }));
     return NextResponse.json({
-      connected: Boolean(clinicConnection || providerConnections.length),
-      clinicConnection,
+      connected: Boolean(providerConnections.length),
+      clinicConnection: null,
       providers,
       history,
       queued,
-      canManageClinicConnection: access.role === 'admin',
+      canManageClinicConnection: false,
     }, { headers: { 'Cache-Control': 'no-store' } });
   } catch {
     return NextResponse.json({ error: 'No se pudo cargar el estado de Google Calendar. Revisa que la migración esté aplicada.' }, { status: 503 });
