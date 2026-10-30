@@ -208,6 +208,13 @@ async function deleteCalendarEvent(accessToken, connection, appointmentId) {
 }
 
 export async function runGoogleCalendarSync(service, { clinicId = null, limit = 10 } = {}) {
+  // Local dev shares Supabase with production but usually has no Google secrets.
+  // Do not claim production sync jobs in that environment, because failures
+  // would overwrite the shared connection's status and leave jobs for cron.
+  if (process.env.NODE_ENV !== 'production' && !googleCalendarConfig()) {
+    throw new Error('Google Calendar sync skipped: this non-production server has no Google Calendar configuration.');
+  }
+
   const { data: jobs, error: claimError } = await service.rpc('claim_google_calendar_sync_jobs', {
     target_clinic_id: clinicId,
     target_limit: limit,
