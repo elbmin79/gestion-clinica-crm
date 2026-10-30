@@ -120,6 +120,17 @@ function throwDatabaseError(result, label) {
   throw error;
 }
 
+function notifyGoogleCalendarSync(clinicId) {
+  if (typeof window === 'undefined') return;
+  void fetch('/api/integrations/google-calendar/sync', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ clinicId }),
+    keepalive: true,
+  }).catch(() => {});
+}
+
 export function agendaQueryRange(date, period, timeZone, listEnd) {
   const range = rangeFor(date, period, timeZone);
   if (period === 'Lista' && listEnd >= date) range.to = rangeFor(listEnd, 'Día', timeZone).to;
@@ -173,6 +184,7 @@ export function createClinicAgendaStore({ clientFactory = createClient } = {}) {
         note: input.note.trim() || null,
       }).select('id').single();
       throwDatabaseError(result, 'No se pudo guardar la cita. Revisa el horario, la asignación del profesional y tus permisos.');
+      notifyGoogleCalendarSync(clinicId);
       return result.data;
     },
 
@@ -195,6 +207,7 @@ export function createClinicAgendaStore({ clientFactory = createClient } = {}) {
         status: statusToDatabase[input.status] || 'pending',
       }).eq('clinic_id', clinicId).eq('id', appointment.id).select('id').single();
       throwDatabaseError(result, 'No se pudo actualizar la cita. Revisa el horario y tus permisos.');
+      notifyGoogleCalendarSync(clinicId);
       return result.data;
     },
   };
