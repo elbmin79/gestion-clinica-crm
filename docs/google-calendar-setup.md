@@ -1,6 +1,6 @@
 # Google Calendar OAuth setup
 
-The integration lets a clinic administrator connect a Google account, then syncs future appointment events from the CRM to that account's primary calendar. Sync is one-way: Google Calendar edits do not change CRM appointments. Events use a generic title and description and omit patient names, notes, diagnoses, and service details. Cancellations remove the matching CRM-created Google event; disconnecting leaves already-synced events in Google Calendar.
+Each professional can connect a Google account and select a calendar where that account has write access. Multiple professionals can select the same shared Google Calendar. A clinic-wide connection remains available as a fallback for professionals without an individual connection. Sync is one-way: Google Calendar edits do not change CRM appointments. Events use a generic title and description and omit patient names, notes, diagnoses, and service details. Cancellations remove the matching CRM-created Google event; disconnecting leaves already-synced events in Google Calendar.
 
 ## Google Cloud
 
@@ -19,12 +19,13 @@ The OAuth request uses these scopes:
 ```text
 openid
 email
-https://www.googleapis.com/auth/calendar.events.owned
+https://www.googleapis.com/auth/calendar.events
+https://www.googleapis.com/auth/calendar.calendarlist.readonly
 ```
 
-Add the Calendar scope under **Google Auth Platform → Data Access** before testing the consent flow.
+Add both Calendar scopes under **Google Auth Platform → Data Access** before testing the consent flow. The events scope is needed to write to calendars shared with the authorizing account; the calendar-list scope lets the CRM offer calendars the account can edit. Google accounts must have **Make changes to events** access to a shared calendar. After deploying the scope change, each account must reconnect and grant the updated access.
 
-This limited scope allows the CRM to create, update, and delete events on calendars owned by the authorizing account. Google documents it as an event access scope; production OAuth verification may be required for external users.
+The CRM only writes to the calendar selected for the professional's appointments. Google classifies Calendar event access as sensitive user data, so production OAuth verification may be required for external users.
 
 The app requests offline access so it can keep syncing without the user present.
 
@@ -56,8 +57,8 @@ Do not commit the generated key or OAuth client JSON. Changing the encryption ke
 
 ## Database
 
-Apply `supabase/migrations/20261030033604_google_calendar_oauth.sql` to the connected Supabase project before using the Connect button. The OAuth and sync-job tables are inaccessible to browser roles; server routes validate clinic membership and use the service-role client only after that check. Appointment writes enqueue sync jobs in the database. The authenticated sync endpoint handles new changes immediately, and `vercel.json` schedules a daily retry sweep (Vercel Hobby cadence). More frequent scheduled retries require a Vercel plan that supports them.
+Apply the Google Calendar OAuth and provider-calendar migrations in `supabase/migrations/` to the connected Supabase project before using Connect. The OAuth and sync-job tables are inaccessible to browser roles; server routes validate clinic membership and provider assignment before using the service-role client. Appointment writes enqueue sync jobs in the database. The authenticated sync endpoint handles new changes immediately, and `vercel.json` schedules a daily retry sweep (Vercel Hobby cadence). More frequent scheduled retries require a Vercel plan that supports them.
 
-After adding the environment variables and applying the migration, redeploy Vercel. In the CRM, open **Configuración → Google Calendar → Conectar Google Calendar** and authorize the clinic's Google account. Use **Sincronizar citas** for the first pass; it queues upcoming appointments for the next 90 days.
+After adding the environment variables, updating the Google consent scopes, and applying the migrations, redeploy Vercel. In **Configuración → Google Calendar**, each professional can connect their Google account and select a writable calendar. The clinic administrator can also connect an optional shared fallback calendar. Use **Sincronizar** to queue upcoming appointments for that professional for the next 90 days.
 
 Google's public OAuth verification also requires the domains used for app branding and redirect URIs to be verified. The Vercel hostname can be used for development and initial authorization, but a custom domain owned by the clinic may be needed for public production verification.

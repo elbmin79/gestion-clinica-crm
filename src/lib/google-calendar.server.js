@@ -9,7 +9,8 @@ export const GOOGLE_CALENDAR_STATE_COOKIE = 'clinic_google_calendar_oauth_state'
 export const GOOGLE_CALENDAR_SCOPES = [
   'openid',
   'email',
-  'https://www.googleapis.com/auth/calendar.events.owned',
+  'https://www.googleapis.com/auth/calendar.events',
+  'https://www.googleapis.com/auth/calendar.calendarlist.readonly',
 ];
 
 export function googleCalendarConfig() {
@@ -81,22 +82,22 @@ export async function requireClinicAccess(clinicId, allowedRoles = ['admin']) {
     .maybeSingle();
   if (error) return { error: 'No se pudo validar el acceso a la clínica.', status: 503 };
   if (!allowedRoles.includes(membership?.role)) return { error: 'Tu rol no tiene acceso a esta acción de Google Calendar.', status: 403 };
-  return { supabase, user };
+  return { supabase, user, role: membership.role };
 }
 
 export function requireClinicAdmin(clinicId) {
   return requireClinicAccess(clinicId, ['admin']);
 }
 
-export function createGoogleOAuthAuthorizationUrl({ clinicId, userId, nonce, clientSecret, clientId, redirectUri }) {
-  const state = signGoogleCalendarState({ clinicId, userId, nonce, exp: Date.now() + 10 * 60 * 1000 }, clientSecret);
+export function createGoogleOAuthAuthorizationUrl({ clinicId, providerId = null, userId, nonce, clientSecret, clientId, redirectUri }) {
+  const state = signGoogleCalendarState({ clinicId, providerId, userId, nonce, exp: Date.now() + 10 * 60 * 1000 }, clientSecret);
   const url = new URL('https://accounts.google.com/o/oauth2/v2/auth');
   url.searchParams.set('client_id', clientId);
   url.searchParams.set('redirect_uri', redirectUri);
   url.searchParams.set('response_type', 'code');
   url.searchParams.set('scope', GOOGLE_CALENDAR_SCOPES.join(' '));
   url.searchParams.set('access_type', 'offline');
-  url.searchParams.set('prompt', 'consent');
+  url.searchParams.set('prompt', 'consent select_account');
   url.searchParams.set('include_granted_scopes', 'true');
   url.searchParams.set('state', state);
   return { url, state };
@@ -133,6 +134,102 @@ export async function getGoogleAccount(accessToken) {
     throw new Error('Google no devolvió una cuenta verificada.');
   }
   return user;
+}
+
+export async function getGoogleCalendars(accessToken) {
+  const calendars = [];
+  let pageToken = '';
+  do {
+    const url = new URL('https://www.googleapis.com/calendar/v3/users/me/calendarList');
+    url.searchParams.set('minAccessRole', 'writer');
+    url.searchParams.set('showHidden', 'true');
+    url.searchParams.set('maxResults', '250');
+    if (pageToken) url.searchParams.set('pageToken', pageToken);
+    const response = await fetch(url, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      cache: 'no-store',
+    });
+    const result = await response.json().catch(() => null);
+    if (!response.ok || !Array.isArray(result?.items)) {
+      throw new Error('No se pudieron consultar los calendarios con permiso de edición. Vuelve a autorizar Google Calendar.');
+    }
+    calendars.push(...result.items.map(item => ({
+      id: item.id,
+      summary: item.summary || item.id,
+      primary: item.primary === true,
+      accessRole: item.accessRole,
+      timeZone: item.timeZone || '',
+    })).filter(item => item.id && ['owner', 'writer'].includes(item.accessRole)));
+    pageToken = result.nextPageToken || '';
+  } while (pageToken);
+  return calendars;
+}
+
+export async function requireProviderCalendarAccess(service, { clinicId, providerId, userId, role }) {
+  if (!providerId) return { error: 'Selecciona un profesional.', status: 400 };
+  const { data: provider, error } = await service
+    .from('clinic_providers')
+    .select('id, name, user_id, active')
+    .eq('clinic_id', clinicId)
+    .eq('id', providerId)
+    .maybeSingle();
+  if (error) return { error: 'No se pudo validar el profesional seleccionado.', status: 503 };
+  if (!provider) return { error: 'El profesional no pertenece a esta clínica.', status: 404 };
+  if (role !== 'admin' && provider.user_id !== userId) {
+    return { error: 'Solo puedes conectar el calendario del profesional vinculado a tu cuenta.', status: 403 };
+  }
+  return { provider };
+}
+
+export async function getProviderGoogleCalendarConnection(service, clinicId, providerId) {
+  const { data, error } = await service
+    .from('clinic_provider_google_calendar_connections')
+    .select('clinic_id, provider_id, google_email, calendar_id, refresh_token_ciphertext, connected_by, connected_at, updated_at, last_synced_at, last_sync_status, last_sync_error')
+    .eq('clinic_id', clinicId)
+    .eq('provider_id', providerId)
+    .maybeSingle();
+  if (error) throw error;
+  return data || null;
+}
+
+export async function getGoogleCalendarConnection(service, clinicId, providerId) {
+  if (providerId) {
+    const providerConnection = await getProviderGoogleCalendarConnection(service, clinicId, providerId);
+    if (providerConnection) return providerConnection;
+  }
+  const { data, error } = await service
+    .from('clinic_google_calendar_connections')
+    .select('clinic_id, google_email, calendar_id, refresh_token_ciphertext, connected_by, connected_at, updated_at, last_synced_at, last_sync_status, last_sync_error')
+    .eq('clinic_id', clinicId)
+    .maybeSingle();
+  if (error) throw error;
+  return data ? { ...data, provider_id: null } : null;
+}
+
+async function getConnectionForEventLink(service, clinicId, eventLink) {
+  if (!eventLink) return null;
+  const connection = eventLink.provider_id
+    ? await getProviderGoogleCalendarConnection(service, clinicId, eventLink.provider_id)
+    : await getGoogleCalendarConnection(service, clinicId, null);
+  return connection?.google_email?.toLowerCase() === eventLink.google_email?.toLowerCase() ? connection : null;
+}
+
+function calendarMatchesConnection(eventLink, connection) {
+  return Boolean(eventLink && connection
+    && eventLink.calendar_id === connection.calendar_id
+    && (eventLink.calendar_id !== 'primary'
+      || eventLink.google_email?.toLowerCase() === connection.google_email?.toLowerCase()));
+}
+
+async function saveConnectionSyncState(service, connection, values) {
+  if (!connection) return;
+  if (connection.provider_id) {
+    await service.from('clinic_provider_google_calendar_connections').update(values)
+      .eq('clinic_id', connection.clinic_id).eq('provider_id', connection.provider_id);
+  } else {
+    await service.from('clinic_google_calendar_connections').update(values)
+      .eq('clinic_id', connection.clinic_id);
+  }
 }
 
 export async function getGoogleAccessToken(connection) {
@@ -207,7 +304,7 @@ async function deleteCalendarEvent(accessToken, connection, appointmentId) {
   throw new Error(`Google Calendar API devolvió ${response.status}.`);
 }
 
-export async function runGoogleCalendarSync(service, { clinicId = null, limit = 10 } = {}) {
+export async function runGoogleCalendarSync(service, { clinicId = null, providerId = null, limit = 10 } = {}) {
   // Local dev shares Supabase with production but usually has no Google secrets.
   // Do not claim production sync jobs in that environment, because failures
   // would overwrite the shared connection's status and leave jobs for cron.
@@ -218,36 +315,72 @@ export async function runGoogleCalendarSync(service, { clinicId = null, limit = 
   const { data: jobs, error: claimError } = await service.rpc('claim_google_calendar_sync_jobs', {
     target_clinic_id: clinicId,
     target_limit: limit,
+    target_provider_id: providerId,
   });
   if (claimError) throw new Error('No se pudieron reclamar las tareas de Google Calendar. Aplica la migración y vuelve a intentarlo.');
 
   const accessTokens = new Map();
+  const accessTokenFor = async connection => {
+    const key = `${connection.provider_id || 'clinic'}:${connection.google_email}:${connection.calendar_id}`;
+    let token = accessTokens.get(key);
+    if (!token) {
+      token = await getGoogleAccessToken(connection);
+      accessTokens.set(key, token);
+    }
+    return token;
+  };
   let succeeded = 0;
   let failed = 0;
   for (const job of jobs || []) {
-    let failure = '';
+    let connection = null;
+    let previousConnection = null;
     try {
-      const { data: connection, error: connectionError } = await service
-        .from('clinic_google_calendar_connections')
-        .select('clinic_id, calendar_id, refresh_token_ciphertext')
-        .eq('clinic_id', job.clinic_id)
-        .maybeSingle();
-      if (connectionError || !connection) throw new Error('Google Calendar ya no está conectado para esta clínica.');
-      let accessToken = accessTokens.get(job.clinic_id);
-      if (!accessToken) {
-        accessToken = await getGoogleAccessToken(connection);
-        accessTokens.set(job.clinic_id, accessToken);
-      }
       const { data: appointment, error: appointmentError } = await service
         .from('appointments')
-        .select('id, clinic_id, starts_at, ends_at, status')
+        .select('id, clinic_id, provider_id, starts_at, ends_at, status')
         .eq('clinic_id', job.clinic_id)
         .eq('id', job.appointment_id)
         .maybeSingle();
       if (appointmentError || !appointment) throw new Error('La cita no está disponible para sincronizar.');
 
-      if (appointment.status === 'cancelled') await deleteCalendarEvent(accessToken, connection, appointment.id);
-      else if (appointment.status !== 'completed') await upsertCalendarEvent(accessToken, connection, appointment);
+      const { data: eventLink, error: linkError } = await service
+        .from('clinic_google_calendar_event_links')
+        .select('provider_id, calendar_id, google_email')
+        .eq('clinic_id', job.clinic_id)
+        .eq('appointment_id', appointment.id)
+        .maybeSingle();
+      if (linkError) throw new Error('No se pudo consultar el destino anterior de la cita.');
+
+      connection = await getGoogleCalendarConnection(service, job.clinic_id, appointment.provider_id);
+      previousConnection = await getConnectionForEventLink(service, job.clinic_id, eventLink);
+
+      if (appointment.status === 'cancelled') {
+        const deleteConnection = previousConnection || (calendarMatchesConnection(eventLink, connection) ? connection : !eventLink ? connection : null);
+        if (deleteConnection) await deleteCalendarEvent(await accessTokenFor(deleteConnection), deleteConnection, appointment.id);
+        await service.from('clinic_google_calendar_event_links').delete()
+          .eq('clinic_id', job.clinic_id).eq('appointment_id', appointment.id);
+      } else if (appointment.status !== 'completed' && !connection) {
+        if (eventLink && previousConnection) {
+          await deleteCalendarEvent(await accessTokenFor(previousConnection), previousConnection, appointment.id);
+        }
+        await service.from('clinic_google_calendar_event_links').delete()
+          .eq('clinic_id', job.clinic_id).eq('appointment_id', appointment.id);
+      } else if (appointment.status !== 'completed') {
+        const sameCalendar = calendarMatchesConnection(eventLink, connection);
+        if (eventLink && !sameCalendar && previousConnection) {
+          await deleteCalendarEvent(await accessTokenFor(previousConnection), previousConnection, appointment.id);
+        }
+        await upsertCalendarEvent(await accessTokenFor(connection), connection, appointment);
+        const { error: linkUpdateError } = await service.from('clinic_google_calendar_event_links').upsert({
+          clinic_id: job.clinic_id,
+          appointment_id: appointment.id,
+          provider_id: connection.provider_id || null,
+          calendar_id: connection.calendar_id,
+          google_email: connection.google_email,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'clinic_id,appointment_id' });
+        if (linkUpdateError) throw new Error('No se pudo guardar el destino del evento.');
+      }
 
       const now = new Date().toISOString();
       const { error: updateError } = await service
@@ -255,15 +388,15 @@ export async function runGoogleCalendarSync(service, { clinicId = null, limit = 
         .update({ status: 'succeeded', completed_at: now, updated_at: now, last_error: null })
         .eq('id', job.job_id);
       if (updateError) throw new Error('No se pudo guardar el resultado de sincronización.');
-      await service.from('clinic_google_calendar_connections').update({
+      await saveConnectionSyncState(service, connection || previousConnection, {
         last_synced_at: now,
         last_sync_status: 'success',
         last_sync_error: null,
         updated_at: now,
-      }).eq('clinic_id', job.clinic_id);
+      });
       succeeded += 1;
     } catch (error) {
-      failure = error instanceof Error ? error.message.slice(0, 500) : 'Falló la sincronización con Google Calendar.';
+      const failure = error instanceof Error ? error.message.slice(0, 500) : 'Falló la sincronización con Google Calendar.';
       const now = new Date();
       const finalFailure = job.attempts >= 6;
       const nextAttempt = new Date(now.getTime() + Math.min(60 * 60 * 1000, 30_000 * (2 ** Math.max(0, job.attempts - 1))));
@@ -274,11 +407,11 @@ export async function runGoogleCalendarSync(service, { clinicId = null, limit = 
         updated_at: now.toISOString(),
         completed_at: finalFailure ? now.toISOString() : null,
       }).eq('id', job.job_id);
-      await service.from('clinic_google_calendar_connections').update({
+      await saveConnectionSyncState(service, connection || previousConnection, {
         last_sync_status: 'error',
         last_sync_error: failure,
         updated_at: now.toISOString(),
-      }).eq('clinic_id', job.clinic_id);
+      });
       failed += 1;
     }
   }

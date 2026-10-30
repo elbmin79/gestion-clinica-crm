@@ -1448,7 +1448,7 @@ function App({ children }) {
 }
 
 const settingsSections = [
-  {id:'google-calendar',label:'Google Calendar',icon:CalendarDays,title:'Google Calendar',description:'Conecta el calendario principal de la clínica y sincroniza citas.',status:'Disponible'},
+  {id:'google-calendar',label:'Google Calendar',icon:CalendarDays,title:'Google Calendar',description:'Conecta calendarios personales o uno compartido para sincronizar citas.',status:'Disponible'},
   {id:'whatsapp',label:'Notificaciones WhatsApp',icon:Bell,title:'Notificaciones WhatsApp',description:'Configura confirmaciones y recordatorios de citas en modo simulado.',status:'Modo simulado'},
   {id:'availability',label:'Disponibilidad',icon:Clock3,title:'Gestión de disponibilidad',description:'Define horarios bloqueados y reglas para citas simultáneas.',status:'Próximamente',items:[['Bloquear horarios','Marca fechas y horas en las que no se pueden agendar citas.'],['Permitir citas simultáneas','Controla si se aceptan citas que coinciden en horario.'],['Horarios bloqueados','Consulta y administra las fechas que no están disponibles.']]},
   {id:'push',label:'Notificaciones Push',icon:Bell,title:'Notificaciones Push',description:'Administra los avisos que recibe el equipo en sus dispositivos.',status:'Próximamente',items:[['Nuevas citas','Avisos al equipo cuando se registra una cita.'],['Cambios en la agenda','Notificaciones sobre cancelaciones y cambios de horario.'],['Preferencias por usuario','Cada integrante podrá elegir qué avisos recibe.']]},
