@@ -28,14 +28,25 @@ export function createReminderDispatchHandler({
   loadRoute = loadClinicWhatsAppRoute,
   createProvider = createWhatsAppProvider,
 }) {
-  return async function POST(request) {
-    const secret = env.REMINDER_DISPATCH_SECRET?.trim();
-    if (!secret) return Response.json({ error: 'Reminder dispatch is not configured.' }, { status: 503 });
-    if (!authorized(request, secret)) return Response.json({ error: 'Unauthorized.' }, { status: 401 });
+  return async function dispatch(request) {
+    const secrets = [env.REMINDER_DISPATCH_SECRET, env.CRON_SECRET].map(value => value?.trim()).filter(Boolean);
+    if (!secrets.length) return Response.json({ error: 'Reminder dispatch is not configured.' }, { status: 503 });
+    if (!secrets.some(secret => authorized(request, secret))) return Response.json({ error: 'Unauthorized.' }, { status: 401 });
+
+    if (request.method === 'GET' && (
+      env.WHATSAPP_PROVIDER_MODE !== 'twilio'
+      || env.TWILIO_WHATSAPP_ENABLED !== 'true'
+      || env.WHATSAPP_AUTOMATION_ENABLED !== 'true'
+    )) {
+      return Response.json({ processed: 0, skipped: true, mode: 'twilio', simulated: false, counts: { claimed: 0, sent: 0, failed: 0, unknown: 0, skipped: 0 } }, { headers: { 'Cache-Control': 'no-store' } });
+    }
 
     const provider = createProvider({ env });
-    if (provider.mode !== 'mock' || provider.available === false) {
-      return Response.json({ error: provider.error || 'Only the simulated WhatsApp provider is enabled.' }, { status: 503 });
+    if (!['mock', 'twilio'].includes(provider.mode) || provider.available === false) {
+      return Response.json({ error: provider.error || 'WhatsApp provider is not configured.' }, { status: 503 });
+    }
+    if (provider.mode === 'twilio' && env.WHATSAPP_AUTOMATION_ENABLED !== 'true') {
+      return Response.json({ error: 'Automated WhatsApp delivery is disabled until explicitly enabled.' }, { status: 503 });
     }
     const client = createServiceClient();
     if (!client) return Response.json({ error: 'Server-side Supabase configuration is incomplete.' }, { status: 503 });
@@ -68,11 +79,11 @@ export function createReminderDispatchHandler({
         context: { patientName: appointment.patient_name, appointmentAt: appointment.appointment_at },
       });
       const status = result.status === 'accepted' ? 'sent' : result.status;
-      const error = result.error ? `Resultado simulado: ${result.error.replace(/^Resultado simulado:\s*/i, '')}` : null;
+      const error = result.error && result.simulated ? `Resultado simulado: ${result.error.replace(/^Resultado simulado:\s*/i, '')}` : result.error;
       const settled = await settle(client, item.reminder_id, status, result.messageId, error);
       const finalStatus = settled ? result.status : 'unknown';
       counts[finalStatus === 'accepted' ? 'sent' : finalStatus] += 1;
     }
-    return Response.json({ processed: counts.claimed, mode: 'mock', simulated: true, counts }, { headers: { 'Cache-Control': 'no-store' } });
+    return Response.json({ processed: counts.claimed, mode: provider.mode, simulated: provider.simulated === true || provider.mode === 'mock', counts }, { headers: { 'Cache-Control': 'no-store' } });
   };
 }

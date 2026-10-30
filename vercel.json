@@ -8,6 +8,14 @@
     {
       "path": "/api/notifications/dispatch",
       "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/reminders/dispatch",
+      "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/confirmations/dispatch",
+      "schedule": "* * * * *"
     }
   ]
 }

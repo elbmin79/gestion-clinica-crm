@@ -1,0 +1,94 @@
+import twilio from 'twilio';
+import { actionFromWhatsAppMessage } from './whatsapp-confirmation.js';
+import { resolveInboundTwilioWhatsAppSender } from './whatsapp/clinic-routing.js';
+
+const webhookPath = '/api/webhooks/twilio/whatsapp';
+
+function canonicalWebhookUrl(request, env) {
+  const baseUrl = String(env.TWILIO_WEBHOOK_PUBLIC_BASE_URL || '').trim();
+  if (!baseUrl) return null;
+  try {
+    const base = new URL(baseUrl);
+    if (base.protocol !== 'https:' && !['localhost', '127.0.0.1'].includes(base.hostname)) return null;
+    const incoming = new URL(request.url);
+    return `${base.origin}${webhookPath}${incoming.search}`;
+  } catch {
+    return null;
+  }
+}
+
+function emptyTwiML() {
+  return new Response('<Response/>', {
+    status: 200,
+    headers: { 'Content-Type': 'text/xml; charset=utf-8', 'Cache-Control': 'no-store' },
+  });
+}
+
+export function createTwilioWhatsAppWebhookHandler({
+  createServiceClient,
+  env = process.env,
+  resolveSender = resolveInboundTwilioWhatsAppSender,
+} = {}) {
+  return async function POST(request) {
+    const authToken = String(env.TWILIO_AUTH_TOKEN || '').trim();
+    const accountSid = String(env.TWILIO_ACCOUNT_SID || '').trim();
+    const requestUrl = canonicalWebhookUrl(request, env);
+    const signature = request.headers.get('x-twilio-signature') || '';
+    if (!authToken || !/^AC[0-9a-fA-F]{32}$/.test(accountSid) || !requestUrl || !signature) {
+      return Response.json({ error: 'Twilio webhook is not configured.' }, { status: 503 });
+    }
+    if (!request.headers.get('content-type')?.toLowerCase().startsWith('application/x-www-form-urlencoded')) {
+      return Response.json({ error: 'Unsupported webhook content type.' }, { status: 415 });
+    }
+    const rawBody = await request.text();
+    if (rawBody.length > 65536) return Response.json({ error: 'Webhook payload is too large.' }, { status: 413 });
+    const params = Object.fromEntries(new URLSearchParams(rawBody));
+    let valid = false;
+    try { valid = twilio.validateRequest(authToken, signature, requestUrl, params); } catch { valid = false; }
+    if (!valid) return Response.json({ error: 'Invalid Twilio signature.' }, { status: 401 });
+    if (params.AccountSid !== accountSid) return Response.json({ error: 'Twilio account mismatch.' }, { status: 403 });
+
+    const messageSid = String(params.MessageSid || params.SmsMessageSid || '').trim();
+    const from = String(params.From || '').replace(/^whatsapp:/i, '').trim();
+    const to = String(params.To || '').replace(/^whatsapp:/i, '').trim();
+    if (!/^SM[0-9a-fA-F]{32}$/.test(messageSid)
+      || !/^\+[1-9]\d{7,14}$/.test(from)
+      || !/^\+[1-9]\d{7,14}$/.test(to)) return Response.json({ error: 'Invalid inbound WhatsApp message.' }, { status: 400 });
+
+    const action = actionFromWhatsAppMessage({ text: { body: params.Body || '' } });
+    const client = createServiceClient?.();
+    if (!client) return Response.json({ error: 'Server-side Supabase configuration is incomplete.' }, { status: 503 });
+    let route = await resolveSender(client, to);
+    if (!route?.clinicId && to === '+14155238886') {
+      const sandboxRoute = await client.rpc('route_twilio_sandbox_whatsapp', { target_phone: to });
+      if (sandboxRoute.error) return Response.json({ error: 'Could not route Sandbox message.' }, { status: 503 });
+      const clinicId = sandboxRoute.data?.[0]?.clinic_id;
+      if (clinicId) route = { clinicId, branchId: null };
+    }
+    if (!route?.clinicId) return emptyTwiML();
+    const messageBody = String(params.Body || '').trim() || `[${Number(params.NumMedia || 0) || 1} archivo multimedia]`;
+    const contactName = String(params.ProfileName || '').trim().slice(0, 120);
+    const { data: conversation, error: conversationError } = await client
+      .from('clinic_whatsapp_conversations')
+      .upsert({ clinic_id: route.clinicId, contact_phone: from, ...(contactName ? { contact_name: contactName } : {}), sender_phone: to, last_inbound_at: new Date().toISOString(), last_message_at: new Date().toISOString(), updated_at: new Date().toISOString() }, { onConflict: 'clinic_id,contact_phone' })
+      .select('id')
+      .single();
+    if (conversationError || !conversation) return Response.json({ error: 'Could not save inbound WhatsApp conversation.' }, { status: 503 });
+    const { error: messageError } = await client.from('clinic_whatsapp_messages').upsert({ clinic_id: route.clinicId, conversation_id: conversation.id, direction: 'inbound', body: messageBody, twilio_message_sid: messageSid, delivery_status: 'received' }, { onConflict: 'twilio_message_sid', ignoreDuplicates: true });
+    if (messageError) return Response.json({ error: 'Could not save inbound WhatsApp message.' }, { status: 503 });
+    if (action) {
+      const result = await client.rpc('apply_appointment_confirmation_reply_v2', {
+        target_clinic_id: route.clinicId,
+        target_branch_id: route.branchId || null,
+        target_context_message_id: String(params.OriginalRepliedMessageSid || '').trim() || null,
+        target_inbound_message_id: messageSid,
+        target_from: from,
+        target_action: action,
+      });
+      if (result.error) return Response.json({ error: 'Could not apply appointment response.' }, { status: 503 });
+    }
+    return emptyTwiML();
+  };
+}
+
+export { canonicalWebhookUrl };

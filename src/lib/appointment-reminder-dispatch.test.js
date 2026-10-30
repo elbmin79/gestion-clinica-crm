@@ -7,6 +7,9 @@ const testRoute = { ok: true, sender: { sender_key: 'mock:branch-one', display_l
 function request(token = env.REMINDER_DISPATCH_SECRET) {
   return new Request('http://localhost/api/reminders/dispatch', { method: 'POST', headers: { authorization: `Bearer ${token}` } });
 }
+function cronRequest(token = 'cron-test-secret') {
+  return new Request('http://localhost/api/reminders/dispatch', { method: 'GET', headers: { authorization: `Bearer ${token}` } });
+}
 function fakeClient({ eligible = true, settled = true } = {}) {
   const calls = [];
   return {
@@ -29,6 +32,49 @@ test('requires scheduler authorization and disables production even when old Met
   const production = createReminderDispatchHandler({ createServiceClient, env: { ...env, NODE_ENV: 'production' } });
   assert.equal((await production(request())).status, 503);
   assert.equal(created, false);
+});
+
+test('fails closed for Twilio reminders until automated delivery is explicitly enabled', async () => {
+  let clientCreated = false;
+  const handler = createReminderDispatchHandler({
+    createServiceClient: () => { clientCreated = true; return null; },
+    env: { ...env, WHATSAPP_PROVIDER_MODE: 'twilio', TWILIO_WHATSAPP_ENABLED: 'true', WHATSAPP_AUTOMATION_ENABLED: 'false' },
+    createProvider: () => ({ mode: 'twilio', available: true, simulated: false }),
+  });
+  assert.equal((await handler(request())).status, 503);
+  assert.equal(clientCreated, false);
+});
+
+test('Vercel cron accepts CRON_SECRET and leaves the reminder queue untouched while delivery is disabled', async () => {
+  let clientCreated = false;
+  const handler = createReminderDispatchHandler({
+    createServiceClient: () => { clientCreated = true; throw new Error('The disabled cron must not claim queue items.'); },
+    env: { ...env, CRON_SECRET: 'cron-test-secret', WHATSAPP_PROVIDER_MODE: 'twilio', TWILIO_WHATSAPP_ENABLED: 'true', WHATSAPP_AUTOMATION_ENABLED: 'false' },
+  });
+  const response = await handler(cronRequest());
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { processed: 0, skipped: true, mode: 'twilio', simulated: false, counts: { claimed: 0, sent: 0, failed: 0, unknown: 0, skipped: 0 } });
+  assert.equal(clientCreated, false);
+  assert.equal((await handler(cronRequest('wrong'))).status, 401);
+});
+
+test('dispatches a configured Twilio reminder as a real provider result when enabled', async () => {
+  const { client, calls } = fakeClient();
+  let payload;
+  const handler = createReminderDispatchHandler({
+    createServiceClient: () => client,
+    env: { ...env, CRON_SECRET: 'cron-test-secret', WHATSAPP_PROVIDER_MODE: 'twilio', TWILIO_WHATSAPP_ENABLED: 'true', WHATSAPP_AUTOMATION_ENABLED: 'true' },
+    loadRoute: async () => ({ ok: true, sender: { sender_key: 'twilio:+14155550123' }, route: 'branch' }),
+    createProvider: () => ({ mode: 'twilio', available: true, simulated: false, sendTemplate: async input => {
+      payload = input;
+      return { status: 'accepted', messageId: `SM${'1'.repeat(32)}`, error: null, simulated: false };
+    } }),
+  });
+  const response = await handler(cronRequest());
+  assert.deepEqual(await response.json(), { processed: 1, mode: 'twilio', simulated: false, counts: { claimed: 1, sent: 1, failed: 0, unknown: 0, skipped: 0 } });
+  assert.equal(payload.sender.sender_key, 'twilio:+14155550123');
+  assert.equal(calls.at(-1).args.target_provider_message_id, `SM${'1'.repeat(32)}`);
+  assert.equal(calls.at(-1).args.target_error, null);
 });
 
 test('dispatches and records accepted, failed, and uncertain mock outcomes without network calls', async () => {

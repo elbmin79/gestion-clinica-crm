@@ -1,8 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Check, CircleAlert, CircleCheck, CircleHelp, LoaderCircle, Plus, Save, ShieldCheck, Trash2 } from 'lucide-react';
-import { dispatchClinicWhatsAppMockTest, loadClinicWhatsAppSettings, saveClinicWhatsAppSettings } from './whatsapp-settings-actions.js';
+import { CircleAlert, CircleCheck, LoaderCircle, MessageCircle, Plus, Save, ShieldCheck, Trash2 } from 'lucide-react';
+import { loadAvailableWhatsAppSenders, loadClinicWhatsAppSettings, saveClinicWhatsAppSettings } from './whatsapp-settings-actions.js';
 
 const templateKinds = [
   ['confirmation_2d', 'Confirmación · 2 días antes'],
@@ -11,29 +11,36 @@ const templateKinds = [
 ];
 
 const initialSettings = {
+  providerMode: 'twilio',
   allowDefaultFallback: false,
   templateReadiness: { confirmation_2d: false, reminder_1d: false, reminder_5h: false },
 };
-
-function outcomeLabel(status) {
-  if (status === 'accepted') return 'Aceptado · simulado';
-  if (status === 'failed') return 'Falló · simulado';
-  return 'Resultado incierto · simulado';
-}
+const initialAvailableTemplates = { confirmation_2d: false, reminder_1d: false, reminder_5h: false };
+const initialTemplateStatuses = { confirmation_2d: 'not_configured', reminder_1d: 'not_configured', reminder_5h: 'not_configured' };
+const templateStatusLabels = {
+  approved: 'Aprobada',
+  received: 'Enviada para revisión',
+  pending: 'En revisión',
+  rejected: 'Rechazada',
+  paused: 'Pausada',
+  disabled: 'Desactivada',
+  not_configured: 'Falta configurar el identificador',
+  unavailable: 'No se pudo verificar',
+};
 
 export default function WhatsAppSettings({ clinicId, role, branches = [], sharedMode }) {
   const [loading, setLoading] = useState(true);
+  const [loadingAvailableSenders, setLoadingAvailableSenders] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [testing, setTesting] = useState(false);
   const [error, setError] = useState('');
+  const [senderLookupError, setSenderLookupError] = useState('');
   const [notice, setNotice] = useState('');
-  const [configured, setConfigured] = useState(false);
   const [settings, setSettings] = useState(initialSettings);
   const [senders, setSenders] = useState([]);
-  const [testBranchId, setTestBranchId] = useState('');
-  const [testKind, setTestKind] = useState('reminder_1d');
-  const [testOutcome, setTestOutcome] = useState('accepted');
-  const [testResult, setTestResult] = useState(null);
+  const [availableSenders, setAvailableSenders] = useState([]);
+  const [availableTemplates, setAvailableTemplates] = useState(initialAvailableTemplates);
+  const [templateStatuses, setTemplateStatuses] = useState(initialTemplateStatuses);
+  const [deliveryEnabled, setDeliveryEnabled] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -47,13 +54,23 @@ export default function WhatsAppSettings({ clinicId, role, branches = [], shared
       if (!active) return;
       if (!result.ok) setError(result.message);
       else {
-        setConfigured(result.configured);
-        setSettings(result.settings);
+        setSettings({ ...result.settings, providerMode: 'twilio' });
         setSenders(result.senders);
       }
       setLoading(false);
     }).catch(() => {
       if (active) { setError('No se pudo cargar la configuración de WhatsApp.'); setLoading(false); }
+    });
+    loadAvailableWhatsAppSenders(clinicId).then(result => {
+      if (!active) return;
+      if (result.ok) setAvailableSenders(result.senders);
+      else setSenderLookupError(result.message);
+      setAvailableTemplates(result.availableTemplates || initialAvailableTemplates);
+      setTemplateStatuses({ ...initialTemplateStatuses, ...(result.templateStatuses || {}) });
+      setDeliveryEnabled(result.deliveryEnabled === true);
+      setLoadingAvailableSenders(false);
+    }).catch(() => {
+      if (active) { setSenderLookupError('No se pudieron consultar los números registrados.'); setAvailableSenders([]); setAvailableTemplates(initialAvailableTemplates); setTemplateStatuses(initialTemplateStatuses); setDeliveryEnabled(false); setLoadingAvailableSenders(false); }
     });
     return () => { active = false; };
   }, [clinicId, role, sharedMode]);
@@ -62,69 +79,62 @@ export default function WhatsAppSettings({ clinicId, role, branches = [], shared
     setSenders(current => current.map(sender => sender.senderKey === senderKey
       ? { ...sender, [field]: value }
       : field === 'isDefault' && value ? { ...sender, isDefault: false } : sender));
-    setTestResult(null);
   };
 
   const addSender = () => {
-    const senderKey = `mock:sender-${globalThis.crypto?.randomUUID?.().slice(0, 8) || Math.random().toString(36).slice(2, 10)}`;
-    setSenders(current => [...current, { senderKey, displayLabel: `Número simulado ${current.length + 1}`, branchId: '', isDefault: current.length === 0, active: true }]);
-    setTestResult(null);
+    const senderKey = `form:${globalThis.crypto?.randomUUID?.().slice(0, 8) || Math.random().toString(36).slice(2, 10)}`;
+    setSenders(current => [...current, { senderKey, whatsappNumber: '', displayLabel: `WhatsApp ${current.length + 1}`, branchId: '', isDefault: current.length === 0, active: true }]);
   };
 
   const save = async event => {
     event.preventDefault();
-    setSaving(true); setError(''); setNotice(''); setTestResult(null);
-    const result = await saveClinicWhatsAppSettings({ clinicId, ...settings, senders });
+    setSaving(true); setError(''); setNotice('');
+    const templateReadiness = Object.fromEntries(templateKinds.map(([kind]) => [kind, settings.templateReadiness[kind] === true && availableTemplates[kind] === true]));
+    const result = await saveClinicWhatsAppSettings({ clinicId, ...settings, providerMode: 'twilio', templateReadiness, senders });
     if (!result.ok) setError(result.message);
     else {
-      setConfigured(result.configured);
-      setSettings(result.settings);
+      setSettings({ ...result.settings, providerMode: 'twilio' });
       setSenders(result.senders);
       setNotice(result.message);
     }
     setSaving(false);
   };
 
-  const runTest = async () => {
-    setTesting(true); setError(''); setNotice(''); setTestResult(null);
-    const result = await dispatchClinicWhatsAppMockTest({ clinicId, branchId: testBranchId || null, templateKind: testKind, outcome: testOutcome });
-    if (!result.ok) setError(result.message);
-    else setTestResult(result);
-    setTesting(false);
-  };
-
   if (!sharedMode || !clinicId) {
-    return <div className="whatsapp-settings-content"><header className="whatsapp-page-heading"><h1>WhatsApp</h1><p>Configura confirmaciones y recordatorios de citas en modo de prueba.</p></header><div className="whatsapp-simulated-notice"><ShieldCheck size={18}/><div><strong>Modo de prueba</strong><span>La configuración de remitentes requiere una clínica compartida con Supabase. Aquí no se conecta a WhatsApp ni se envían mensajes.</span></div></div></div>;
+    return <div className="whatsapp-settings-content"><header className="whatsapp-page-heading"><h1>WhatsApp</h1><p>Configura confirmaciones y recordatorios de citas.</p></header><div className="whatsapp-settings-pending-notice"><ShieldCheck size={18}/><div><strong>Configuración no disponible</strong><span>Conecta una clínica compartida para guardar los números y plantillas de WhatsApp.</span></div></div></div>;
   }
   if (role !== 'admin') {
-    return <div className="whatsapp-settings-content"><header className="whatsapp-page-heading"><h1>WhatsApp</h1><p>Configura confirmaciones y recordatorios de citas en modo de prueba.</p></header><div className="whatsapp-simulated-notice"><ShieldCheck size={18}/><div><strong>Configuración solo para administración</strong><span>Una persona administradora de la clínica puede revisar y operar el modo simulado.</span></div></div></div>;
+    return <div className="whatsapp-settings-content"><header className="whatsapp-page-heading"><h1>WhatsApp</h1><p>Configura confirmaciones y recordatorios de citas.</p></header><div className="whatsapp-settings-pending-notice"><ShieldCheck size={18}/><div><strong>Configuración solo para administración</strong><span>Una persona administradora de la clínica puede configurar los números y plantillas.</span></div></div></div>;
   }
 
-  const statusLabel = configured ? 'Modo de prueba' : 'Sin conectar';
-  const readySenderCount = senders.filter(sender => sender.active && (sender.branchId || sender.isDefault)).length;
+  const validSender = sender => sender.active
+    && availableSenders.some(available => available.phoneNumber === sender.whatsappNumber)
+    && (sender.branchId || sender.isDefault);
+  const readySenderCount = senders.filter(validSender).length;
+  const whatsappReady = deliveryEnabled && readySenderCount > 0
+    && templateKinds.some(([kind]) => settings.templateReadiness[kind] && availableTemplates[kind]);
 
-  return <div className="whatsapp-settings-content" aria-busy={loading || saving || testing}>
-    <header className="whatsapp-page-heading"><h1>WhatsApp</h1><p>Configura confirmaciones y recordatorios de citas en modo de prueba.</p></header>
-    <div className="whatsapp-simulated-notice"><ShieldCheck size={18}/><div><strong>Solo simulación · no envía mensajes</strong><span>Este modo no se conecta a Meta ni a WhatsApp. Los resultados de prueba se generan localmente en el servidor.</span></div></div>
-    <div className="whatsapp-settings-summary"><div><span>Estado</span><strong className={configured ? 'is-mock' : ''}>{loading ? 'Cargando…' : statusLabel}</strong></div><div><span>Números simulados activos</span><strong>{loading ? '—' : String(readySenderCount)}</strong></div></div>
+  return <div className="whatsapp-settings-content" aria-busy={loading || saving}>
+    <header className="whatsapp-page-heading"><h1>WhatsApp</h1><p>Configura confirmaciones y recordatorios de citas.</p></header>
+    <div className={whatsappReady ? 'whatsapp-settings-live-notice' : 'whatsapp-settings-pending-notice'}><ShieldCheck size={18}/><div><strong>{whatsappReady ? 'Notificaciones configuradas' : 'Configura tus notificaciones'}</strong><span>Vincula remitentes ya registrados y activa las plantillas aprobadas que usarás para citas.</span></div></div>
+    <div className="whatsapp-settings-summary"><div><span>Estado</span><strong>{loading ? 'Cargando…' : whatsappReady ? 'Configurado' : 'Pendiente de configuración'}</strong></div><div><span>Remitentes vinculados</span><strong>{loading ? '—' : String(readySenderCount)}</strong></div></div>
     {loading ? <p className="whatsapp-settings-loading"><LoaderCircle size={16}/> Cargando configuración…</p> : <form className="whatsapp-settings-form" onSubmit={save}>
-      <section className="whatsapp-settings-section"><div className="whatsapp-settings-heading"><div><h3>Números de prueba</h3><p>Asigna un remitente simulado a cada sucursal.</p></div><button className="button outline compact" type="button" onClick={addSender}><Plus size={15}/> Agregar número</button></div>
+      <section className="whatsapp-settings-section"><div className="whatsapp-settings-heading"><div><h3>Números de WhatsApp</h3><p>Vincula a cada sucursal un remitente ya registrado y activo.</p></div>{availableSenders.length > 0 && <button className="button outline compact" type="button" onClick={addSender}><Plus size={15}/> Vincular remitente</button>}</div>
+        <p className="whatsapp-settings-helper">La alta, migración y verificación de cada línea se hacen fuera del CRM. Aquí solo asignas remitentes existentes a sucursales.</p>
+        {senderLookupError && <p className="whatsapp-settings-error" role="status"><CircleAlert size={15}/>{senderLookupError}</p>}
+        {!senderLookupError && !loadingAvailableSenders && availableSenders.length === 0 && <p className="whatsapp-settings-empty">Cuando haya remitentes registrados y activos, aparecerán aquí para asignarlos a una sucursal.</p>}
         {senders.length ? <div className="whatsapp-sender-list">{senders.map((sender, index) => <div className="whatsapp-sender-row" key={sender.senderKey}>
-          <label className="whatsapp-sender-label">Etiqueta<input maxLength={120} value={sender.displayLabel} onChange={event => updateSender(sender.senderKey, 'displayLabel', event.target.value)} placeholder={`Número simulado ${index + 1}`} required/></label>
+          <label className="whatsapp-sender-label">Etiqueta<input maxLength={120} value={sender.displayLabel} onChange={event => updateSender(sender.senderKey, 'displayLabel', event.target.value)} placeholder={`Número WhatsApp ${index + 1}`} required/></label>
+          <label className="whatsapp-sender-address">Número registrado<select value={sender.whatsappNumber || ''} onChange={event => updateSender(sender.senderKey, 'whatsappNumber', event.target.value)} required><option value="">Selecciona un número activo</option>{sender.whatsappNumber && !availableSenders.some(item => item.phoneNumber === sender.whatsappNumber) && <option value={sender.whatsappNumber}>{sender.whatsappNumber} · no disponible</option>}{availableSenders.map(item => <option key={item.phoneNumber} value={item.phoneNumber}>{item.phoneNumber}</option>)}</select></label>
           <label className="whatsapp-sender-branch">Sucursal<select value={sender.branchId} onChange={event => updateSender(sender.senderKey, 'branchId', event.target.value)}><option value="">Sin sucursal asignada</option>{branches.map(branch => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select></label>
           <label className="whatsapp-sender-default"><input type="checkbox" checked={sender.isDefault} onChange={event => updateSender(sender.senderKey, 'isDefault', event.target.checked)}/> Predeterminado</label>
-          <button className="icon-button outline" type="button" aria-label={`Quitar ${sender.displayLabel || `número ${index + 1}`}`} onClick={() => { setSenders(current => current.filter(item => item.senderKey !== sender.senderKey)); setTestResult(null); }}><Trash2 size={15}/></button>
-        </div>)}</div> : <p className="whatsapp-settings-empty">Aún no hay remitentes de prueba. Agrega uno y asígnalo a una sucursal.</p>}
+          <button className="icon-button outline" type="button" aria-label={`Quitar ${sender.displayLabel || `número ${index + 1}`}`} onClick={() => setSenders(current => current.filter(item => item.senderKey !== sender.senderKey))}><Trash2 size={15}/></button>
+        </div>)}</div> : availableSenders.length > 0 && <p className="whatsapp-settings-empty">Aún no hay remitentes vinculados. Selecciona uno para asignarlo a una sucursal.</p>}
         <label className="whatsapp-default-fallback"><input type="checkbox" checked={settings.allowDefaultFallback} onChange={event => setSettings(current => ({ ...current, allowDefaultFallback: event.target.checked }))}/> Permitir el número predeterminado como respaldo cuando una sucursal no tenga remitente asignado</label>
       </section>
-      <section className="whatsapp-settings-section"><div className="whatsapp-settings-heading"><div><h3>Plantillas de prueba</h3><p>Disponibilidad simulada para avisos de logística de citas.</p></div></div><div className="whatsapp-template-list">{templateKinds.map(([key, label]) => <label key={key}><input type="checkbox" checked={settings.templateReadiness[key] === true} onChange={event => setSettings(current => ({ ...current, templateReadiness: { ...current.templateReadiness, [key]: event.target.checked } }))}/>{label}</label>)}</div></section>
+      <section className="whatsapp-settings-section"><div className="whatsapp-settings-heading"><div><h3>Plantillas aprobadas</h3><p>El estado se consulta automáticamente. Solo puedes activar plantillas aprobadas para avisos de citas.</p></div></div><div className="whatsapp-template-list">{templateKinds.map(([key, label]) => <label key={key}><input type="checkbox" disabled={!availableTemplates[key]} checked={settings.templateReadiness[key] === true && availableTemplates[key] === true} onChange={event => setSettings(current => ({ ...current, templateReadiness: { ...current.templateReadiness, [key]: event.target.checked } }))}/><span className="whatsapp-template-copy"><strong>{label}</strong><small>{templateStatusLabels[templateStatuses[key]] || templateStatusLabels.unavailable}</small></span></label>)}</div></section>
       {error && <p className="whatsapp-settings-error" role="alert"><CircleAlert size={15}/>{error}</p>}{notice && <p className="whatsapp-settings-success" role="status"><CircleCheck size={15}/>{notice}</p>}
-      <div className="whatsapp-settings-actions"><button className="button primary" type="submit" disabled={saving || loading}><Save size={15}/>{saving ? 'Guardando…' : 'Guardar configuración simulada'}</button></div>
+      <div className="whatsapp-settings-actions"><button className="button primary" type="submit" disabled={saving || loading}><Save size={15}/>{saving ? 'Guardando…' : 'Guardar configuración'}</button></div>
     </form>}
-    <section className="whatsapp-settings-test"><div className="whatsapp-settings-heading"><div><h3>Probar resultado simulado</h3><p>Usa una cita sintética, sin nombre ni teléfono de paciente.</p></div></div>
-      <div className="whatsapp-test-controls"><label>Sucursal<select value={testBranchId} onChange={event => setTestBranchId(event.target.value)}><option value="">Sin sucursal específica</option>{branches.map(branch => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select></label><label>Tipo de aviso<select value={testKind} onChange={event => setTestKind(event.target.value)}>{templateKinds.map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label><label>Resultado<select value={testOutcome} onChange={event => setTestOutcome(event.target.value)}><option value="accepted">Aceptado</option><option value="failed">Fallo</option><option value="unknown">Incierto</option></select></label><button className="button outline compact" type="button" onClick={runTest} disabled={testing || loading || !configured || readySenderCount === 0}><CircleHelp size={15}/>{testing ? 'Probando…' : 'Ejecutar prueba'}</button></div>
-      {testResult && <p className={`whatsapp-test-result is-${testResult.status}`} role="status"><Check size={15}/>{outcomeLabel(testResult.status)} · {testResult.senderLabel} · {testResult.route === 'default' ? 'respaldo predeterminado' : 'asignación de sucursal'}. {testResult.message}</p>}
-    </section>
-    <p className="whatsapp-settings-footnote">Los números, estados de plantillas y resultados son ficticios. El modo simulado no utiliza credenciales, no guarda mensajes de prueba y no realiza solicitudes a Meta.</p>
   </div>;
 }

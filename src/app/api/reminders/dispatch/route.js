@@ -4,4 +4,6 @@ import { createReminderDispatchHandler } from '@/lib/appointment-reminder-dispat
 export const runtime = 'nodejs';
 export const maxDuration = 60;
 
-export const POST = createReminderDispatchHandler({ createServiceClient });
+const dispatch = createReminderDispatchHandler({ createServiceClient });
+export const GET = dispatch;
+export const POST = dispatch;

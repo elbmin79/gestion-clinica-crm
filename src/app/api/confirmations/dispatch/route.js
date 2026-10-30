@@ -4,4 +4,6 @@ import { createConfirmationDispatchHandler } from '@/lib/appointment-confirmatio
 export const runtime = 'nodejs';
 export const maxDuration = 60;
 
-export const POST = createConfirmationDispatchHandler({ createServiceClient });
+const dispatch = createConfirmationDispatchHandler({ createServiceClient });
+export const GET = dispatch;
+export const POST = dispatch;

@@ -9,10 +9,10 @@ export async function loadClinicWhatsAppSettings(clinicId) {
   return actions.load(clinicId);
 }
 
-export async function saveClinicWhatsAppSettings(input) {
-  return actions.save(input);
+export async function loadAvailableWhatsAppSenders(clinicId) {
+  return actions.loadAvailableSenders(clinicId);
 }
 
-export async function dispatchClinicWhatsAppMockTest(input) {
-  return actions.testSend(input);
+export async function saveClinicWhatsAppSettings(input) {
+  return actions.save(input);
 }

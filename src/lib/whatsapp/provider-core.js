@@ -9,7 +9,7 @@ export const whatsappTemplateKinds = Object.freeze({
 export function resolveWhatsAppProviderMode(env = process.env) {
   const configured = String(env.WHATSAPP_PROVIDER_MODE || '').trim().toLowerCase();
   if (configured === 'mock') return 'mock';
-  if (!configured && env.NODE_ENV !== 'production') return 'mock';
+  if (configured === 'twilio' && env.TWILIO_WHATSAPP_ENABLED === 'true') return 'twilio';
   return 'disabled';
 }
 
@@ -30,6 +30,18 @@ export function resolveMockSender(settings, senders, branchId) {
     if (defaultSender) return { ok: true, sender: defaultSender, route: 'default' };
   }
   return { ok: false, reason: 'No se configuró un número simulado para esta sucursal.' };
+}
+
+export function resolveTwilioSender(settings, senders, branchId) {
+  if (!settings || settings.provider_mode !== 'twilio') return { ok: false, reason: 'La clínica no está configurada para Twilio.' };
+  const activeSenders = (senders || []).filter(sender => sender.active !== false && /^twilio:\+[1-9]\d{7,14}$/.test(String(sender.sender_key || '')));
+  const branchSender = branchId ? activeSenders.find(sender => sender.branch_id === branchId) : null;
+  if (branchSender) return { ok: true, sender: branchSender, route: 'branch' };
+  if (settings.allow_default_fallback === true) {
+    const defaultSender = activeSenders.find(sender => sender.is_default === true && !sender.branch_id);
+    if (defaultSender) return { ok: true, sender: defaultSender, route: 'default' };
+  }
+  return { ok: false, reason: 'No hay un número de WhatsApp de Twilio activo para esta sucursal.' };
 }
 
 export function createMockWhatsAppProvider({ outcome = 'accepted', idFactory = randomUUID } = {}) {
@@ -61,7 +73,7 @@ export function createDisabledWhatsAppProvider() {
     mode: 'disabled',
     simulated: false,
     available: false,
-    error: 'WhatsApp solo está disponible en modo de prueba. El envío real está deshabilitado.',
+    error: 'WhatsApp no está configurado para enviar mensajes.',
     async sendTemplate() {
       return { status: 'failed', messageId: null, error: this.error, simulated: false };
     },

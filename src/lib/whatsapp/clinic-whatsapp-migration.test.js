@@ -3,10 +3,11 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { PGlite } from '@electric-sql/pglite';
 
-test('mock WhatsApp migration persists clinic and branch settings with admin-only writes', async t => {
+test('WhatsApp migrations persist provider and branch settings with admin-only writes', async t => {
   const db = new PGlite();
   t.after(() => db.close());
   const migration = await readFile(new URL('../../../supabase/migrations/20261029225620_clinic_whatsapp_mock_setup.sql', import.meta.url), 'utf8');
+  const twilioMigration = await readFile(new URL('../../../supabase/migrations/20261030224417_clinic_whatsapp_twilio_provider.sql', import.meta.url), 'utf8');
   await db.exec(`create role anon; create role authenticated; create role service_role;
     create schema auth; create schema private;
     create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid $$;
@@ -26,7 +27,8 @@ test('mock WhatsApp migration persists clinic and branch settings with admin-onl
     create table public.payments(appointment_id uuid, clinic_id uuid, direction text, amount numeric);
     create table public.patient_activities(clinic_id uuid, patient_id uuid, activity_type text, note text, author_id uuid);
     create function public.get_appointment_reminders(uuid,timestamptz,timestamptz) returns table(id uuid) language sql as $$ select null::uuid $$;
-    ${migration}`);
+    ${migration}
+    ${twilioMigration}`);
   assert.equal((await db.query("select to_regprocedure('public.get_appointment_reminders(uuid,timestamptz,timestamptz)') is not null preserved")).rows[0].preserved, true);
 
   const clinic = '10000000-0000-0000-0000-000000000001';
@@ -67,6 +69,23 @@ test('mock WhatsApp migration persists clinic and branch settings with admin-onl
       await assert.rejects(db.query('select public.save_clinic_whatsapp_settings($1,false,\'{}\'::jsonb,\'[]\'::jsonb)', [clinic]), /Invalid simulated template readiness/);
     } finally { await db.exec('reset role'); }
   });
+  await t.test('saves Twilio senders by branch and rejects simulated numbers in live mode', async () => {
+    await session(admin);
+    await db.exec('set role authenticated');
+    try {
+      const readiness = JSON.stringify({ confirmation_2d: true, reminder_1d: true, reminder_5h: false });
+      const senders = JSON.stringify([
+        { sender_key: 'twilio:+14155550123', display_label: 'East Twilio', branch_id: branch, active: true },
+        { sender_key: 'twilio:+14155550124', display_label: 'Default Twilio', is_default: true, active: true },
+      ]);
+      const saved = await db.query('select public.save_clinic_whatsapp_settings_v2($1,$2,$3,$4::jsonb,$5::jsonb) saved', [clinic, 'twilio', true, readiness, senders]);
+      assert.equal(saved.rows[0].saved, true);
+      assert.equal((await db.query("select provider_mode from public.clinic_whatsapp_configurations where clinic_id=$1", [clinic])).rows[0].provider_mode, 'twilio');
+      assert.equal((await db.query("select count(*)::int count from public.clinic_whatsapp_senders where clinic_id=$1 and active and sender_key like 'twilio:%'", [clinic])).rows[0].count, 2);
+      await assert.rejects(db.query('select public.save_clinic_whatsapp_settings_v2($1,$2,$3,$4::jsonb,$5::jsonb)', [clinic, 'twilio', false, readiness, JSON.stringify([{ sender_key: 'mock:bad', display_label: 'Wrong mode' }])]), /does not match the selected WhatsApp provider/);
+      assert.equal((await db.query("select has_function_privilege('anon','public.save_clinic_whatsapp_settings_v2(uuid,text,boolean,jsonb,jsonb)','execute') allowed")).rows[0].allowed, false);
+    } finally { await db.exec('reset role'); }
+  });
   await t.test('reminder ledger identifies mock results without returning patient contact data', async () => {
     const patient = '50000000-0000-0000-0000-000000000001';
     const provider = '40000000-0000-0000-0000-000000000001';
@@ -80,9 +99,14 @@ test('mock WhatsApp migration persists clinic and branch settings with admin-onl
         values ('${reminder}','${clinic}','${appointment}','reminder_1d',now()+interval '1 day','sent',1,1,'mock:synthetic');`);
     await session(admin); await db.exec('set role authenticated');
     try {
+      const readiness = JSON.stringify({ confirmation_2d: true, reminder_1d: true, reminder_5h: false });
+      await db.query('select public.save_clinic_whatsapp_settings_v2($1,$2,$3,$4::jsonb,$5::jsonb)', [clinic, 'mock', false, readiness, JSON.stringify([{ sender_key: 'mock:ledger', display_label: 'Ledger', branch_id: branch, active: true }])]);
       const result = await db.query('select * from public.get_appointment_reminders_v2($1,now(),now()+interval \'3 days\')',[clinic]);
       assert.equal(result.rows[0].simulated, true);
       assert.equal('phone' in result.rows[0], false);
+      await db.query('select public.save_clinic_whatsapp_settings_v2($1,$2,$3,$4::jsonb,$5::jsonb)', [clinic, 'twilio', false, readiness, JSON.stringify([{ sender_key: 'twilio:+14155550125', display_label: 'Ledger', branch_id: branch, active: true }])]);
+      const liveResult = await db.query('select * from public.get_appointment_reminders_v2($1,now(),now()+interval \'3 days\')',[clinic]);
+      assert.equal(liveResult.rows[0].simulated, false);
     } finally { await db.exec('reset role'); }
   });
   await t.test('server recheck blocks opt-out, invalid phone, unconfirmed and expired appointments', async () => {

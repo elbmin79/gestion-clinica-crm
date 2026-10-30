@@ -1449,7 +1449,7 @@ function App({ children }) {
         {page==='contracts'&&<ContractsPage patients={workspacePatients} templates={contractTemplatesForPage} setModal={setModal} notify={notify} onOpenDocument={openPatientDocument} onNewContract={()=>openContractPreparation()} onNewTemplate={()=>openContractTemplateCreation()} sharedMode={sharedMode} canPrepare={!sharedMode||['admin','clinician'].includes(sharedDirectory.role)} canManageTemplates={!sharedMode||sharedDirectory.role==='admin'}/>}
         {!sharedMode&&page==='team' && <TeamPage businesses={businesses} branches={branches} providers={providers} setModal={setModal} notify={notify} onEditBranch={branch=>{setSelectedBranchRecord(branch);setModal('edit-branch')}} onEditProvider={provider=>{setSelectedProvider(provider);setModal('edit-provider')}}/>}
         {sharedMode&&page==='team'&&<><TeamPage sharedMode clinicId={sharedDirectory.clinicId} businesses={businesses} branches={branches} providers={providers} setModal={setModal} notify={notify} onEditBranch={branch=>{setSelectedBranchRecord(branch);setModal('edit-branch')}} onEditProvider={provider=>{setSelectedProvider(provider);setModal('edit-provider')}} canManageBusinesses={['admin','receptionist'].includes(sharedDirectory.role)} canManageProviders={sharedDirectory.role==='admin'}/>{sharedDirectory.role==='admin'&&<ClinicAccessManager clinicId={sharedDirectory.clinicId}/>}</>}
-        {page==='whatsapp'&&<WhatsAppInbox reminders={workspaceReminders} sharedMode={sharedMode}/>}
+        {page==='whatsapp'&&<WhatsAppInbox sharedMode={sharedMode} clinicId={sharedDirectory.clinicId} role={sharedDirectory.role}/>}
         {page==='settings'&&<SettingsPage publicBranches={branches} publicProviders={providers} services={serviceCatalog} patients={patients} onRequestApproved={sharedDirectory.refresh} clinicName={activeClinicName} sharedMode={sharedMode} clinicId={sharedDirectory.clinicId} role={sharedDirectory.role} branches={workspaceBranches} providers={workspaceProviders} timeZone={sharedDirectory.timeZone} onCatalogChange={setServiceCatalog} onSaveClinicName={saveClinicName}/>}
         {page==='profile'&&<ProfilePage profile={{...userProfile,name:displayUserName}} clinicName={activeClinicName} memberships={sharedDirectory.memberships} clinicId={sharedDirectory.clinicId} onSelectClinic={sharedDirectory.chooseClinic} sharedMode={sharedMode} onProfileChange={setUserProfile} notify={notify}/>}
         </div>
@@ -1484,7 +1484,7 @@ function App({ children }) {
 
 const settingsSections = [
   {id:'google-calendar',label:'Google Calendar',icon:CalendarDays,title:'Google Calendar',description:'Conecta tu cuenta de Google para sincronizar tus citas.',status:'Disponible'},
-  {id:'whatsapp',label:'Notificaciones WhatsApp',icon:Bell,title:'Notificaciones WhatsApp',description:'Configura confirmaciones y recordatorios de citas en modo simulado.',status:'Modo simulado'},
+  {id:'whatsapp',label:'Notificaciones WhatsApp',icon:Bell,title:'Notificaciones WhatsApp',description:'Configura números y plantillas para avisos de citas.',status:'Configurable'},
   {id:'availability',label:'Disponibilidad',icon:Clock3,title:'Gestión de disponibilidad',description:'Define horarios bloqueados y reglas para citas simultáneas.',status:'Disponible',items:[]},
   {id:'push',label:'Notificaciones Push',icon:Bell,title:'Notificaciones Push',description:'Administra los avisos que recibe el equipo en sus dispositivos.',status:'Disponible',items:[['Nuevas citas','Avisos al equipo cuando se registra una cita.'],['Cambios en la agenda','Notificaciones sobre cancelaciones y cambios de horario.'],['Preferencias por usuario','Cada integrante podrá elegir qué avisos recibe.']]},
   {id:'services',label:'Servicios',icon:Settings2,title:'Catálogo de servicios',description:'Administra tratamientos, duraciones, precios y paquetes de la clínica.',status:'Disponible'},
@@ -2142,15 +2142,16 @@ function RemindersPage({ reminders, sharedMode = false }) {
   const [kindFilter, setKindFilter] = useState('Todos');
   const pending = reminders.filter(item => (item.status === 'pending' || item.status === 'sending') && item.deliveryEligible).length;
   const blocked = reminders.filter(item => item.status === 'blocked' || (['pending', 'failed'].includes(item.status) && !item.deliveryEligible)).length;
-  const sent = reminders.filter(item => item.status === 'sent').length;
-  const attention = reminders.filter(item => item.status === 'failed' || item.status === 'unknown').length;
+  const sent = reminders.filter(item => item.status === 'sent' && !item.simulated).length;
+  const hasRealAttempts = reminders.some(item => !item.simulated && ['sent', 'failed', 'unknown'].includes(item.status));
+  const attention = reminders.filter(item => !item.simulated && (item.status === 'failed' || item.status === 'unknown')).length;
   const statusLabels = { pending: 'Pendiente', sending: 'En preparación', sent: 'Enviado', failed: 'Error', unknown: 'Entrega incierta · revisar', blocked: 'Bloqueado', skipped: 'Omitido', cancelled: 'Cancelado' };
   const sorted = reminders.filter(item => {
     const statusMatches = statusFilter === 'Todos'
-      || (statusFilter === 'Pendientes' && ['pending', 'sending'].includes(item.status) && item.deliveryEligible)
+      || (statusFilter === 'Pendientes' && (['pending', 'sending'].includes(item.status) || item.simulated) && item.deliveryEligible)
       || (statusFilter === 'Bloqueados' && (item.status === 'blocked' || (['pending', 'failed'].includes(item.status) && !item.deliveryEligible)))
-      || (statusFilter === 'Enviados' && item.status === 'sent')
-      || (statusFilter === 'Requieren atención' && ['failed', 'unknown'].includes(item.status))
+      || (statusFilter === 'Enviados' && item.status === 'sent' && !item.simulated)
+      || (statusFilter === 'Requieren atención' && ['failed', 'unknown'].includes(item.status) && !item.simulated)
       || (statusFilter === 'Omitidos o cancelados' && ['skipped', 'cancelled'].includes(item.status));
     return statusMatches && (kindFilter === 'Todos' || item.kind === kindFilter);
   }).sort((a, b) => a.scheduledAt.localeCompare(b.scheduledAt));
@@ -2164,7 +2165,7 @@ function RemindersPage({ reminders, sharedMode = false }) {
     </div>
     <section className="panel reminder-ledger">
       <div className="panel-heading"><div><div className="panel-title">Calendario de mensajes</div><p className="panel-subtitle">Confirmación 2 días antes · recordatorio 1 día antes · aviso 5 horas antes</p></div></div>
-      <div className="reminder-delivery-note"><Bell size={15}/><span>{sharedMode ? 'La programación se guarda en la clínica. Solo pacientes con autorización explícita y teléfono válido serán elegibles; los resultados actuales son simulados y no se envían a WhatsApp.' : 'Vista de demostración: muestra cuándo tocaría cada aviso; todavía no se envían mensajes.'}</span></div>
+      <div className="reminder-delivery-note"><Bell size={15}/><span>{sharedMode ? hasRealAttempts ? 'La programación se guarda en la clínica. Los avisos requieren autorización explícita, teléfono válido y una plantilla aprobada.' : 'La programación se guarda en la clínica. Solo pacientes con autorización y teléfono válido son elegibles; los avisos también requieren números y plantillas configurados.' : 'Vista de demostración: muestra cuándo tocaría cada aviso; no se envían mensajes.'}</span></div>
       <div className="agenda-filter-panel">
         <label className="select-filter"><Filter size={15}/><select aria-label="Filtrar recordatorios por tipo" value={kindFilter} onChange={event=>setKindFilter(event.target.value)}><option value="Todos">Todos los tipos</option><option value="confirmation_2d">Confirmación · 2 días antes</option><option value="reminder_1d">Recordatorio · 1 día antes</option><option value="reminder_5h">Recordatorio · 5 horas antes</option></select><ChevronDown size={14}/></label>
         <label className="select-filter"><Clock3 size={15}/><select aria-label="Filtrar recordatorios por estado" value={statusFilter} onChange={event=>setStatusFilter(event.target.value)}><option>Todos</option><option>Pendientes</option><option>Bloqueados</option><option>Enviados</option><option>Requieren atención</option><option>Omitidos o cancelados</option></select><ChevronDown size={14}/></label>
@@ -2177,7 +2178,7 @@ function RemindersPage({ reminders, sharedMode = false }) {
           <td>{item.scheduledLabel}</td>
           <td><div className="reminder-person"><strong>{item.patientName || 'Paciente'}</strong><span>{item.service || 'Cita clínica'}</span></div></td>
           <td><div className="reminder-person"><strong>{item.appointmentLabel}</strong><span>{[item.providerName, item.branchName].filter(Boolean).join(' · ') || 'Equipo clínico'}</span></div></td>
-          <td><span className={`reminder-status ${item.status || 'pending'}`}><i/>{item.simulated ? ({sent:'Aceptado · simulado',failed:'Falló · simulado',unknown:'Incierto · simulado'}[item.status] || statusLabels[item.status] || 'Pendiente') : (statusLabels[item.status] || 'Pendiente')}</span>{!item.deliveryEligible&&item.deliveryBlockReason&&<small className="reminder-block-reason">{item.deliveryBlockReason}</small>}</td>
+          <td><span className={`reminder-status ${item.simulated ? 'pending' : item.status || 'pending'}`}><i/>{item.simulated && item.deliveryEligible ? 'Pendiente de configuración' : statusLabels[item.status] || 'Pendiente'}</span>{!item.deliveryEligible&&item.deliveryBlockReason&&<small className="reminder-block-reason">{item.deliveryBlockReason}</small>}</td>
         </tr>)}
       </tbody></table>
         {sorted.length === 0 && <div className="empty-state"><Bell size={20}/><strong>No hay avisos programados</strong><span>Las citas aparecerán aquí cuando estén confirmadas.</span></div>}
