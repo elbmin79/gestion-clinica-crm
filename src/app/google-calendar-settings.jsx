@@ -197,25 +197,15 @@ export default function GoogleCalendarSettings({ clinicId, role, sharedMode }) {
     {error && <p className="professional-error" role="alert"><CircleAlert size={15}/>{error}</p>}
     <div className="settings-preview-banner"><CalendarDays size={17}/><div><strong>Conecta tu calendario de Google</strong><span>Solo verás y administrarás el calendario vinculado a tu cuenta CRM. Puedes elegir un calendario compartido si tu cuenta Google tiene permiso de edición. Los eventos usan títulos genéricos y no incluyen datos del paciente.</span></div></div>
     {loading ? <p className="whatsapp-settings-loading"><LoaderCircle size={16}/> Consultando conexiones…</p> : <>
-      {role === 'admin' && <section className="google-clinic-calendar-section">
-        <div className="google-calendar-section-heading"><div><strong>Mi cuenta Google</strong><span>Controla la cuenta de Google conectada por tu usuario.</span></div><span className="settings-option-status">{clinicConnection ? 'Conectada' : 'Sin conectar'}</span></div>
-        {clinicConnection ? <>
-          <div className="google-clinic-calendar-account">
-            <span>{clinicConnection.google_email} · {clinicConnection.calendar_id === 'primary' ? 'Calendario principal' : clinicConnection.calendar_id}</span>
-            {clinicConnection.last_sync_error && <span className="google-provider-calendar-error"><CircleAlert size={13}/>{clinicConnection.last_sync_error}</span>}
-            <small>{clinicConnection.last_synced_at ? `Última sincronización: ${formatDate(clinicConnection.last_synced_at)}` : 'La cuenta está conectada; aún no hay sincronizaciones registradas.'}</small>
-          </div>
-          <div className="google-provider-calendar-actions">
-            <button className="button outline compact" type="button" onClick={() => sync('', true)} disabled={busy || syncing}><RefreshCw size={14}/>{syncing ? 'Sincronizando…' : 'Resincronizar citas'}</button>
-            <button className="button secondary compact" type="button" onClick={() => connect('', true)} disabled={busy || syncing}><Link2 size={14}/> Cambiar cuenta</button>
-            <button className="button secondary compact" type="button" onClick={() => disconnect()} disabled={busy || syncing}><Unlink size={14}/> Desvincular</button>
-            <a className="button outline compact" href="https://calendar.google.com" target="_blank" rel="noreferrer"><ExternalLink size={14}/> Abrir Google Calendar</a>
-          </div>
-        </> : <div className="google-provider-calendar-actions">
-          <button className="button primary compact" type="button" onClick={() => connect()} disabled={busy || syncing}><Link2 size={14}/> Vincular Google Calendar</button>
-        </div>}
+      {role === 'admin' && clinicConnection && <section className="google-clinic-calendar-section">
+        <div className="google-calendar-section-heading"><div><strong>Conexión antigua de la clínica</strong><span>Esta cuenta ya no recibe citas nuevas; cada perfil debe conectar su propio calendario.</span></div><span className="settings-option-status">Sincronización desactivada</span></div>
+        <div className="google-clinic-calendar-account"><span>{clinicConnection.google_email}</span><small>Los eventos que ya están en Google Calendar se conservan. Puedes desvincular esta conexión antigua.</small></div>
+        <div className="google-provider-calendar-actions">
+          <a className="button outline compact" href="https://calendar.google.com" target="_blank" rel="noreferrer"><ExternalLink size={14}/> Abrir Google Calendar</a>
+          <button className="button secondary compact" type="button" onClick={() => disconnect()} disabled={busy || syncing}><Unlink size={14}/> Desvincular conexión antigua</button>
+        </div>
       </section>}
-      {(providers.length > 0 || role === 'clinician') && <section className="google-provider-calendar-section">
+      {(providers.length > 0 || ['admin', 'clinician'].includes(role)) && <section className="google-provider-calendar-section">
         <div className="google-calendar-section-heading"><div><strong>Mi perfil profesional</strong><span>Aquí solo aparecen los perfiles profesionales vinculados a tu cuenta.</span></div></div>
         {providers.length ? providers.map(provider => <ProviderCalendarRow
           key={provider.id}

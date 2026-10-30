@@ -52,41 +52,29 @@ export async function GET(request) {
   }
 
   const service = getGoogleServiceClient();
-  if (state.providerId) {
-    const providerAccess = await requireProviderCalendarAccess(service, {
-      clinicId: state.clinicId,
-      providerId: state.providerId,
-      userId: access.user.id,
-      role: access.role,
-    });
-    if (providerAccess.error) {
-      return clearStateCookie(NextResponse.redirect(googleCalendarSettingsUrl(request.url, 'unauthorized')));
-    }
-  } else if (access.role !== 'admin') {
+  if (!state.providerId) {
     return clearStateCookie(NextResponse.redirect(googleCalendarSettingsUrl(request.url, 'unauthorized')));
-  } else {
-    const { data: existing, error } = await service
-      .from('clinic_google_calendar_connections')
-      .select('connected_by')
-      .eq('clinic_id', state.clinicId)
-      .maybeSingle();
-    if (error || (existing && existing.connected_by !== access.user.id)) {
-      return clearStateCookie(NextResponse.redirect(googleCalendarSettingsUrl(request.url, 'unauthorized')));
-    }
+  }
+  const providerAccess = await requireProviderCalendarAccess(service, {
+    clinicId: state.clinicId,
+    providerId: state.providerId,
+    userId: access.user.id,
+    role: access.role,
+  });
+  if (providerAccess.error) {
+    return clearStateCookie(NextResponse.redirect(googleCalendarSettingsUrl(request.url, 'unauthorized')));
   }
 
   try {
     const token = await exchangeGoogleAuthorizationCode(code, config);
     const account = await getGoogleAccount(token.access_token);
-    const table = state.providerId
-      ? 'clinic_provider_google_calendar_connections'
-      : 'clinic_google_calendar_connections';
-    let currentQuery = service
+    const table = 'clinic_provider_google_calendar_connections';
+    const { data: current, error: currentError } = await service
       .from(table)
       .select('google_email, refresh_token_ciphertext')
-      .eq('clinic_id', state.clinicId);
-    if (state.providerId) currentQuery = currentQuery.eq('provider_id', state.providerId);
-    const { data: current, error: currentError } = await currentQuery.maybeSingle();
+      .eq('clinic_id', state.clinicId)
+      .eq('provider_id', state.providerId)
+      .maybeSingle();
     if (currentError) throw new Error('No se pudo leer la conexión anterior de la clínica. Aplica la migración de Google Calendar y vuelve a intentarlo.');
 
     let encryptedRefreshToken;
@@ -109,19 +97,17 @@ export async function GET(request) {
       connected_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
-    if (state.providerId) connection.provider_id = state.providerId;
+    connection.provider_id = state.providerId;
     const { error: saveError } = await service.from(table).upsert(connection, {
-      onConflict: state.providerId ? 'clinic_id,provider_id' : 'clinic_id',
+      onConflict: 'clinic_id,provider_id',
     });
     if (saveError) throw new Error('No se pudo guardar la conexión en Supabase. Aplica la migración de Google Calendar y vuelve a intentarlo.');
 
-    if (state.providerId) {
-      const { error: queueError } = await service.rpc('queue_google_calendar_provider_initial_sync', {
-        target_clinic_id: state.clinicId,
-        target_provider_id: state.providerId,
-      });
-      if (queueError) console.error('Google Calendar initial provider sync could not be queued:', queueError.message);
-    }
+    const { error: queueError } = await service.rpc('queue_google_calendar_provider_initial_sync', {
+      target_clinic_id: state.clinicId,
+      target_provider_id: state.providerId,
+    });
+    if (queueError) console.error('Google Calendar initial provider sync could not be queued:', queueError.message);
 
     return clearStateCookie(NextResponse.redirect(googleCalendarSettingsUrl(request.url, 'connected')));
   } catch (error) {

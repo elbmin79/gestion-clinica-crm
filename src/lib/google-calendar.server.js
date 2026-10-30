@@ -193,24 +193,26 @@ export async function getProviderGoogleCalendarConnection(service, clinicId, pro
 }
 
 export async function getGoogleCalendarConnection(service, clinicId, providerId) {
-  if (providerId) {
-    const providerConnection = await getProviderGoogleCalendarConnection(service, clinicId, providerId);
-    if (providerConnection) return providerConnection;
-  }
-  const { data, error } = await service
-    .from('clinic_google_calendar_connections')
-    .select('clinic_id, google_email, calendar_id, refresh_token_ciphertext, connected_by, connected_at, updated_at, last_synced_at, last_sync_status, last_sync_error')
-    .eq('clinic_id', clinicId)
-    .maybeSingle();
-  if (error) throw error;
-  return data ? { ...data, provider_id: null } : null;
+  if (!providerId) return null;
+  return getProviderGoogleCalendarConnection(service, clinicId, providerId);
 }
 
 async function getConnectionForEventLink(service, clinicId, eventLink) {
   if (!eventLink) return null;
-  const connection = eventLink.provider_id
-    ? await getProviderGoogleCalendarConnection(service, clinicId, eventLink.provider_id)
-    : await getGoogleCalendarConnection(service, clinicId, null);
+  let connection;
+  if (eventLink.provider_id) {
+    connection = await getProviderGoogleCalendarConnection(service, clinicId, eventLink.provider_id);
+  } else {
+    // Legacy clinic-level events can still be moved when their professional
+    // connects an individual calendar; the clinic calendar is never a target.
+    const { data, error } = await service
+      .from('clinic_google_calendar_connections')
+      .select('clinic_id, google_email, calendar_id, refresh_token_ciphertext, connected_by, connected_at, updated_at, last_synced_at, last_sync_status, last_sync_error')
+      .eq('clinic_id', clinicId)
+      .maybeSingle();
+    if (error) throw error;
+    connection = data ? { ...data, provider_id: null } : null;
+  }
   return connection?.google_email?.toLowerCase() === eventLink.google_email?.toLowerCase() ? connection : null;
 }
 

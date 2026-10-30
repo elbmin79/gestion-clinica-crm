@@ -20,7 +20,7 @@ export async function GET(request) {
     const visibleProviders = providerRows || [];
     const providerIds = visibleProviders.map(provider => provider.id);
     let clinicConnection = null;
-    if (!providerIds.length && access.role === 'admin') {
+    if (access.role === 'admin') {
       const { data, error } = await service
         .from('clinic_google_calendar_connections')
         .select('google_email, calendar_id, connected_at, last_synced_at, last_sync_status, last_sync_error, connected_by')
@@ -43,23 +43,34 @@ export async function GET(request) {
     let history = [];
     let queued = 0;
     if (providerIds.length) {
-      const { data, error: historyError } = await service
-        .from('clinic_google_calendar_sync_jobs')
-        .select('status, attempts, last_error, created_at, updated_at, completed_at')
+      const since = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString();
+      const { data: appointments, error: appointmentError } = await service
+        .from('appointments')
+        .select('id')
         .eq('clinic_id', clinicId)
-        .in('target_provider_id', providerIds)
-        .order('created_at', { ascending: false })
-        .limit(8);
-      if (historyError) throw historyError;
-      history = data || [];
-      const { count, error: queueError } = await service
-        .from('clinic_google_calendar_sync_jobs')
-        .select('id', { count: 'exact', head: true })
-        .eq('clinic_id', clinicId)
-        .in('target_provider_id', providerIds)
-        .eq('status', 'queued');
-      if (queueError) throw queueError;
-      queued = count || 0;
+        .in('provider_id', providerIds)
+        .gte('starts_at', since);
+      if (appointmentError) throw appointmentError;
+      const appointmentIds = (appointments || []).map(appointment => appointment.id);
+      if (appointmentIds.length) {
+        const { data, error: historyError } = await service
+          .from('clinic_google_calendar_sync_jobs')
+          .select('status, attempts, last_error, created_at, updated_at, completed_at')
+          .eq('clinic_id', clinicId)
+          .in('appointment_id', appointmentIds)
+          .order('created_at', { ascending: false })
+          .limit(8);
+        if (historyError) throw historyError;
+        history = data || [];
+        const { count, error: queueError } = await service
+          .from('clinic_google_calendar_sync_jobs')
+          .select('id', { count: 'exact', head: true })
+          .eq('clinic_id', clinicId)
+          .in('appointment_id', appointmentIds)
+          .eq('status', 'queued');
+        if (queueError) throw queueError;
+        queued = count || 0;
+      }
     }
     const connectionByProvider = new Map(providerConnections.map(connection => [connection.provider_id, connection]));
     const providers = visibleProviders.map(provider => ({
@@ -69,7 +80,7 @@ export async function GET(request) {
       connection: connectionByProvider.get(provider.id) || null,
     }));
     return NextResponse.json({
-      connected: Boolean(clinicConnection || providerConnections.length),
+      connected: Boolean(providerConnections.length),
       clinicConnection,
       providers,
       history,

@@ -9,7 +9,7 @@ export async function POST(request) {
   const clinicId = typeof body?.clinicId === 'string' ? body.clinicId.trim() : '';
   const providerId = typeof body?.providerId === 'string' ? body.providerId.trim() : '';
   const initial = body?.initial === true;
-  if (!clinicId) return NextResponse.json({ error: 'Falta la clínica.' }, { status: 400 });
+  if (!clinicId || (initial && !providerId)) return NextResponse.json({ error: 'Indica la clínica y tu perfil profesional para sincronizar.' }, { status: 400 });
   const access = await requireClinicAccess(clinicId, providerId ? ['admin', 'clinician'] : initial ? ['admin'] : ['admin', 'clinician', 'receptionist']);
   if (access.error) return NextResponse.json({ error: access.error }, { status: access.status });
 
@@ -21,24 +21,11 @@ export async function POST(request) {
       });
       if (providerAccess.error) return NextResponse.json({ error: providerAccess.error }, { status: providerAccess.status });
     }
-    if (initial && !providerId) {
-      const { data: ownedConnection, error } = await service
-        .from('clinic_google_calendar_connections')
-        .select('connected_by')
-        .eq('clinic_id', clinicId)
-        .eq('connected_by', access.user.id)
-        .maybeSingle();
-      if (error) throw error;
-      if (!ownedConnection) return NextResponse.json({ error: 'No tienes un calendario compartido conectado para sincronizar.' }, { status: 404 });
-    }
     if (initial && providerId) {
       const { error } = await service.rpc('queue_google_calendar_provider_initial_sync', {
         target_clinic_id: clinicId,
         target_provider_id: providerId,
       });
-      if (error) throw new Error('No se pudo preparar la primera sincronización. Aplica la migración de Google Calendar.');
-    } else if (initial) {
-      const { error } = await service.rpc('queue_google_calendar_initial_sync', { target_clinic_id: clinicId });
       if (error) throw new Error('No se pudo preparar la primera sincronización. Aplica la migración de Google Calendar.');
     }
     const result = await runGoogleCalendarSync(service, { clinicId, providerId: providerId || null, limit: initial ? 20 : 8 });
@@ -47,7 +34,19 @@ export async function POST(request) {
       .select('id', { count: 'exact', head: true })
       .eq('clinic_id', clinicId)
       .eq('status', 'queued');
-    if (providerId) queueQuery = queueQuery.eq('target_provider_id', providerId);
+    if (providerId) {
+      const since = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString();
+      const { data: appointments, error: appointmentError } = await service
+        .from('appointments')
+        .select('id')
+        .eq('clinic_id', clinicId)
+        .eq('provider_id', providerId)
+        .gte('starts_at', since);
+      if (appointmentError) throw appointmentError;
+      const appointmentIds = (appointments || []).map(appointment => appointment.id);
+      if (!appointmentIds.length) return NextResponse.json({ ok: true, ...result, queued: 0 });
+      queueQuery = queueQuery.in('appointment_id', appointmentIds);
+    }
     const { count, error: queueError } = await queueQuery;
     if (queueError) throw queueError;
     return NextResponse.json({ ok: true, ...result, queued: count || 0 });

@@ -14,21 +14,11 @@ export async function GET(request) {
   const access = await requireClinicAccess(clinicId, ['admin', 'clinician']);
   if (access.error) return NextResponse.json({ error: access.error }, { status: access.status });
   const service = getGoogleServiceClient();
-  if (providerId) {
-    const providerAccess = await requireProviderCalendarAccess(service, {
-      clinicId, providerId, userId: access.user.id, role: access.role,
-    });
-    if (providerAccess.error) return NextResponse.json({ error: providerAccess.error }, { status: providerAccess.status });
-  } else {
-    if (access.role !== 'admin') return NextResponse.json({ error: 'Solo administración puede conectar el calendario compartido de la clínica.' }, { status: 403 });
-    const { data: existing, error } = await service
-      .from('clinic_google_calendar_connections')
-      .select('connected_by')
-      .eq('clinic_id', clinicId)
-      .maybeSingle();
-    if (error) return NextResponse.json({ error: 'No se pudo validar la cuenta de Google conectada.' }, { status: 503 });
-    if (existing && existing.connected_by !== access.user.id) return NextResponse.json({ error: 'El calendario compartido está conectado por otra cuenta administradora.' }, { status: 409 });
-  }
+  if (!providerId) return NextResponse.json({ error: 'Vincula tu cuenta CRM a un perfil profesional antes de conectar Google Calendar.' }, { status: 400 });
+  const providerAccess = await requireProviderCalendarAccess(service, {
+    clinicId, providerId, userId: access.user.id, role: access.role,
+  });
+  if (providerAccess.error) return NextResponse.json({ error: providerAccess.error }, { status: providerAccess.status });
 
   const nonce = randomBytes(32).toString('base64url');
   const { url, state } = createGoogleOAuthAuthorizationUrl({
