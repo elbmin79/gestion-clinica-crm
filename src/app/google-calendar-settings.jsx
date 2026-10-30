@@ -100,7 +100,7 @@ function ProviderCalendarRow({ clinicId, provider, connect, disconnect, sync, sy
   </div>;
 }
 
-export default function GoogleCalendarSettings({ clinicId, role, sharedMode }) {
+export default function GoogleCalendarSettings({ clinicId, role, sharedMode, onGoTeam }) {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [syncing, setSyncing] = useState(false);
@@ -209,7 +209,7 @@ export default function GoogleCalendarSettings({ clinicId, role, sharedMode }) {
           sync={sync}
           syncing={syncingProviderId === provider.id}
           busy={busy}
-        />) : <p className="google-calendar-empty">{role === 'admin' ? 'Tu cuenta CRM aún no está vinculada a un perfil profesional. Vincúlala en Equipo y sucursales si también tienes citas asignadas a un perfil.' : 'Tu cuenta CRM aún no está vinculada a un perfil profesional. Pide a administración que vincule tu usuario para conectar tu calendario.'}</p>}
+        />) : role === 'admin' ? <div className="google-calendar-empty"><p>Tu cuenta CRM aún no está vinculada a un perfil profesional. Vincúlala para administrar tu propio calendario.</p><button className="button outline compact" type="button" onClick={onGoTeam}><Link2 size={14}/> Vincular mi perfil profesional</button></div> : <p className="google-calendar-empty">Tu cuenta CRM aún no está vinculada a un perfil profesional. Pide a administración que vincule tu usuario para conectar tu calendario.</p>}
       </section>}
 
       {history.length > 0 && <div className="settings-option-list google-calendar-history"><div className="settings-option-row"><div><strong>Últimos intentos</strong><span>{history.slice(0, 5).map((item, index) => <span key={`${item.created_at}-${index}`} className="google-sync-history-item">{item.status === 'succeeded' ? 'Correcta' : item.status === 'failed' ? 'Fallida' : item.status === 'processing' ? 'En curso' : 'Pendiente'} · {formatDate(item.updated_at || item.created_at)}{item.last_error ? ` · ${item.last_error}` : ''}</span>)}</span></div><span className="settings-option-status">Historial</span></div></div>}
