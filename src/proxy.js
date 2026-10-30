@@ -9,6 +9,12 @@ export async function proxy(request) {
   const isForgotPasswordRoute = pathname === '/forgot-password';
   const isAuthCallbackRoute = pathname === '/auth/callback';
   const isReminderDispatchRoute = pathname === '/api/reminders/dispatch';
+  // Only these explicit public booking routes bypass staff login. The API itself
+  // enforces publication, field validation, bot checks and throttling.
+  if (/^\/reservar\/[a-z0-9][a-z0-9-]{2,59}$/.test(pathname) || /^\/api\/public-agenda\/[a-z0-9][a-z0-9-]{2,59}$/.test(pathname)) return NextResponse.next({request});
+  // These routes perform their own authentication or serve public PWA metadata.
+  const isPushRoute = pathname === '/api/notifications/dispatch' || pathname === '/api/notifications/push' || pathname === '/sw.js' || pathname === '/manifest.webmanifest';
+  if (isPushRoute) return NextResponse.next({ request });
 
   if (!config) {
     // Local development stays usable without Supabase, but a production

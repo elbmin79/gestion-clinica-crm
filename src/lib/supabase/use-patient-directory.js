@@ -19,6 +19,11 @@ export function usePatientDirectory(enabled) {
   const refresh = useCallback(() => setReloadKey(value => value + 1), []);
   const chooseClinic = useCallback((id) => {
     if (!memberships.some(membership => membership.clinicId === id)) return;
+    // A notification link selects its clinic once. Explicit switching must not
+    // be overridden by the old link on the next directory reload.
+    const url=new URL(window.location.href);
+    url.searchParams.delete('clinic');url.searchParams.delete('appointment');
+    window.history.replaceState(window.history.state,'',url);
     try { window.sessionStorage.setItem(selectedClinicStorageKey, id); } catch { /* Session selection remains available in memory. */ }
     setClinicId(id);
   }, [memberships]);
@@ -72,10 +77,14 @@ export function usePatientDirectory(enabled) {
       setMemberships(nextMemberships);
 
       let rememberedClinicId = '';
+      const requestedClinicId = new URL(window.location.href).searchParams.get('clinic');
+      if (nextMemberships.some(item => item.clinicId === requestedClinicId)) {
+        try { window.sessionStorage.setItem(selectedClinicStorageKey, requestedClinicId); } catch {}
+      }
       try { rememberedClinicId = window.sessionStorage.getItem(selectedClinicStorageKey) || ''; } catch { /* Continue without a remembered selection. */ }
       const inMemoryMembership = nextMemberships.find(item => item.clinicId === clinicId);
       const rememberedMembership = nextMemberships.find(item => item.clinicId === rememberedClinicId);
-      const activeMembership = inMemoryMembership || rememberedMembership;
+      const activeMembership = nextMemberships.find(item=>item.clinicId===requestedClinicId) || inMemoryMembership || rememberedMembership;
 
       if (!nextMemberships.length) {
         try { window.sessionStorage.removeItem(selectedClinicStorageKey); } catch { /* Ignore unavailable browser storage. */ }

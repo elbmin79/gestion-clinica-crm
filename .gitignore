@@ -9,3 +9,5 @@ dist/
 supabase/bootstrap/clinic-admin.generated.sql
 *.log
 /logo-header.png
+
+supabase/.temp/

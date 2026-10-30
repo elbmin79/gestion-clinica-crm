@@ -1,7 +1,7 @@
 import "./fonts.css";
 import "./globals.css";
 import "./font-tokens.css";
-import App from "./app-shell";
+import RouteShell from "./route-shell";
 
 export const metadata = {
   title: "CRM clínico",
@@ -15,7 +15,7 @@ export const dynamic = "force-dynamic";
 export default function RootLayout({ children }) {
   return (
     <html lang="es">
-      <body><App>{children}</App></body>
+      <body><RouteShell>{children}</RouteShell></body>
     </html>
   );
 }

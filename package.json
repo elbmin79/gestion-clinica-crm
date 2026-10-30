@@ -8,7 +8,8 @@
     "clinic:setup": "node scripts/prepare-clinic-setup.mjs",
     "test": "node --test",
     "build": "next build",
-    "start": "next start --hostname 127.0.0.1"
+    "start": "next start --hostname 127.0.0.1",
+    "notifications:worker": "node --env-file=.env.local scripts/notification-worker.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",
@@ -16,7 +17,8 @@
     "lucide-react": "1.61.0",
     "next": "16.4.3",
     "react": "19.3.1",
-    "react-dom": "19.3.1"
+    "react-dom": "19.3.1",
+    "web-push": "3.6.7"
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.13"

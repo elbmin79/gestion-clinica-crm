@@ -19,9 +19,16 @@ export async function signIn(formData) {
   redirect(next);
 }
 
-export async function signOut() {
+export async function signOut(formData) {
   const supabase = await createClient();
-  if (supabase) await supabase.auth.signOut();
+  if (supabase) {
+    const endpoint=String(formData?.get('pushEndpoint') || '');
+    if(endpoint && endpoint.length<=2048){
+      const {data:{user}}=await supabase.auth.getUser();
+      if(user)await supabase.from('staff_push_subscriptions').delete().eq('user_id',user.id).eq('endpoint',endpoint);
+    }
+    await supabase.auth.signOut();
+  }
   redirect('/login');
 }
 
