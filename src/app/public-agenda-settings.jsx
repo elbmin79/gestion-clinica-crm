@@ -87,7 +87,6 @@ export default function PublicAgendaSettings({clinicId,clinicName,role,permissio
     const formatDate=value=>new Intl.DateTimeFormat('es-MX',{timeZone:timeZone||'America/Tijuana',dateStyle:'medium'}).format(new Date(`${value}T12:00:00`));
     const selectedRequests=requests;
     return <div className="public-agenda-settings public-agenda-read-only" aria-busy={status==='loading'}>
-      <div className="settings-preview-banner"><CalendarDays size={17}/><div><strong>Agenda pública · Solo lectura</strong><span>Puedes consultar la configuración y las solicitudes. No tienes acceso para hacer cambios.</span></div></div>
       {error&&<p className="professional-error" role="alert"><CircleAlert size={15}/>{error}</p>}
       {status==='loading'&&<p className="public-agenda-hint" role="status">Cargando agenda pública…</p>}
       {status==='error'&&<p className="professional-error" role="status"><CircleAlert size={15}/>No se pudo cargar la agenda pública.</p>}
