@@ -19,8 +19,8 @@ test('never falls back to mock sending unless explicitly selected', () => {
   assert.equal(resolveWhatsAppProviderMode({ NODE_ENV: 'production', WHATSAPP_PROVIDER_MODE: 'twilio', TWILIO_WHATSAPP_ENABLED: 'false' }), 'disabled');
 });
 
-test('routes Twilio sender by branch and only uses the explicit default fallback', () => {
-  const settings = { provider_mode: 'twilio', allow_default_fallback: false };
+test('routes Twilio sender only to its assigned branch', () => {
+  const settings = { provider_mode: 'twilio', allow_default_fallback: true };
   const senders = [
     { sender_key: 'twilio:+14155550123', is_default: true, branch_id: null },
     { sender_key: 'twilio:+14155550124', branch_id: 'branch-east' },
@@ -30,11 +30,11 @@ test('routes Twilio sender by branch and only uses the explicit default fallback
   assert.equal(resolveTwilioSender(settings, senders, 'branch-east').sender.sender_key, 'twilio:+14155550124');
   assert.equal(resolveTwilioSender(settings, senders, 'branch-west').ok, false);
   assert.equal(resolveTwilioSender(settings, senders, 'branch-west').ok, false);
-  assert.equal(resolveTwilioSender({ ...settings, allow_default_fallback: true }, senders, 'branch-west').sender.sender_key, 'twilio:+14155550123');
+  assert.equal(resolveTwilioSender(settings, senders, 'branch-west').ok, false);
 });
 
-test('routes to the exact branch sender and only uses explicit default fallback', () => {
-  const settings = { provider_mode: 'mock', allow_default_fallback: false };
+test('routes mock sender only to its assigned branch', () => {
+  const settings = { provider_mode: 'mock', allow_default_fallback: true };
   const senders = [
     { sender_key: 'mock:default', is_default: true, branch_id: null },
     { sender_key: 'mock:east', branch_id: 'branch-east' },
@@ -43,7 +43,7 @@ test('routes to the exact branch sender and only uses explicit default fallback'
   assert.equal(resolveMockSender(settings, senders, 'branch-east').sender.sender_key, 'mock:east');
   assert.equal(resolveMockSender(settings, senders, 'branch-west').ok, false);
   assert.equal(resolveMockSender(settings, senders, 'branch-west').ok, false);
-  assert.equal(resolveMockSender({ ...settings, allow_default_fallback: true }, senders, 'branch-west').sender.sender_key, 'mock:default');
+  assert.equal(resolveMockSender(settings, senders, 'branch-west').ok, false);
   assert.equal(resolveMockSender({ ...settings, provider_mode: 'cloud' }, senders, 'branch-east').ok, false);
 });
 

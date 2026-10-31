@@ -18,7 +18,7 @@ export async function loadClinicWhatsAppRoute(client, clinicId, branchId, templa
 
   const route = resolveMockSender(settings, senders, branchId);
   const selectedRoute = settings.provider_mode === 'twilio'
-    ? resolveTwilioSender(settings, senders, branchId)
+    ? resolveTwilioSender({ ...settings, allow_default_fallback: false }, senders, branchId)
     : route;
   if (!selectedRoute.ok) return selectedRoute;
   if (!templateReadyForKind(settings, templateKind)) {

@@ -25,10 +25,6 @@ export function resolveMockSender(settings, senders, branchId) {
     ? activeSenders.find(sender => sender.branch_id === branchId)
     : null;
   if (branchSender) return { ok: true, sender: branchSender, route: 'branch' };
-  if (settings.allow_default_fallback === true) {
-    const defaultSender = activeSenders.find(sender => sender.is_default === true && !sender.branch_id);
-    if (defaultSender) return { ok: true, sender: defaultSender, route: 'default' };
-  }
   return { ok: false, reason: 'No se configuró un número simulado para esta sucursal.' };
 }
 
@@ -37,10 +33,6 @@ export function resolveTwilioSender(settings, senders, branchId) {
   const activeSenders = (senders || []).filter(sender => sender.active !== false && /^twilio:\+[1-9]\d{7,14}$/.test(String(sender.sender_key || '')));
   const branchSender = branchId ? activeSenders.find(sender => sender.branch_id === branchId) : null;
   if (branchSender) return { ok: true, sender: branchSender, route: 'branch' };
-  if (settings.allow_default_fallback === true) {
-    const defaultSender = activeSenders.find(sender => sender.is_default === true && !sender.branch_id);
-    if (defaultSender) return { ok: true, sender: defaultSender, route: 'default' };
-  }
   return { ok: false, reason: 'No hay un número de WhatsApp de Twilio activo para esta sucursal.' };
 }
 
