@@ -130,15 +130,19 @@ export default function WhatsAppSettings({ clinicId, role, branches = [], shared
     && availableSenders.some(available => available.phoneNumber === sender.whatsappNumber)
     && sender.branchIds?.length > 0;
   const readySenderCount = senders.filter(validSender).length;
-  const connectedInboxNumber = inboxSender?.phoneNumber || senders.find(sender => sender.active && sender.branchIds?.length)?.whatsappNumber || '';
+  const connectedNumbers = new Set([
+    inboxSender?.phoneNumber,
+    ...availableSenders.map(sender => sender.phoneNumber),
+  ].filter(Boolean));
+  const inboxConnected = connectedNumbers.size > 0;
   const whatsappReady = deliveryEnabled && readySenderCount > 0
     && templateKinds.some(([kind]) => settings.templateReadiness[kind] && availableTemplates[kind]);
 
   return <div className="whatsapp-settings-content" aria-busy={loading || saving || loadingAvailableSenders}>
     <header className="whatsapp-page-heading"><h1>WhatsApp</h1><p>Configura confirmaciones y recordatorios de citas.</p></header>
-    {connectedInboxNumber ? <div className="whatsapp-settings-connection-notice"><MessageCircle size={18}/><div><strong>La bandeja de conversaciones está conectada</strong><span>La bandeja recibe y responde mensajes con {connectedInboxNumber}.{whatsappReady ? ' Los avisos automáticos de citas también están configurados.' : ' Para activar avisos automáticos, asigna números a las sucursales y configura plantillas aprobadas.'}</span></div></div>
+    {inboxConnected ? <div className="whatsapp-settings-connection-notice"><MessageCircle size={18}/><div><strong>La bandeja de conversaciones está conectada</strong><span>Administra aquí los números que reciben y responden mensajes desde la bandeja.{whatsappReady ? ' Los avisos automáticos de citas también están configurados.' : ' Para activar avisos automáticos, asigna números a las sucursales y configura plantillas aprobadas.'}</span></div></div>
       : <div className={whatsappReady ? 'whatsapp-settings-live-notice' : 'whatsapp-settings-pending-notice'}><ShieldCheck size={18}/><div><strong>{whatsappReady ? 'Notificaciones configuradas' : 'Configura tus notificaciones'}</strong><span>Vincula remitentes ya registrados y activa las plantillas aprobadas que usarás para citas.</span></div></div>}
-    <div className="whatsapp-settings-summary"><div><span>Bandeja de conversaciones</span><strong>{loading ? 'Cargando…' : connectedInboxNumber ? 'Conectada' : 'No conectada'}</strong></div><div><span>Número conectado</span><strong>{loading ? '—' : connectedInboxNumber || 'Sin configurar'}</strong></div><div><span>Números asignables</span><strong>{loading || loadingAvailableSenders ? 'Cargando…' : availableSenders.length ? `${readySenderCount} de ${availableSenders.length} asignados` : 'Sin números disponibles para asignar'}</strong></div><div><span>Avisos automáticos de citas</span><strong>{loading ? 'Cargando…' : whatsappReady ? 'Activos' : 'En configuración'}</strong></div></div>
+    <div className="whatsapp-settings-summary"><div><span>Bandeja de conversaciones</span><strong>{loading || loadingAvailableSenders ? 'Cargando…' : inboxConnected ? 'Conectada' : 'No conectada'}</strong></div><div><span>Números conectados</span><strong>{loadingAvailableSenders ? 'Cargando…' : connectedNumbers.size}</strong></div><div><span>Números asignables</span><strong>{loading || loadingAvailableSenders ? 'Cargando…' : availableSenders.length ? `${readySenderCount} de ${availableSenders.length} asignados` : 'Sin números disponibles para asignar'}</strong></div><div><span>Avisos automáticos de citas</span><strong>{loading ? 'Cargando…' : whatsappReady ? 'Activos' : 'En configuración'}</strong></div></div>
     {loading ? <p className="whatsapp-settings-loading"><LoaderCircle size={16}/> Cargando configuración…</p> : <form className="whatsapp-settings-form" onSubmit={save}>
       <section className="whatsapp-settings-section"><div className="whatsapp-settings-heading"><div><h3>Números de WhatsApp</h3><p>Asigna un número a una o varias sucursales.</p></div></div>
         <p className="whatsapp-settings-helper">Pulsa «Editar sucursales» para cambiar dónde se usa cada número.</p>
