@@ -1,12 +1,17 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Download, Expand, MessageCircle, Paperclip, Search, Send, X } from 'lucide-react';
+import { ArrowLeft, Download, Expand, MessageCircle, Paperclip, Search, Send, X } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { buildWhatsAppTimeline, formatWhatsAppMessageTime, formatWhatsAppThreadTime } from '@/lib/whatsapp/time-format.js';
 import './whatsapp-inbox.css';
 
 function initials(name = '') { return String(name).trim().split(/\s+/).filter(Boolean).slice(0, 2).map(part => part[0]).join('').toUpperCase() || 'W'; }
+function readableMediaName(name = '') {
+  const value = String(name || '').trim();
+  if (!value || /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}\.(?:jpe?g|png|webp)$/i.test(value) || /^image-[\da-f]{6}\.(?:jpe?g|png|webp)$/i.test(value)) return 'Imagen compartida';
+  return value;
+}
 
 export default function WhatsAppInbox({ clinicId = '', sharedMode = false, role = '' }) {
   const [conversations, setConversations] = useState([]);
@@ -146,7 +151,7 @@ export default function WhatsAppInbox({ clinicId = '', sharedMode = false, role 
               : <article className={`whatsapp-message-row is-${item.message.direction}`} key={item.key}>
                 <div className="whatsapp-message-bubble">{item.message.media_content_type?.startsWith('image/') && (() => {
                   const mediaUrl = `/api/whatsapp/media?clinicId=${encodeURIComponent(clinicId)}&messageId=${encodeURIComponent(item.message.id)}`;
-                  const filename = item.message.media_filename || 'imagen-compartida';
+                  const filename = readableMediaName(item.message.media_filename);
                   return <div className="whatsapp-message-image-wrap">
                     <button type="button" className="whatsapp-message-image-open" onClick={() => setExpandedImage({ src: mediaUrl, filename })} aria-label="Ampliar imagen">
                       <img className="whatsapp-message-media" src={mediaUrl} alt={filename} loading="lazy"/>
@@ -171,13 +176,16 @@ export default function WhatsAppInbox({ clinicId = '', sharedMode = false, role 
       </main>
     </div>
     <dialog ref={imageDialogRef} className="whatsapp-image-dialog" aria-label="Vista ampliada de imagen" onClose={() => setExpandedImage(null)} onClick={event => { if (event.target === imageDialogRef.current) imageDialogRef.current.close(); }}>
-      {expandedImage && <div className="whatsapp-image-dialog-content">
-        <div className="whatsapp-image-dialog-actions">
-          <a href={`${expandedImage.src}&download=1`} aria-label="Descargar imagen" title="Descargar imagen"><Download size={18}/></a>
-          <button type="button" onClick={() => imageDialogRef.current?.close()} aria-label="Cerrar imagen" title="Cerrar"><X size={18}/></button>
-        </div>
-        <img src={expandedImage.src} alt={expandedImage.filename}/>
-      </div>}
+      {expandedImage && <section className="whatsapp-image-dialog-frame">
+        <header className="whatsapp-image-dialog-header">
+          <div className="whatsapp-image-dialog-heading"><strong>Vista previa</strong><span>{expandedImage.filename}</span></div>
+          <div className="whatsapp-image-dialog-actions">
+            <a href={`${expandedImage.src}&download=1`}><Download size={16}/>Descargar</a>
+            <button type="button" onClick={() => imageDialogRef.current?.close()}><ArrowLeft size={16}/>Volver</button>
+          </div>
+        </header>
+        <div className="whatsapp-image-dialog-canvas"><img src={expandedImage.src} alt={expandedImage.filename}/></div>
+      </section>}
     </dialog>
     {error && <p role="alert" className="whatsapp-inbox-error">{error}</p>}
   </section>;
