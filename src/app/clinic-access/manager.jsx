@@ -86,7 +86,6 @@ export default function ClinicAccessManager({ clinicId }) {
         setError(result.message);
         return;
       }
-      setSuccess(`${account.name || account.email}: acceso asignado como ${roleLabels[role]}.`);
       setReloadKey(value => value + 1);
     } catch {
       setError('No se pudo asignar acceso a la clínica.');
