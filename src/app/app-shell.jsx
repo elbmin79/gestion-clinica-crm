@@ -423,6 +423,11 @@ function App({ children }) {
   const patientSearchRef = useRef(null);
   const [focusPatientSearch, setFocusPatientSearch] = useState(false);
   const page = routePages[pathname] || 'overview';
+  useEffect(() => {
+    if (sharedMode && sharedDirectory.role === 'billing' && sharedDirectory.status === 'finance_only' && page !== 'payments' && page !== 'profile') {
+      router.replace('/pagos');
+    }
+  }, [sharedMode, sharedDirectory.role, sharedDirectory.status, page, router]);
   const setPage = (nextPage) => {
     const route = pageRoutes[nextPage];
     setMobileNavOpen(false);
@@ -517,11 +522,15 @@ function App({ children }) {
   const canReadSharedPayments = ['admin', 'receptionist'].includes(sharedDirectory.role);
   const sharedPaymentWorkspace = useClinicPayments(sharedMode && (page === 'payments' || (page === 'agenda' && canReadSharedPayments)), sharedDirectory.clinicId, sharedDirectory.role, sharedDirectory.timeZone, { branches, providers, businesses });
   const sharedReminderWorkspace = useClinicReminders(sharedMode && (page === 'reminders' || page === 'whatsapp') && sharedDirectory.status === 'ready', sharedDirectory.clinicId, sharedDirectory.role, sharedDirectory.timeZone);
-  const sharedPageStatus = !sharedMode ? 'idle' : sharedDirectory.status !== 'ready' ? sharedDirectory.status
+  const isFinanceOnly = sharedMode && sharedDirectory.role === 'billing';
+  const sharedPageStatus = !sharedMode ? 'idle' : isFinanceOnly
+    ? page === 'payments' ? (sharedPaymentWorkspace.status === 'idle' ? 'loading' : sharedPaymentWorkspace.status) : page === 'profile' ? 'ready' : 'no_access'
+    : sharedDirectory.status !== 'ready' ? sharedDirectory.status
     : (page === 'overview' || page === 'agenda') ? (sharedAgenda.status === 'idle' ? 'loading' : sharedAgenda.status)
       : page === 'payments' ? (sharedPaymentWorkspace.status === 'idle' ? 'loading' : sharedPaymentWorkspace.status)
         : page === 'reminders' || page === 'whatsapp' ? (sharedReminderWorkspace.status === 'idle' ? 'loading' : sharedReminderWorkspace.status) : 'ready';
-  const sharedPageRetry = sharedDirectory.status !== 'ready' ? sharedDirectory.refresh
+  const sharedPageRetry = isFinanceOnly && page === 'payments' ? sharedPaymentWorkspace.refresh
+    : sharedDirectory.status !== 'ready' ? sharedDirectory.refresh
     : page === 'agenda' || page === 'overview' ? sharedAgenda.refresh
       : page === 'payments' ? sharedPaymentWorkspace.refresh
       : page === 'reminders' || page === 'whatsapp' ? sharedReminderWorkspace.refresh : sharedDirectory.refresh;
@@ -1404,7 +1413,9 @@ function App({ children }) {
     ...(typeof selectedContractRecord.diagnosisAccepted === 'boolean' ? { diagnosisAccepted: selectedContractRecord.diagnosisAccepted } : selectedContractRecord.diagnosisId ? { diagnosisAccepted: true } : {}),
   } : selectedPatient;
 
-  const nav = [
+  const nav = isFinanceOnly ? [
+    { section: 'FINANZAS', links: [{ id: 'payments', label: 'Pagos', icon: DollarSign }] },
+  ] : [
     { section: 'PRINCIPAL', links: [{ id: 'overview', label: 'Resumen', icon: LayoutDashboard }, { id: 'agenda', label: 'Agenda', icon: CalendarDays, count: String(workspaceAppointments.filter(a => !a.date || a.date === agendaDate).length) }, { id: 'patients', label: 'Pacientes', icon: UsersRound }] },
     { section: 'OPERACIÓN', links: [{ id: 'payments', label: 'Pagos', icon: DollarSign }, { id: 'reminders', label: 'Recordatorios', icon: Bell }, { id: 'whatsapp', label: 'WhatsApp', icon: MessageCircle }] },
     { section: 'GESTIÓN CLÍNICA', links: [{ id: 'consents', label: 'Consentimientos', icon: FileCheck2, count: String(workspacePatients.filter(p => p.consent === 'Pendiente').length) }, { id: 'contracts', label: 'Contratos', icon: FileText }, { id: 'team', label: 'Equipo y sucursales', icon: UserRound }] },
@@ -1428,11 +1439,11 @@ function App({ children }) {
         </div>}
       </div>
       <nav className="side-nav">{nav.map(group=><div className="nav-group" key={group.section}><div className="nav-caption">{group.section}</div>{group.links.map(item=><button key={item.id} className={`nav-item ${page===item.id?'active':''}`} onClick={()=>setPage(item.id)}><item.icon size={17}/><span>{item.label}</span>{item.count&&<span className="nav-count">{item.count}</span>}</button>)}</div>)}</nav>
-      <div className="sidebar-bottom"><button className={`nav-item ${page==='settings'?'active':''}`} onClick={()=>setPage('settings')}><Settings2 size={17}/><span>Configuración</span></button><div className="profile-row"><button type="button" className="profile-identity" onClick={()=>setPage('profile')} aria-label="Abrir mi perfil"><Avatar initials={profileInitials(displayUserName)} tone="navy" imageUrl={userProfile.avatarUrl}/><span className="profile-copy"><strong>{profileLoaded?displayUserName:'Cargando perfil…'}</strong></span></button><button type="button" className="profile-logout" onClick={()=>setModal('confirm-logout')}>Cerrar sesión</button></div></div>
+      <div className="sidebar-bottom">{!isFinanceOnly&&<button className={`nav-item ${page==='settings'?'active':''}`} onClick={()=>setPage('settings')}><Settings2 size={17}/><span>Configuración</span></button>}<div className="profile-row"><button type="button" className="profile-identity" onClick={()=>setPage('profile')} aria-label="Abrir mi perfil"><Avatar initials={profileInitials(displayUserName)} tone="navy" imageUrl={userProfile.avatarUrl}/><span className="profile-copy"><strong>{profileLoaded?displayUserName:'Cargando perfil…'}</strong></span></button><button type="button" className="profile-logout" onClick={()=>setModal('confirm-logout')}>Cerrar sesión</button></div></div>
     </aside>
     {mobileNavOpen&&<button className="mobile-nav-backdrop" aria-label="Cerrar navegación" onClick={()=>setMobileNavOpen(false)}/>}
     <main className="main-shell">
-      <header className="topbar"><button className="mobile-menu-button" aria-label="Abrir navegación" aria-expanded={mobileNavOpen} onClick={()=>setMobileNavOpen(open=>!open)}><Menu size={18}/></button><div className="breadcrumbs"><span>{activeClinicName}</span><ChevronRight size={14}/><strong>{({overview:'Resumen',agenda:'Agenda',payments:'Pagos',reminders:'Recordatorios',whatsapp:'WhatsApp',patients:'Pacientes',consents:'Consentimientos',contracts:'Contratos',team:'Equipo y sucursales',settings:'Configuración',profile:'Mi perfil'})[page]}</strong></div><div className="topbar-actions"><button className="search-shortcut" onClick={openPatientSearch}><Search size={15}/><span>Buscar</span><kbd>⌘ K</kbd></button><span className="topbar-divider"/><IconButton className="theme-toggle-button" aria-label={theme==='dark'?'Activar modo claro':'Activar modo oscuro'} aria-pressed={theme==='dark'} title={theme==='dark'?'Cambiar a modo claro':'Cambiar a modo oscuro'} onClick={()=>setTheme(current=>current==='dark'?'light':'dark')}>{theme==='dark'?<Sun size={18}/>:<Moon size={18}/>}</IconButton><NotificationCenter key={notificationScope} {...notificationFeed}/><button type="button" className="topbar-profile-button" aria-label="Abrir mi perfil" onClick={()=>setPage('profile')}><Avatar initials={profileInitials(displayUserName)} tone="navy" imageUrl={userProfile.avatarUrl}/></button></div></header>
+      <header className="topbar"><button className="mobile-menu-button" aria-label="Abrir navegación" aria-expanded={mobileNavOpen} onClick={()=>setMobileNavOpen(open=>!open)}><Menu size={18}/></button><div className="breadcrumbs"><span>{activeClinicName}</span><ChevronRight size={14}/><strong>{({overview:'Resumen',agenda:'Agenda',payments:'Pagos',reminders:'Recordatorios',whatsapp:'WhatsApp',patients:'Pacientes',consents:'Consentimientos',contracts:'Contratos',team:'Equipo y sucursales',settings:'Configuración',profile:'Mi perfil'})[page]}</strong></div><div className="topbar-actions">{!isFinanceOnly&&<><button className="search-shortcut" onClick={openPatientSearch}><Search size={15}/><span>Buscar</span><kbd>⌘ K</kbd></button><span className="topbar-divider"/></>}<IconButton className="theme-toggle-button" aria-label={theme==='dark'?'Activar modo claro':'Activar modo oscuro'} aria-pressed={theme==='dark'} title={theme==='dark'?'Cambiar a modo claro':'Cambiar a modo oscuro'} onClick={()=>setTheme(current=>current==='dark'?'light':'dark')}>{theme==='dark'?<Sun size={18}/>:<Moon size={18}/>}</IconButton>{!isFinanceOnly&&<NotificationCenter key={notificationScope} {...notificationFeed}/>}<button type="button" className="topbar-profile-button" aria-label="Abrir mi perfil" onClick={()=>setPage('profile')}><Avatar initials={profileInitials(displayUserName)} tone="navy" imageUrl={userProfile.avatarUrl}/></button></div></header>
     <div className="content-area">
         {!sharedMode && <div className="demo-storage-banner" role="status"><ShieldCheck size={15}/> Modo de demostración: usa solo datos ficticios. Los cambios se guardan en este navegador; no es un sistema seguro para información real de pacientes. Conecta el proyecto Supabase de la clínica antes de usarlo en operación.</div>}
         {sharedMode && <SharedDataStatus status={sharedPageStatus} memberships={sharedDirectory.memberships} chooseClinic={sharedDirectory.chooseClinic} retry={sharedPageRetry}/>}

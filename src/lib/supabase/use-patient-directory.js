@@ -107,6 +107,13 @@ export function usePatientDirectory(enabled) {
       try { window.sessionStorage.setItem(selectedClinicStorageKey, selected.clinicId); } catch { /* Session selection remains available in memory. */ }
       setRole(selected.role);
       setTimeZone(selected.timeZone);
+      if (selected.role === 'billing') {
+        // Finance users intentionally do not load the clinical patient directory.
+        // Their access is served by the finance workspace instead.
+        setDirectory(emptyDirectory);
+        setStatus('finance_only');
+        return;
+      }
       if (!['admin', 'clinician', 'receptionist'].includes(selected.role)) {
         setDirectory(emptyDirectory); setStatus('no_patient_access');
         return;
