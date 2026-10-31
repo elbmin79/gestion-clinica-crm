@@ -8,8 +8,55 @@ function normalizedApprovalStatus(record) {
     || record?.whatsapp
     || record?.approval_requests?.whatsapp
     || record?.approval_content?.channel;
+  if (!approval) return 'draft';
   const status = String(approval?.status || '').toLowerCase();
   return ['received', 'pending', 'approved', 'rejected', 'paused', 'disabled'].includes(status) ? status : 'unavailable';
+}
+
+async function postTwilioContent(path, body, { env = process.env, fetchImpl = globalThis.fetch } = {}) {
+  const accountSid = String(env.TWILIO_ACCOUNT_SID || '').trim();
+  const authToken = String(env.TWILIO_AUTH_TOKEN || '').trim();
+  if (!/^AC[0-9a-fA-F]{32}$/.test(accountSid) || !authToken) throw new Error('WhatsApp templates are not configured.');
+  const response = await fetchImpl(`https://content.twilio.com/v1/${path}`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Basic ${Buffer.from(`${accountSid}:${authToken}`).toString('base64')}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(15000),
+    cache: 'no-store',
+  });
+  let payload = {};
+  try { payload = await response.json(); } catch { /* Use the generic error below. */ }
+  if (!response.ok) throw new Error('Twilio rejected the WhatsApp template request.');
+  return payload;
+}
+
+export async function createTwilioWhatsAppTemplate({ name, body, env = process.env, fetchImpl = globalThis.fetch } = {}) {
+  const friendlyName = String(name || '').trim();
+  const messageBody = String(body || '').trim();
+  if (friendlyName.length < 3 || friendlyName.length > 60) throw new Error('El nombre debe tener entre 3 y 60 caracteres.');
+  if (messageBody.length < 10 || messageBody.length > 1024 || !messageBody.includes('{{1}}') || !messageBody.includes('{{2}}')) {
+    throw new Error('El mensaje debe incluir {{1}} para la fecha y {{2}} para la hora de la cita.');
+  }
+  const payload = await postTwilioContent('Content', {
+    friendly_name: friendlyName,
+    language: 'es_MX',
+    variables: { '1': '15 de noviembre', '2': '3:30 p. m.' },
+    types: { 'twilio/text': { body: messageBody } },
+  }, { env, fetchImpl });
+  if (!/^HX[0-9a-fA-F]{32}$/.test(String(payload?.sid || ''))) throw new Error('Twilio no devolvió el identificador de la plantilla.');
+  return { sid: payload.sid, name: friendlyName, language: 'es_MX', status: 'draft' };
+}
+
+export async function submitTwilioWhatsAppTemplateApproval({ sid, env = process.env, fetchImpl = globalThis.fetch } = {}) {
+  if (!/^HX[0-9a-fA-F]{32}$/.test(String(sid || ''))) throw new Error('La plantilla seleccionada no es válida.');
+  const payload = await postTwilioContent(`Content/${sid}/ApprovalRequests/WhatsApp`, {
+    name: `recordatorio_cita_${String(sid).slice(-8).toLowerCase()}`,
+    category: 'UTILITY',
+  }, { env, fetchImpl });
+  return { sid, status: String(payload?.status || 'pending').toLowerCase() };
 }
 
 export async function listTwilioWhatsAppTemplates({ env = process.env, fetchImpl = globalThis.fetch } = {}) {

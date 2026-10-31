@@ -1,4 +1,4 @@
-import { listRegisteredTwilioWhatsAppSenders, listTwilioWhatsAppTemplates } from './twilio-whatsapp.server.js';
+import { createTwilioWhatsAppTemplate, listRegisteredTwilioWhatsAppSenders, listTwilioWhatsAppTemplates, submitTwilioWhatsAppTemplateApproval } from './twilio-whatsapp.server.js';
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const twilioSenderKeyPattern = /^twilio:\+[1-9]\d{7,14}$/;
@@ -6,16 +6,9 @@ const templateKinds = ['confirmation_2d', 'reminder_1d', 'reminder_5h'];
 const defaultReadiness = Object.freeze({ confirmation_2d: false, reminder_1d: false, reminder_5h: false });
 const contentSidPattern = /^HX[0-9a-fA-F]{32}$/;
 const twilioSandboxNumber = '+14155238886';
-const sandboxAppointmentTemplate = Object.freeze({
-  sid: 'HXb5b62575e6e4ff6129ad7c8efe1f983e',
-  name: 'Recordatorio de cita',
-  language: 'en',
-  status: 'approved',
-});
 
-function withSandboxAppointmentTemplate(templates, allowSandboxTemplate) {
-  if (!allowSandboxTemplate || templates.some(template => template.sid === sandboxAppointmentTemplate.sid)) return templates;
-  return [...templates, sandboxAppointmentTemplate];
+function isSpanishTemplate(template) {
+  return /^es(?:[-_]|$)/i.test(String(template?.language || '').trim());
 }
 
 function configuredInboxSender(env) {
@@ -24,7 +17,7 @@ function configuredInboxSender(env) {
   const sandboxEnabled = String(env.TWILIO_WHATSAPP_SANDBOX_ENABLED || '').toLowerCase() !== 'false';
   const phoneNumber = configuredNumber || twilioSandboxNumber;
   return sandboxEnabled && credentialsAvailable && /^\+[1-9]\d{7,14}$/.test(phoneNumber)
-    ? { phoneNumber, displayLabel: 'WhatsApp', sandbox: phoneNumber === twilioSandboxNumber }
+    ? { phoneNumber, displayLabel: 'WhatsApp' }
     : null;
 }
 
@@ -33,6 +26,8 @@ export function createWhatsAppSettingsActions({
   env = process.env,
   listWhatsAppSenders = listRegisteredTwilioWhatsAppSenders,
   getTemplates = listTwilioWhatsAppTemplates,
+  createTemplate = createTwilioWhatsAppTemplate,
+  submitTemplateApproval = submitTwilioWhatsAppTemplateApproval,
 } = {}) {
   async function authorizedAdmin(clinicId) {
     if (!uuidPattern.test(String(clinicId || ''))) return { error: 'Selecciona una clínica válida.' };
@@ -115,10 +110,8 @@ export function createWhatsAppSettingsActions({
       ]);
       const registeredSenders = senderResult.status === 'fulfilled' ? senderResult.value : [];
       if (senderResult.status === 'rejected') senderLookupError = 'No se pudieron consultar todos los números registrados en Twilio.';
-      if (templateResult.status === 'fulfilled') templates = templateResult.value;
+      if (templateResult.status === 'fulfilled') templates = templateResult.value.filter(isSpanishTemplate);
       else templateLookupError = 'No se pudieron consultar las plantillas de Twilio.';
-      const onlySandboxSenders = registeredSenders.every(sender => sender.phoneNumber === twilioSandboxNumber);
-      templates = withSandboxAppointmentTemplate(templates, inboxSender?.sandbox === true && onlySandboxSenders);
       const senders = [...(inboxSender ? [inboxSender] : []), ...registeredSenders]
         .filter((sender, index, rows) => rows.findIndex(row => row.phoneNumber === sender.phoneNumber) === index);
       if (!senders.length && senderLookupError) {
@@ -127,6 +120,33 @@ export function createWhatsAppSettingsActions({
       return { ok: true, senders, templates, senderLookupError, templateLookupError, deliveryEnabled, ...(inboxSender ? { inboxSender } : {}) };
     } catch {
       return { ok: false, message: 'No se pudo cargar la configuración de WhatsApp.', templates, templateLookupError, deliveryEnabled, ...(inboxSender ? { inboxSender } : {}) };
+    }
+  }
+
+  async function createTemplateDraft(input) {
+    try {
+      const context = await authorizedAdmin(input?.clinicId);
+      if (context.error) return { ok: false, message: context.error };
+      const template = await createTemplate({ name: input?.name, body: input?.body, env });
+      return { ok: true, template, message: 'Borrador guardado. Aún no puede usarse en avisos.' };
+    } catch (error) {
+      return { ok: false, message: error?.message?.startsWith('El ') || error?.message?.startsWith('La plantilla') ? error.message : 'No se pudo guardar el borrador. Revisa la conexión de WhatsApp e inténtalo de nuevo.' };
+    }
+  }
+
+  async function submitTemplate(input) {
+    try {
+      const context = await authorizedAdmin(input?.clinicId);
+      if (context.error) return { ok: false, message: context.error };
+      const senders = await listWhatsAppSenders({ env });
+      if (!senders.length) return { ok: false, message: 'Registra primero un remitente de WhatsApp para enviar la plantilla a aprobación.' };
+      const templates = (await getTemplates({ env })).filter(isSpanishTemplate);
+      const draft = templates.find(template => template.sid === input?.sid && template.status === 'draft');
+      if (!draft) return { ok: false, message: 'Solo puedes enviar a aprobación un borrador en español.' };
+      const result = await submitTemplateApproval({ sid: draft.sid, env });
+      return { ok: true, template: { ...draft, status: result.status || 'pending' }, message: 'Plantilla enviada a aprobación.' };
+    } catch {
+      return { ok: false, message: 'No se pudo enviar la plantilla a aprobación. Inténtalo de nuevo más tarde.' };
     }
   }
 
@@ -148,10 +168,7 @@ export function createWhatsAppSettingsActions({
         || templateKinds.some(kind => templateContentSids[kind] != null && !contentSidPattern.test(String(templateContentSids[kind])))) {
         return { ok: false, message: 'La selección de plantillas no es válida.' };
       }
-      const availableTemplates = withSandboxAppointmentTemplate(
-        await getTemplates({ env }),
-        senders.length > 0 && senders.every(sender => String(sender?.whatsappNumber || '').trim() === twilioSandboxNumber),
-      );
+      const availableTemplates = (await getTemplates({ env })).filter(isSpanishTemplate);
       const approvedSids = new Set(availableTemplates.filter(template => template.status === 'approved').map(template => template.sid));
       if (templateKinds.some(kind => readiness[kind] && !approvedSids.has(templateContentSids[kind]))) {
         return { ok: false, message: 'Selecciona una plantilla aprobada para cada aviso que quieras activar.' };
@@ -209,5 +226,5 @@ export function createWhatsAppSettingsActions({
     }
   }
 
-  return { load, loadAvailableSenders, save };
+  return { load, loadAvailableSenders, save, createTemplateDraft, submitTemplate };
 }
