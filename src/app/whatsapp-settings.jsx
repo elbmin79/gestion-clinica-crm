@@ -140,27 +140,30 @@ export default function WhatsAppSettings({ clinicId, role, branches = [], shared
       : <div className={whatsappReady ? 'whatsapp-settings-live-notice' : 'whatsapp-settings-pending-notice'}><ShieldCheck size={18}/><div><strong>{whatsappReady ? 'Notificaciones configuradas' : 'Configura tus notificaciones'}</strong><span>Vincula remitentes ya registrados y activa las plantillas aprobadas que usarás para citas.</span></div></div>}
     <div className="whatsapp-settings-summary"><div><span>Bandeja de conversaciones</span><strong>{loading ? 'Cargando…' : connectedInboxNumber ? 'Conectada' : 'No conectada'}</strong></div><div><span>Número conectado</span><strong>{loading ? '—' : connectedInboxNumber || 'Sin configurar'}</strong></div><div><span>Números asignables</span><strong>{loading || loadingAvailableSenders ? 'Cargando…' : availableSenders.length ? `${readySenderCount} de ${availableSenders.length} asignados` : 'Sin números disponibles para asignar'}</strong></div><div><span>Avisos automáticos de citas</span><strong>{loading ? 'Cargando…' : whatsappReady ? 'Activos' : 'En configuración'}</strong></div></div>
     {loading ? <p className="whatsapp-settings-loading"><LoaderCircle size={16}/> Cargando configuración…</p> : <form className="whatsapp-settings-form" onSubmit={save}>
-      <section className="whatsapp-settings-section"><div className="whatsapp-settings-heading"><div><h3>Números de WhatsApp</h3><p>Asigna cada número disponible a su sucursal.</p></div></div>
-        <p className="whatsapp-settings-helper">Cada número puede asignarse a una o varias sucursales. Pulsa Editar para cambiar las sucursales seleccionadas.</p>
-        {connectedInboxNumber && <div className="whatsapp-connected-number-row"><span><MessageCircle size={16}/></span><div><strong>Número conectado a la bandeja</strong><small>{connectedInboxNumber} · Recibe y responde conversaciones</small></div><b>Conectado</b></div>}
+      <section className="whatsapp-settings-section"><div className="whatsapp-settings-heading"><div><h3>Números de WhatsApp</h3><p>Asigna un número a una o varias sucursales.</p></div></div>
+        <p className="whatsapp-settings-helper">Pulsa «Editar sucursales» para cambiar dónde se usa cada número.</p>
         {senderLookupError && <p className="whatsapp-settings-error" role="status"><CircleAlert size={15}/>{senderLookupError}</p>}
         {!senderLookupError && !loadingAvailableSenders && availableSenders.length === 0 && <p className="whatsapp-settings-empty">No se encontraron números de WhatsApp disponibles para asignar.</p>}
         {senders.length ? <div className="whatsapp-sender-list">{senders.map(sender => {
           const isEditing = editingAssignments.has(sender.senderKey);
-          return <div className="whatsapp-sender-row" key={sender.senderKey}>
-          <div className="whatsapp-sender-label"><span>Número de WhatsApp</span><strong>{sender.whatsappNumber || sender.displayLabel}</strong></div>
-          <div className="whatsapp-branch-assignments">
-            <div className="whatsapp-branch-assignments-heading"><strong>Sucursales</strong><button className="button outline compact" type="button" aria-pressed={isEditing} onClick={() => setEditingAssignments(current => { const next = new Set(current); if (next.has(sender.senderKey)) next.delete(sender.senderKey); else next.add(sender.senderKey); return next; })}>{isEditing ? <><Check size={14}/> Listo</> : <><Pencil size={14}/> Editar</>}</button></div>
-            <fieldset className="whatsapp-branch-checklist" aria-label={`Sucursales asignadas a ${sender.whatsappNumber || sender.displayLabel}`} disabled={!isEditing}>
-              {branches.map(branch => {
-                const checked = sender.branchIds?.includes(branch.id) || false;
-                const assignedElsewhere = senders.some(other => other.senderKey !== sender.senderKey && other.branchIds?.includes(branch.id));
-                return <label key={branch.id} className={assignedElsewhere && !checked ? 'is-unavailable' : ''}><input type="checkbox" checked={checked} disabled={!isEditing || (assignedElsewhere && !checked)} onChange={event => updateSender(sender.senderKey, 'branchIds', event.target.checked ? [...(sender.branchIds || []), branch.id] : (sender.branchIds || []).filter(id => id !== branch.id))}/><span>{branch.name}</span></label>;
-              })}
-            </fieldset>
-          </div>
-          {!availableSenders.some(item => item.phoneNumber === sender.whatsappNumber) && <button className="icon-button outline" type="button" aria-label={`Quitar el número no disponible ${sender.whatsappNumber}`} onClick={() => setSenders(current => current.filter(item => item.senderKey !== sender.senderKey))}><Trash2 size={15}/></button>}
-        </div>})}</div> : null}
+          const assignedBranches = branches.filter(branch => sender.branchIds?.includes(branch.id));
+          return <article className={`whatsapp-sender-row${isEditing ? ' is-editing' : ''}`} key={sender.senderKey}>
+            <div className="whatsapp-sender-row-heading">
+              <div className="whatsapp-sender-label"><span>Número de WhatsApp</span><strong>{sender.whatsappNumber || sender.displayLabel}</strong></div>
+              <button className="button outline compact whatsapp-assignment-edit" type="button" aria-pressed={isEditing} onClick={() => setEditingAssignments(current => { const next = new Set(current); if (next.has(sender.senderKey)) next.delete(sender.senderKey); else next.add(sender.senderKey); return next; })}>{isEditing ? <><Check size={14}/> Listo</> : <><Pencil size={14}/> Editar sucursales</>}</button>
+              {!availableSenders.some(item => item.phoneNumber === sender.whatsappNumber) && <button className="icon-button outline" type="button" aria-label={`Quitar el número no disponible ${sender.whatsappNumber}`} onClick={() => setSenders(current => current.filter(item => item.senderKey !== sender.senderKey))}><Trash2 size={15}/></button>}
+            </div>
+            <div className="whatsapp-branch-assignments">
+              <div className="whatsapp-branch-assignments-heading"><strong>Sucursales</strong>{!isEditing && <span>{assignedBranches.length ? `${assignedBranches.length} asignada${assignedBranches.length === 1 ? '' : 's'}` : 'Sin sucursales asignadas'}</span>}</div>
+              {isEditing ? <fieldset className="whatsapp-branch-checklist" aria-label={`Sucursales asignadas a ${sender.whatsappNumber || sender.displayLabel}`}>
+                {branches.map(branch => {
+                  const checked = sender.branchIds?.includes(branch.id) || false;
+                  const assignedElsewhere = senders.some(other => other.senderKey !== sender.senderKey && other.branchIds?.includes(branch.id));
+                  return <label key={branch.id} className={assignedElsewhere && !checked ? 'is-unavailable' : ''}><input type="checkbox" checked={checked} disabled={assignedElsewhere && !checked} onChange={event => updateSender(sender.senderKey, 'branchIds', event.target.checked ? [...(sender.branchIds || []), branch.id] : (sender.branchIds || []).filter(id => id !== branch.id))}/><span>{branch.name}</span>{assignedElsewhere && !checked && <small>Asignada a otro número</small>}</label>;
+                })}
+              </fieldset> : <div className="whatsapp-assigned-branches">{assignedBranches.length ? assignedBranches.map(branch => <span className="whatsapp-branch-chip" key={branch.id}>{branch.name}</span>) : <span className="whatsapp-branch-empty">Pulsa «Editar sucursales» para elegir dónde se usará este número.</span>}</div>}
+            </div>
+          </article>})}</div> : null}
       </section>
       <section className="whatsapp-settings-section"><div className="whatsapp-settings-heading"><div><h3>Plantillas aprobadas</h3><p>El estado se consulta automáticamente. Las plantillas activas se usan para avisos automáticos de citas.</p></div></div><div className="whatsapp-template-list">{templateKinds.map(([key, label]) => <label key={key}><input type="checkbox" disabled={!availableTemplates[key]} checked={settings.templateReadiness[key] === true && availableTemplates[key] === true} onChange={event => setSettings(current => ({ ...current, templateReadiness: { ...current.templateReadiness, [key]: event.target.checked } }))}/><span className="whatsapp-template-copy"><strong>{label}</strong><small>{templateStatusLabels[templateStatuses[key]] || templateStatusLabels.unavailable}</small></span></label>)}</div></section>
       {error && <p className="whatsapp-settings-error" role="alert"><CircleAlert size={15}/>{error}</p>}{notice && <p className="whatsapp-settings-success" role="status"><CircleCheck size={15}/>{notice}</p>}
