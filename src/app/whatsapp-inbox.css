@@ -30,20 +30,20 @@
 .whatsapp-message-image-actions button,.whatsapp-message-image-actions a{display:grid;place-items:center;width:32px;height:32px;padding:0;border:1px solid rgb(255 255 255 / 24%);border-radius:50%;background:rgb(24 20 27 / 88%);color:#fff;cursor:pointer;text-decoration:none}
 .whatsapp-message-image-actions button:hover,.whatsapp-message-image-actions a:hover{background:rgb(24 20 27 / 100%)}
 .whatsapp-message-bubble:has(.whatsapp-message-image-wrap) .whatsapp-message-details{display:flex;width:100%;justify-content:flex-end;margin:2px 0 0;padding:0 2px}
-.whatsapp-image-dialog{display:flex;flex-direction:column;width:min(94vw,1120px);height:min(90dvh,860px);max-width:calc(100vw - 28px);max-height:calc(100dvh - 28px);margin:auto;padding:12px;border:1px solid color-mix(in srgb,var(--line) 58%,transparent);border-radius:16px;overflow:hidden;background:color-mix(in srgb,var(--paper) 78%,transparent);color:var(--ink);box-shadow:0 24px 72px rgb(0 0 0 / 28%);backdrop-filter:blur(14px)}
+.whatsapp-image-dialog{display:flex;flex-direction:column;width:min(94vw,1120px);height:min(90dvh,860px);max-width:calc(100vw - 28px);max-height:calc(100dvh - 28px);margin:auto;padding:12px;border:1px solid color-mix(in srgb,var(--line) 24%,transparent);border-radius:16px;overflow:hidden;background:color-mix(in srgb,var(--paper) 38%,transparent);color:var(--ink);box-shadow:0 20px 64px rgb(0 0 0 / 16%);backdrop-filter:blur(10px)}
 .whatsapp-image-dialog:not([open]){display:none}
-.whatsapp-image-dialog::backdrop{background:rgb(12 10 14 / 68%)}
+.whatsapp-image-dialog::backdrop{background:rgb(12 10 14 / 48%)}
 .whatsapp-image-dialog-frame{display:flex;flex:1;flex-direction:column;min-width:0;min-height:0}
-.whatsapp-image-dialog-header{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:3px 4px 12px;border-bottom:1px solid var(--line)}
+.whatsapp-image-dialog-header{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:3px 4px 12px;border-bottom:1px solid color-mix(in srgb,var(--line) 28%,transparent)}
 .whatsapp-image-dialog-heading{display:flex;flex-direction:column;gap:3px;min-width:0}
 .whatsapp-image-dialog-heading strong{color:var(--ink);font-size:15px;font-weight:750;line-height:1.2}
 .whatsapp-image-dialog-heading span{max-width:min(38vw,520px);overflow:hidden;color:var(--muted);font-size:12px;text-overflow:ellipsis;white-space:nowrap}
 .whatsapp-image-dialog-actions{display:flex;flex:none;align-items:center;gap:8px}
-.whatsapp-image-dialog-actions a,.whatsapp-image-dialog-actions button{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:38px;padding:0 12px;border:1px solid var(--line);border-radius:9px;background:var(--canvas);color:var(--ink);font:inherit;font-size:12px;font-weight:700;text-decoration:none;cursor:pointer;transition:background 140ms ease,border-color 140ms ease}
-.whatsapp-image-dialog-actions a{border-color:var(--green);background:var(--green);color:var(--paper)}
-.whatsapp-image-dialog-actions a:hover{filter:brightness(1.07)}
-.whatsapp-image-dialog-actions button:hover{background:var(--paper);border-color:var(--muted)}
-.whatsapp-image-dialog-canvas{display:grid;flex:1;place-items:center;min-width:0;min-height:0;margin-top:12px;padding:12px;border:1px solid color-mix(in srgb,var(--line) 48%,transparent);border-radius:12px;overflow:hidden;background:color-mix(in srgb,var(--canvas) 58%,transparent)}
+.whatsapp-image-dialog-actions a,.whatsapp-image-dialog-actions button{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:36px;padding:0 11px;border:1px solid color-mix(in srgb,var(--line) 26%,transparent);border-radius:9px;background:color-mix(in srgb,var(--canvas) 18%,transparent);color:var(--ink);font:inherit;font-size:12px;font-weight:600;text-decoration:none;cursor:pointer;transition:background 140ms ease,border-color 140ms ease}
+.whatsapp-image-dialog-actions a{border-color:color-mix(in srgb,var(--green) 34%,transparent);background:color-mix(in srgb,var(--green) 18%,transparent)}
+.whatsapp-image-dialog-actions a:hover{background:color-mix(in srgb,var(--green) 30%,transparent)}
+.whatsapp-image-dialog-actions button:hover{background:color-mix(in srgb,var(--canvas) 32%,transparent);border-color:color-mix(in srgb,var(--line) 46%,transparent)}
+.whatsapp-image-dialog-canvas{display:grid;flex:1;place-items:center;min-width:0;min-height:0;margin-top:12px;padding:12px;border:1px solid color-mix(in srgb,var(--line) 20%,transparent);border-radius:12px;overflow:hidden;background:color-mix(in srgb,var(--canvas) 16%,transparent)}
 .whatsapp-image-dialog-canvas img{display:block;width:auto;height:auto;max-width:100%;max-height:100%;object-fit:contain;border-radius:8px}
 .whatsapp-message-details{position:relative;top:2px;display:inline-flex;align-items:center;gap:6px;margin:0 0 0 9px;white-space:nowrap;vertical-align:baseline;font-size:10px;line-height:1.2}
 .whatsapp-composer{display:flex;align-items:center;gap:10px;padding:10px 14px;border-top:1px solid var(--line);background:var(--paper)}
