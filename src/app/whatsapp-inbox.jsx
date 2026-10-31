@@ -16,7 +16,7 @@ function latestConversationPreview(conversation) {
         : message.media_content_type ? 'Archivo' : '';
   const body = String(message.body || '').replace(/\s+/g, ' ').trim();
   const preview = body || mediaLabel || 'Mensaje sin texto';
-  return `${message.direction === 'outbound' ? 'Tú: ' : ''}${preview}`;
+  return preview;
 }
 function readableMediaName(name = '') {
   const value = String(name || '').trim();
@@ -330,7 +330,7 @@ export default function WhatsAppInbox({ clinicId = '', sharedMode = false, role 
   const renderConversationMenu = (conversation, source) => {
     const menuKey = `${source}:${conversation.id}`;
     return <div className={`whatsapp-conversation-menu${openMenuId === menuKey ? ' is-open' : ''}`}>
-    <button type="button" className="whatsapp-icon-action" aria-label={`Acciones para ${conversation.contact_name || conversation.contact_phone}`} aria-haspopup="menu" aria-expanded={openMenuId === menuKey} onClick={event => { event.stopPropagation(); setOpenMenuId(current => current === menuKey ? '' : menuKey); }}><EllipsisVertical size={19}/></button>
+    <button type="button" className="whatsapp-icon-action" aria-label={`Acciones para ${conversation.contact_name || conversation.contact_phone}`} aria-haspopup="menu" aria-expanded={openMenuId === menuKey} onClick={event => { event.stopPropagation(); setOpenMenuId(current => current === menuKey ? '' : menuKey); }}>{source === 'thread' ? <ChevronDown size={18}/> : <EllipsisVertical size={19}/>}</button>
     {openMenuId === menuKey && <div className="whatsapp-conversation-menu-list" role="menu">
       <button type="button" role="menuitem" onClick={event => { event.stopPropagation(); confirmConversationAction(conversation.blocked_at ? 'unblock' : 'block', conversation); }}><Ban size={15}/>{conversation.blocked_at ? 'Desbloquear en el CRM' : 'Bloquear en el CRM'}</button>
       <button type="button" role="menuitem" className="is-destructive" onClick={event => { event.stopPropagation(); confirmConversationAction('delete', conversation); }}><Trash2 size={15}/>Eliminar conversación</button>
