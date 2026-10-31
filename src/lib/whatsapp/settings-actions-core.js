@@ -80,7 +80,10 @@ export function createWhatsAppSettingsActions({
     try {
       const context = await authorizedAdmin(clinicId);
       if (context.error) return { ok: false, message: context.error };
-      const senders = await listWhatsAppSenders({ env });
+      const registeredSenders = await listWhatsAppSenders({ env });
+      const senders = inboxSender && !registeredSenders.some(sender => sender.phoneNumber === inboxSender.phoneNumber)
+        ? [{ ...inboxSender, displayLabel: 'Número conectado' }, ...registeredSenders]
+        : registeredSenders;
       return { ok: true, senders, availableTemplates, templateStatuses, deliveryEnabled, ...(inboxSender ? { inboxSender } : {}) };
     } catch {
       return { ok: false, message: 'No se pudieron consultar los números registrados. Verifica la conexión del servidor.', availableTemplates, templateStatuses, deliveryEnabled, ...(inboxSender ? { inboxSender } : {}) };
@@ -128,8 +131,10 @@ export function createWhatsAppSettingsActions({
         try { registeredSenders = await listWhatsAppSenders({ env }); }
         catch { return { ok: false, message: 'No se pudieron verificar los números registrados. Inténtalo de nuevo más tarde.' }; }
         const onlineNumbers = new Set(registeredSenders.map(sender => sender.phoneNumber));
+        const connectedInboxSender = configuredInboxSender(env);
+        if (connectedInboxSender) onlineNumbers.add(connectedInboxSender.phoneNumber);
         if (safeSenders.some(sender => !onlineNumbers.has(sender.sender_key.slice('twilio:'.length)))) {
-          return { ok: false, message: 'Solo puedes asignar números registrados y activos. Actualiza la lista y vuelve a intentarlo.' };
+          return { ok: false, message: 'Solo puedes asignar números disponibles para WhatsApp. Actualiza la lista y vuelve a intentarlo.' };
         }
       }
       const { data, error } = await context.client.rpc('save_clinic_whatsapp_settings_v2', {
