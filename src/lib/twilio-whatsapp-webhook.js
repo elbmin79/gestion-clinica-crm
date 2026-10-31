@@ -24,7 +24,9 @@ function twilioWhatsAppStatusCallbackUrl(env) {
   try {
     const base = new URL(baseUrl);
     if (base.protocol !== 'https:' && !['localhost', '127.0.0.1'].includes(base.hostname)) return null;
-    return `${base.origin}${statusWebhookPath}`;
+    // Keep callbacks on the inbound webhook route, which is already registered
+    // in Twilio and the production deployment. The query selects its status mode.
+    return `${base.origin}${webhookPath}?callback=status`;
   } catch {
     return null;
   }
@@ -36,7 +38,8 @@ export function createTwilioWhatsAppStatusWebhookHandler({ createServiceClient, 
   return async function POST(request) {
     const authToken = String(env.TWILIO_AUTH_TOKEN || '').trim();
     const accountSid = String(env.TWILIO_ACCOUNT_SID || '').trim();
-    const requestUrl = canonicalWebhookUrl(request, env, statusWebhookPath);
+    const incomingPath = new URL(request.url).pathname;
+    const requestUrl = canonicalWebhookUrl(request, env, incomingPath === statusWebhookPath ? statusWebhookPath : webhookPath);
     const signature = request.headers.get('x-twilio-signature') || '';
     if (!authToken || !/^AC[0-9a-fA-F]{32}$/.test(accountSid) || !requestUrl || !signature) {
       return Response.json({ error: 'Twilio webhook is not configured.' }, { status: 503 });
@@ -107,7 +110,9 @@ export function createTwilioWhatsAppWebhookHandler({
   env = process.env,
   resolveSender = resolveInboundTwilioWhatsAppSender,
 } = {}) {
+  const statusWebhook = createTwilioWhatsAppStatusWebhookHandler({ createServiceClient, env });
   return async function POST(request) {
+    if (new URL(request.url).searchParams.get('callback') === 'status') return statusWebhook(request);
     const authToken = String(env.TWILIO_AUTH_TOKEN || '').trim();
     const accountSid = String(env.TWILIO_ACCOUNT_SID || '').trim();
     const requestUrl = canonicalWebhookUrl(request, env);
