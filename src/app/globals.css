@@ -1102,7 +1102,12 @@ html[data-theme="dark"] .profile-signature-preview,html[data-theme="dark"] .prof
 .whatsapp-template-toggle span{display:grid;gap:3px;line-height:1.3}
 .whatsapp-template-toggle strong{font-size:12px;font-weight:600}
 .whatsapp-template-toggle small{color:var(--muted);font-size:10px;font-weight:400}
-.whatsapp-template-row select{width:100%;min-width:0}
+.whatsapp-template-select{position:relative;min-width:0}
+.whatsapp-template-select select{appearance:none;width:100%;min-width:0;min-height:40px;padding:0 38px 0 12px;border:1px solid var(--line);border-radius:8px;background:var(--canvas);color:var(--ink);font:inherit;font-size:12px;line-height:1.4;transition:border-color .16s ease,background-color .16s ease,box-shadow .16s ease}
+.whatsapp-template-select select:hover:not(:disabled){border-color:color-mix(in srgb,var(--wa-accent) 48%,var(--line));background:var(--paper)}
+.whatsapp-template-select select:focus-visible{border-color:var(--wa-accent);outline:2px solid color-mix(in srgb,var(--wa-accent) 34%,transparent);outline-offset:2px}
+.whatsapp-template-select select:disabled{cursor:not-allowed;opacity:.6}
+.whatsapp-template-select>svg{position:absolute;top:50%;right:12px;transform:translateY(-50%);color:var(--muted);pointer-events:none}
 .whatsapp-settings-actions{display:flex;justify-content:flex-end}
 .whatsapp-settings-actions .button,.whatsapp-test-controls .button{display:inline-flex;align-items:center;justify-content:center;gap:6px}
 .whatsapp-settings-error,.whatsapp-settings-success,.whatsapp-test-result{display:flex;align-items:flex-start;gap:7px;margin:0;font-size:12px;line-height:1.5}
