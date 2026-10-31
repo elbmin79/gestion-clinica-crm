@@ -9,6 +9,10 @@ export async function proxy(request) {
   const isForgotPasswordRoute = pathname === '/forgot-password';
   const isAuthCallbackRoute = pathname === '/auth/callback';
   const isReminderDispatchRoute = pathname === '/api/reminders/dispatch';
+  const isTwilioWhatsAppWebhookRoute = pathname === '/api/webhooks/twilio/whatsapp';
+  // Twilio has no CRM session cookie. The route validates Twilio's request
+  // signature itself, so let the signed webhook reach its handler directly.
+  if (isTwilioWhatsAppWebhookRoute) return NextResponse.next({ request });
   // Only these explicit public booking routes bypass staff login. The API itself
   // enforces publication, field validation, bot checks and throttling.
   if (/^\/reservar\/[a-z0-9][a-z0-9-]{2,59}$/.test(pathname) || /^\/api\/public-agenda\/[a-z0-9][a-z0-9-]{2,59}$/.test(pathname)) return NextResponse.next({request});
