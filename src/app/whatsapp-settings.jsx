@@ -88,7 +88,7 @@ export default function WhatsAppSettings({ clinicId, role, branches = [], shared
     setSenders(current => [...current, { senderKey, whatsappNumber: '', displayLabel: `WhatsApp ${current.length + 1}`, branchId: '', active: true }]);
   };
 
-  const handleLinkSender = async () => {
+  const handleRefreshSenders = async () => {
     if (loadingAvailableSenders) return;
     setLoadingAvailableSenders(true);
     setSenderLookupError('');
@@ -153,7 +153,7 @@ export default function WhatsAppSettings({ clinicId, role, branches = [], shared
       : <div className={whatsappReady ? 'whatsapp-settings-live-notice' : 'whatsapp-settings-pending-notice'}><ShieldCheck size={18}/><div><strong>{whatsappReady ? 'Notificaciones configuradas' : 'Configura tus notificaciones'}</strong><span>Vincula remitentes ya registrados y activa las plantillas aprobadas que usarás para citas.</span></div></div>}
     <div className="whatsapp-settings-summary"><div><span>Bandeja de conversaciones</span><strong>{loading ? 'Cargando…' : connectedInboxNumber ? 'Conectada' : 'No conectada'}</strong></div><div><span>Número conectado</span><strong>{loading ? '—' : connectedInboxNumber || 'Sin configurar'}</strong></div><div><span>Números asignables</span><strong>{loading || loadingAvailableSenders ? 'Cargando…' : availableSenders.length ? `${readySenderCount} de ${availableSenders.length} asignados` : 'Sin números disponibles para asignar'}</strong></div><div><span>Avisos automáticos de citas</span><strong>{loading ? 'Cargando…' : whatsappReady ? 'Activos' : 'En configuración'}</strong></div></div>
     {loading ? <p className="whatsapp-settings-loading"><LoaderCircle size={16}/> Cargando configuración…</p> : <form className="whatsapp-settings-form" onSubmit={save}>
-      <section className="whatsapp-settings-section"><div className="whatsapp-settings-heading"><div><h3>Números de WhatsApp</h3><p>Asigna a cada sucursal el número que usará para responder y enviar avisos.</p></div><button className="button outline compact" type="button" onClick={handleLinkSender} disabled={loadingAvailableSenders}><Plus size={15}/>{loadingAvailableSenders ? 'Buscando…' : 'Vincular remitente'}</button></div>
+      <section className="whatsapp-settings-section"><div className="whatsapp-settings-heading"><div><h3>Números de WhatsApp</h3><p>Asigna a cada sucursal el número que usará para responder y enviar avisos.</p></div><button className="button outline compact" type="button" onClick={availableSenders.length ? addSender : handleRefreshSenders} disabled={loadingAvailableSenders}>{availableSenders.length > 0 && <Plus size={15}/>} {loadingAvailableSenders ? 'Buscando números…' : availableSenders.length > 0 ? 'Vincular remitente' : 'Buscar remitentes disponibles'}</button></div>
         <p className="whatsapp-settings-helper">Aquí eliges números de WhatsApp activos y asignas cada uno a una sucursal. Cada sucursal necesita su propio número para los avisos automáticos.</p>
         {connectedInboxNumber && <div className="whatsapp-connected-number-row"><span><MessageCircle size={16}/></span><div><strong>Número conectado a la bandeja</strong><small>{connectedInboxNumber} · Recibe y responde conversaciones</small></div><b>Conectado</b></div>}
         {senderLookupError && <p className="whatsapp-settings-error" role="status"><CircleAlert size={15}/>{senderLookupError}</p>}
