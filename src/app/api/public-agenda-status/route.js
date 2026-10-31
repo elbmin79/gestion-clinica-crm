@@ -11,9 +11,5 @@ export async function GET(request){
   if(error||!data)return Response.json({error:'Acceso no permitido.'},{status:403});
   const secretConfigured=agendaSecret().length>=32;
   const databaseConfigured=Boolean(createServiceClient());
-  const captchaSiteConfigured=Boolean(process.env.TURNSTILE_SITE_KEY);
-  const captchaSecretConfigured=Boolean(process.env.TURNSTILE_SECRET_KEY);
-  const requiresCaptcha=process.env.NODE_ENV==='production';
-  const captchaConfigured=captchaSiteConfigured&&captchaSecretConfigured;
-  return Response.json({configured:secretConfigured&&databaseConfigured&&(!requiresCaptcha||captchaConfigured),secretConfigured,databaseConfigured,captchaConfigured,captchaSiteConfigured,captchaSecretConfigured,requiresCaptcha},{headers:{'Cache-Control':'no-store'}});
+  return Response.json({configured:secretConfigured&&databaseConfigured,secretConfigured,databaseConfigured},{headers:{'Cache-Control':'no-store'}});
 }

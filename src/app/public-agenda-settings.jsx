@@ -124,7 +124,7 @@ export default function PublicAgendaSettings({clinicId,clinicName,role,permissio
     {error&&<p className="professional-error" role="alert"><CircleAlert size={15}/>{error}</p>}
     {notice&&<p className="form-note" role="status"><CheckCircle2 size={15}/>{notice}</p>}
     {status==='loading'&&<p className="public-agenda-hint" role="status">Cargando agenda pública…</p>}
-    {status==='ready'&&!readiness.configured&&<p className="professional-error" role="status"><CircleAlert size={15}/>La agenda no puede recibir solicitudes en este despliegue. Configuración faltante: {[!readiness.secretConfigured&&'PUBLIC_BOOKING_SECRET (mínimo 32 caracteres)',!readiness.databaseConfigured&&'SUPABASE_SERVICE_ROLE_KEY',readiness.requiresCaptcha&&!readiness.captchaSiteConfigured&&'TURNSTILE_SITE_KEY',readiness.requiresCaptcha&&!readiness.captchaSecretConfigured&&'TURNSTILE_SECRET_KEY'].filter(Boolean).join(', ')}.</p>}
+    {status==='ready'&&!readiness.configured&&<p className="professional-error" role="status"><CircleAlert size={15}/>La agenda no puede recibir solicitudes en este despliegue. Configuración faltante: {[!readiness.secretConfigured&&'PUBLIC_BOOKING_SECRET o CRON_SECRET (mínimo 32 caracteres)',!readiness.databaseConfigured&&'SUPABASE_SERVICE_ROLE_KEY'].filter(Boolean).join(', ')}.</p>}
     {status==='error'&&<button className="button secondary compact" type="button" onClick={load}><RefreshCw size={14}/> Reintentar</button>}
     <form onSubmit={save}>
       <fieldset className="public-agenda-fields" disabled={!canManage||status!=='ready'||Boolean(busy)}>

@@ -12,12 +12,9 @@ one at approval.
 
 - Apply `20261030202528_public_agenda_requests.sql` after the existing catalog,
   availability and staff-push migrations. No existing appointments are changed.
-- Configure a stable `PUBLIC_BOOKING_SECRET` (32+ random characters) and the
-  server-only Supabase service key. Local development may test without CAPTCHA.
-- Production requires `TURNSTILE_SITE_KEY` and `TURNSTILE_SECRET_KEY` for a
-  Cloudflare Turnstile widget on the deployed hostname. Tokens are checked on the
-  server, including hostname and the `public_booking` action. Production public
-  APIs fail closed if the bot-protection configuration is missing.
+- Configure the server-only Supabase service key. An optional stable
+  `PUBLIC_BOOKING_SECRET` can be used; otherwise the signing key is derived from
+  `CRON_SECRET` using a separate HMAC context.
 - Vercel's trusted forwarded header is used for throttling. On another hosting
   platform, configure `PUBLIC_BOOKING_IP_HEADER` only if a trusted reverse proxy
   overwrites it. Without a trusted header, traffic shares a conservative bucket.
@@ -63,12 +60,12 @@ Public capacity is one appointment per professional even when internal staff
 allow parallel appointments. Starts use a 15-minute grid and the CRM's same-day
 06:00-to-midnight bounds. Requests do not reserve capacity; multiple different
 visitors can request a slot, but only a still-available request can be approved.
-Throttling, signed delayed/expiring form challenges, a honeypot, production CAPTCHA,
-a unique submission nonce and a pending-request duplicate constraint protect
-submissions. Rate identifiers are HMACs; raw client addresses are not stored.
+Throttling, signed delayed/expiring form challenges, a honeypot, a unique
+submission nonce and a pending-request duplicate constraint protect submissions.
+Rate identifiers are HMACs; raw client addresses are not stored.
 
 Run `npm test` for the real migration under PGlite, with the existing availability,
-service snapshot and deposit guards, plus request-signature and CAPTCHA tests.
+service snapshot and deposit guards, plus request-signature tests.
 Run `npm run build`, then verify public access in a signed-out Playwright context,
 submission, staff review, slot conflicts, unpublishing, and layout at mobile sizes.
 
@@ -90,9 +87,7 @@ empty-catalog state was also exercised.
 All temporary clinic, request, appointment and patient records were removed;
 publication is off. Existing clinic settings were not automatically published or
 filled with invented working hours. 85 automated tests and the production build
-passed. Live Turnstile verification still requires deployment-owned widget keys;
-the production fail-closed and provider-response checks have automated coverage.
-Provider validation follows [Cloudflare's server-side guidance](https://developers.cloudflare.com/turnstile/get-started/server-side-validation/).
+passed.
 
 Cleanup exposed two existing whole-clinic deletion bugs. Migrations
 `20261030204811_allow_clinic_delete_admin_cascade.sql` and

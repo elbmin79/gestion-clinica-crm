@@ -1,14 +1,13 @@
 'use client';
 import {useEffect,useRef,useState} from 'react';
-import Script from 'next/script';
 import {CalendarDays,CheckCircle2,Clock3,MapPin,ShieldCheck,ArrowLeft,Send,LoaderCircle} from 'lucide-react';
 
 export default function PublicBooking({slug}){
   const [catalog,setCatalog]=useState(null),[error,setError]=useState(''),[loading,setLoading]=useState(true);
   const [branch,setBranch]=useState(''),[service,setService]=useState(''),[provider,setProvider]=useState(''),[date,setDate]=useState('');
   const [slots,setSlots]=useState([]),[slotsLoading,setSlotsLoading]=useState(false),[slotError,setSlotError]=useState(''),[selected,setSelected]=useState(null);
-  const [sending,setSending]=useState(false),[receipt,setReceipt]=useState(''),[captchaToken,setCaptchaToken]=useState(''),[captchaReady,setCaptchaReady]=useState(false);
-  const captchaNode=useRef(null),captchaId=useRef(null),formLoadedAt=useRef(0);
+  const [sending,setSending]=useState(false),[receipt,setReceipt]=useState('');
+  const formLoadedAt=useRef(0);
   const api=`/api/public-agenda/${encodeURIComponent(slug)}`;
   useEffect(()=>{const controller=new AbortController();setLoading(true);setCatalog(null);setError('');setReceipt('');setBranch('');setService('');setProvider('');fetch(api,{cache:'no-store',signal:controller.signal}).then(async response=>{const data=await response.json();if(!response.ok)throw new Error(data.error);formLoadedAt.current=Date.now();setCatalog(data);setDate(data.today);}).catch(cause=>{if(cause.name!=='AbortError')setError(cause.message);}).finally(()=>{if(!controller.signal.aborted)setLoading(false);});return()=>controller.abort();},[slug]);
   const offers=catalog?.offers||[];
@@ -23,11 +22,6 @@ export default function PublicBooking({slug}){
     fetch(`${api}?offer=${offer.id}&date=${date}`,{cache:'no-store',signal:controller.signal}).then(async response=>{const data=await response.json();if(!response.ok)throw new Error(data.error);setSlots(data.slots);}).catch(cause=>{if(cause.name!=='AbortError')setSlotError(cause.message);}).finally(()=>{if(!controller.signal.aborted)setSlotsLoading(false);});
     return()=>controller.abort();
   },[offer?.id,date,slug]);
-  useEffect(()=>{
-    if(!catalog?.captchaSiteKey||!captchaReady||!captchaNode.current||!window.turnstile)return;
-    captchaId.current=window.turnstile.render(captchaNode.current,{sitekey:catalog.captchaSiteKey,action:'public_booking',callback:setCaptchaToken,'expired-callback':()=>setCaptchaToken(''),'error-callback':()=>{setCaptchaToken('');setError('No se pudo cargar la verificación. Recarga la página.');}});
-    return()=>{if(captchaId.current!==null)window.turnstile?.remove(captchaId.current);captchaId.current=null;};
-  },[catalog?.captchaSiteKey,captchaReady]);
   async function submit(event){
     event.preventDefault();if(sending)return;setError('');
     if(!selected||!offer){setError('Selecciona un horario disponible.');return;}
@@ -37,10 +31,10 @@ export default function PublicBooking({slug}){
       // delay here instead of rejecting a legitimate fast submission.
       const delay=2200-(Date.now()-formLoadedAt.current);
       if(delay>0)await new Promise(resolve=>setTimeout(resolve,delay));
-      const response=await fetch(api,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({challenge:catalog.challenge,captchaToken,offerId:offer.id,startsAt:selected.starts_at,name:fields.get('name'),phone:fields.get('phone'),email:fields.get('email'),consent:fields.get('consent')==='on',website:fields.get('website')})});
+      const response=await fetch(api,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({challenge:catalog.challenge,offerId:offer.id,startsAt:selected.starts_at,name:fields.get('name'),phone:fields.get('phone'),email:fields.get('email'),consent:fields.get('consent')==='on',website:fields.get('website')})});
       const data=await response.json();if(!response.ok)throw new Error(data.error);
       setReceipt(data.id);
-    }catch(cause){setError(cause.message||'No se pudo enviar tu solicitud. Vuelve a intentarlo.');setCaptchaToken('');if(captchaId.current!==null)window.turnstile?.reset(captchaId.current);}
+    }catch(cause){setError(cause.message||'No se pudo enviar tu solicitud. Vuelve a intentarlo.');}
     finally{setSending(false);}
   }
   const time=value=>new Intl.DateTimeFormat('es-MX',{timeZone:catalog.timezone,hour:'2-digit',minute:'2-digit'}).format(new Date(value));
@@ -67,9 +61,8 @@ export default function PublicBooking({slug}){
           </div><label className="public-booking-consent"><input name="consent" type="checkbox" required/> Acepto que la clínica me contacte para atender esta solicitud.</label>
           <div className="public-booking-honeypot" aria-hidden="true"><label>Sitio web<input name="website" tabIndex={-1} autoComplete="off"/></label></div>
           </fieldset>
-          {catalog.captchaSiteKey&&<><Script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" onReady={()=>setCaptchaReady(true)}/><div ref={captchaNode}/></>}
           {error&&<p className="public-booking-error" role="alert">{error}</p>}
-          <div className="public-booking-submit"><p><ShieldCheck size={16}/> Enviar la solicitud no confirma la cita ni realiza un cobro. La clínica te indicará cómo registrar el anticipo.</p><button type="submit" className="button primary" disabled={sending||!selected||Boolean(catalog.captchaSiteKey&&!captchaToken)}><Send size={15}/>{sending?'Enviando…':'Enviar solicitud'}</button></div>
+          <div className="public-booking-submit"><p><ShieldCheck size={16}/> Enviar la solicitud no confirma la cita ni realiza un cobro. La clínica te indicará cómo registrar el anticipo.</p><button type="submit" className="button primary" disabled={sending||!selected}><Send size={15}/>{sending?'Enviando…':'Enviar solicitud'}</button></div>
         </form>
       </section>}
     </>}

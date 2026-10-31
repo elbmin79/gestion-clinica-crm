@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {issueBookingChallenge,verifyBookingChallenge,normalizePublicRequest,visitorRateKey,contactRateKey,verifyBookingCaptcha,readBookingBody} from './public-agenda-security.js';
+import {issueBookingChallenge,verifyBookingChallenge,normalizePublicRequest,visitorRateKey,contactRateKey,readBookingBody} from './public-agenda-security.js';
 const secret='test-secret-at-least-thirty-two-characters';
 const now=2000000000000;
 test('public request body limits apply to streamed bytes without trusting content-length',async()=>{
@@ -30,12 +30,4 @@ test('rate keys hide addresses and contacts and only trust operator-configured p
  const request=new Request('https://crm.test',{headers:{'x-forwarded-for':'spoofed','x-real-ip':'127.0.0.1'}});
  const a=visitorRateKey(request,'read:clinic',secret,{}),b=visitorRateKey(request,'read:clinic',secret,{PUBLIC_BOOKING_IP_HEADER:'x-real-ip'});
  assert.equal(a.length,64);assert.notEqual(a,b);assert.equal(contactRateKey('clinic','+526640000001',secret).length,64);
-});
-test('production captcha fails closed and validates provider success, action, and hostname',async()=>{
- const request=new Request('https://crm.test/api/public-agenda/clinic');
- assert.equal(await verifyBookingCaptcha('token',request,'nonce',{env:{NODE_ENV:'production'}}),false);
- assert.equal(await verifyBookingCaptcha('',request,'nonce',{env:{NODE_ENV:'development'}}),true);
- const env={NODE_ENV:'production',TURNSTILE_SITE_KEY:'public',TURNSTILE_SECRET_KEY:'private'};
- for(const result of [{success:false},{success:true,hostname:'evil.test',action:'public_booking'},{success:true,hostname:'crm.test',action:'other'}])assert.equal(await verifyBookingCaptcha('token',request,'nonce',{env,fetcher:async()=>Response.json(result)}),false);
- assert.equal(await verifyBookingCaptcha('token',request,'nonce',{env,fetcher:async()=>Response.json({success:true,hostname:'crm.test',action:'public_booking'})}),true);
 });

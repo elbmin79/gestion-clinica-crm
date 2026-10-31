@@ -12,7 +12,12 @@ export async function readBookingBody(request,limit=8192){
     try{return JSON.parse(Buffer.concat(chunks).toString('utf8'));}catch{throw invalid('Solicitud inválida.',400);}
   }finally{reader.releaseLock();}
 }
-export function agendaSecret(env=process.env){return env.PUBLIC_BOOKING_SECRET?.trim() || '';}
+export function agendaSecret(env=process.env){
+  const explicit=env.PUBLIC_BOOKING_SECRET?.trim()||'';
+  if(explicit.length>=32)return explicit;
+  const root=env.CRON_SECRET?.trim()||'';
+  return root.length>=32?createHmac('sha256',root).update('public-booking:v1').digest('hex'):'';
+}
 export function issueBookingChallenge(slug,secret,now=Date.now()){
   if(secret.length<32)throw new Error('Public booking secret is missing.');
   const payload=Buffer.from(JSON.stringify({slug,nonce:randomUUID(),issued:now})).toString('base64url');
@@ -44,13 +49,3 @@ export function visitorRateKey(request,scope,secret,env=process.env){
   return createHmac('sha256',secret).update(`${scope}:${address}`).digest('hex');
 }
 export function contactRateKey(slug,phone,secret){return createHmac('sha256',secret).update(`contact:${slug}:${phone}`).digest('hex');}
-export async function verifyBookingCaptcha(token,request,nonce,{env=process.env,fetcher=fetch}={}){
-  if(!env.TURNSTILE_SECRET_KEY || !env.TURNSTILE_SITE_KEY)return env.NODE_ENV!=='production';
-  if(typeof token!=='string' || !token || token.length>2048)return false;
-  try{
-    const response=await fetcher('https://challenges.cloudflare.com/turnstile/v0/siteverify',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({secret:env.TURNSTILE_SECRET_KEY,response:token,idempotency_key:nonce}),signal:AbortSignal.timeout(10000)});
-    if(!response.ok)return false;
-    const result=await response.json();
-    return result.success===true && result.action==='public_booking' && result.hostname===new URL(request.url).hostname;
-  }catch{return false;}
-}
