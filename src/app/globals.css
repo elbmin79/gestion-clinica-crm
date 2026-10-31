@@ -1248,6 +1248,8 @@ html[data-theme="dark"] .whatsapp-settings-loading{color:#bba9b7}
 .clinic-access-scope-option select:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .clinic-access-admin-note{border:1px solid var(--line);border-radius:11px;padding:14px;background:var(--canvas);color:var(--muted);font-size:12px}
 .clinic-access-permissions-modal>footer{display:flex;align-items:center;justify-content:flex-end;gap:9px;padding:14px 24px 18px;border-top:1px solid var(--line)}
+.clinic-access-editor-error{margin:0;padding:0 24px 12px;color:#b64d60;font-size:12px;line-height:1.45}
+html[data-theme="dark"] .clinic-access-editor-error{color:#f0a0aa}
 .clinic-access-permissions-footer-spacer{flex:1}
 html[data-theme="dark"] .clinic-access-read-rule{background:color-mix(in srgb,var(--green) 12%,var(--paper))}
 html[data-theme="dark"] .clinic-access-revoke{border-color:#a84c64;background:color-mix(in srgb,#a84c64 18%,var(--paper));color:#f0a0b2}
