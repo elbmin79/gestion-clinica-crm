@@ -6,6 +6,17 @@ const templateKinds = ['confirmation_2d', 'reminder_1d', 'reminder_5h'];
 const defaultReadiness = Object.freeze({ confirmation_2d: false, reminder_1d: false, reminder_5h: false });
 const contentSidPattern = /^HX[0-9a-fA-F]{32}$/;
 const twilioSandboxNumber = '+14155238886';
+const sandboxAppointmentTemplate = Object.freeze({
+  sid: 'HXb5b62575e6e4ff6129ad7c8efe1f983e',
+  name: 'Recordatorio de cita',
+  language: 'en',
+  status: 'approved',
+});
+
+function withSandboxAppointmentTemplate(templates, allowSandboxTemplate) {
+  if (!allowSandboxTemplate || templates.some(template => template.sid === sandboxAppointmentTemplate.sid)) return templates;
+  return [...templates, sandboxAppointmentTemplate];
+}
 
 function configuredInboxSender(env) {
   const configuredNumber = String(env.TWILIO_WHATSAPP_SANDBOX_FROM || '').trim().replace(/^whatsapp:/i, '');
@@ -13,7 +24,7 @@ function configuredInboxSender(env) {
   const sandboxEnabled = String(env.TWILIO_WHATSAPP_SANDBOX_ENABLED || '').toLowerCase() !== 'false';
   const phoneNumber = configuredNumber || twilioSandboxNumber;
   return sandboxEnabled && credentialsAvailable && /^\+[1-9]\d{7,14}$/.test(phoneNumber)
-    ? { phoneNumber, displayLabel: 'WhatsApp' }
+    ? { phoneNumber, displayLabel: 'WhatsApp', sandbox: phoneNumber === twilioSandboxNumber }
     : null;
 }
 
@@ -106,6 +117,8 @@ export function createWhatsAppSettingsActions({
       if (senderResult.status === 'rejected') senderLookupError = 'No se pudieron consultar todos los números registrados en Twilio.';
       if (templateResult.status === 'fulfilled') templates = templateResult.value;
       else templateLookupError = 'No se pudieron consultar las plantillas de Twilio.';
+      const onlySandboxSenders = registeredSenders.every(sender => sender.phoneNumber === twilioSandboxNumber);
+      templates = withSandboxAppointmentTemplate(templates, inboxSender?.sandbox === true && onlySandboxSenders);
       const senders = [...(inboxSender ? [inboxSender] : []), ...registeredSenders]
         .filter((sender, index, rows) => rows.findIndex(row => row.phoneNumber === sender.phoneNumber) === index);
       if (!senders.length && senderLookupError) {
@@ -135,7 +148,10 @@ export function createWhatsAppSettingsActions({
         || templateKinds.some(kind => templateContentSids[kind] != null && !contentSidPattern.test(String(templateContentSids[kind])))) {
         return { ok: false, message: 'La selección de plantillas no es válida.' };
       }
-      const availableTemplates = await getTemplates({ env });
+      const availableTemplates = withSandboxAppointmentTemplate(
+        await getTemplates({ env }),
+        senders.length > 0 && senders.every(sender => String(sender?.whatsappNumber || '').trim() === twilioSandboxNumber),
+      );
       const approvedSids = new Set(availableTemplates.filter(template => template.status === 'approved').map(template => template.sid));
       if (templateKinds.some(kind => readiness[kind] && !approvedSids.has(templateContentSids[kind]))) {
         return { ok: false, message: 'Selecciona una plantilla aprobada para cada aviso que quieras activar.' };
