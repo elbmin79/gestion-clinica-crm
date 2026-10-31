@@ -35,10 +35,15 @@ async function postTwilioContent(path, body, { env = process.env, fetchImpl = gl
 
 export async function createTwilioWhatsAppTemplate({ name, body, env = process.env, fetchImpl = globalThis.fetch } = {}) {
   const friendlyName = String(name || '').trim();
-  const messageBody = String(body || '').trim();
+  const editorBody = String(body || '').trim();
+  const hasDate = /(?<!\{)\{fecha\}(?!\})/i.test(editorBody);
+  const hasTime = /(?<!\{)\{hora\}(?!\})/i.test(editorBody);
+  const messageBody = editorBody
+    .replace(/(?<!\{)\{fecha\}(?!\})/gi, '{{1}}')
+    .replace(/(?<!\{)\{hora\}(?!\})/gi, '{{2}}');
   if (friendlyName.length < 3 || friendlyName.length > 60) throw new Error('El nombre debe tener entre 3 y 60 caracteres.');
-  if (messageBody.length < 10 || messageBody.length > 1024 || !messageBody.includes('{{1}}') || !messageBody.includes('{{2}}')) {
-    throw new Error('El mensaje debe incluir {{1}} para la fecha y {{2}} para la hora de la cita.');
+  if (messageBody.length < 10 || messageBody.length > 1024 || !hasDate || !hasTime || /\{\{(?:fecha|hora)\}\}/i.test(editorBody)) {
+    throw new Error('El mensaje debe incluir {fecha} y {hora} para la cita.');
   }
   const payload = await postTwilioContent('Content', {
     friendly_name: friendlyName,
