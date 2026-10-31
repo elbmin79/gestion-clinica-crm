@@ -127,6 +127,11 @@ export default function WhatsAppInbox({ clinicId = '', sharedMode = false, role 
     } catch (sendError) { setError(sendError.message); }
     finally { setSending(false); }
   }
+  function handleComposerKeyDown(event) {
+    if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return;
+    event.preventDefault();
+    event.currentTarget.form?.requestSubmit();
+  }
 
   return <section className="whatsapp-inbox-page" aria-label="Conversaciones de WhatsApp">
     <header className="whatsapp-inbox-heading"><div><h1>WhatsApp</h1><p>Conversaciones con tus contactos</p></div></header>
@@ -168,7 +173,7 @@ export default function WhatsAppInbox({ clinicId = '', sharedMode = false, role 
             <input ref={fileInputRef} className="whatsapp-file-input" type="file" accept="image/jpeg,image/png,video/mp4" onChange={chooseAttachment} aria-label="Adjuntar imagen o video"/>
             {attachment && <div className="whatsapp-attachment-preview">{attachment.type.startsWith('image/') ? <img src={attachment.previewUrl} alt="Vista previa del archivo"/> : <span className="whatsapp-video-preview">Video</span>}<span className="whatsapp-attachment-name">{attachment.name}</span><button type="button" className="whatsapp-attachment-remove" onClick={removeAttachment} aria-label="Quitar archivo"><X size={15}/></button></div>}
             {sendOutcomeUncertain && <p className="whatsapp-send-uncertain">Comprueba si llegó antes de intentar enviarlo otra vez.</p>}
-            <div className="whatsapp-composer-entry"><button type="button" className="whatsapp-attach-button" onClick={() => fileInputRef.current?.click()} disabled={sending || uploadingAttachment || sendOutcomeUncertain} aria-label="Adjuntar imagen o video"><Paperclip size={18}/></button><textarea aria-label="Escribe un mensaje" placeholder="Escribe un mensaje" rows={1} maxLength={4096} value={draft} onChange={event => setDraft(event.target.value)}/><button type="submit" disabled={(!draft.trim() && !attachment) || sending || uploadingAttachment || sendOutcomeUncertain} aria-label="Enviar mensaje"><Send size={17}/>{uploadingAttachment ? 'Cargando…' : sending ? 'Enviando…' : 'Enviar'}</button></div>
+            <div className="whatsapp-composer-entry"><button type="button" className="whatsapp-attach-button" onClick={() => fileInputRef.current?.click()} disabled={sending || uploadingAttachment || sendOutcomeUncertain} aria-label="Adjuntar imagen o video"><Paperclip size={18}/></button><textarea aria-label="Escribe un mensaje" placeholder="Escribe un mensaje" rows={1} maxLength={4096} value={draft} onChange={event => setDraft(event.target.value)} onKeyDown={handleComposerKeyDown}/><button type="submit" disabled={(!draft.trim() && !attachment) || sending || uploadingAttachment || sendOutcomeUncertain} aria-label="Enviar mensaje"><Send size={17}/>{uploadingAttachment ? 'Cargando…' : sending ? 'Enviando…' : 'Enviar'}</button></div>
           </form>
             : <footer className="whatsapp-composer-disabled"><MessageCircle size={16}/><span>Para responder, espera a que el contacto envíe un nuevo mensaje.</span></footer>
             : <footer className="whatsapp-composer-disabled"><MessageCircle size={16}/><span>Tu perfil puede consultar esta conversación.</span></footer>}
