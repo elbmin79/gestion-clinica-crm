@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Check, CircleAlert, CircleCheck, LoaderCircle, MessageCircle, Pencil, Save, ShieldCheck, Trash2, MessageSquareText, CalendarCheck2 } from 'lucide-react';
 import { loadAvailableWhatsAppSenders, loadClinicWhatsAppSettings, saveClinicWhatsAppSettings } from './whatsapp-settings-actions.js';
 
@@ -22,10 +22,38 @@ export default function WhatsAppSettings({ clinicId, role, branches = [], shared
   const [editingAssignments, setEditingAssignments] = useState(() => new Set());
   const [availableSenders, setAvailableSenders] = useState([]);
   const [inboxSender, setInboxSender] = useState(null);
+  const [leavePromptOpen, setLeavePromptOpen] = useState(false);
+  const rootRef = useRef(null);
+  const baselineRef = useRef(null);
+  const baselineReadyRef = useRef(false);
+  const pendingNavigationRef = useRef(null);
+  const replayingNavigationRef = useRef(false);
+  const revertingPopstateRef = useRef(false);
+
+  const snapshotFor = (nextSettings, nextSenders) => JSON.stringify({
+    settings: {
+      notifyWhatsAppMessages: nextSettings.notifyWhatsAppMessages !== false,
+      notifyWhatsAppConfirmations: nextSettings.notifyWhatsAppConfirmations !== false,
+    },
+    senders: [...(nextSenders || [])]
+      .map(sender => ({
+        whatsappNumber: sender.whatsappNumber,
+        active: sender.active !== false,
+        branchIds: [...(sender.branchIds || [])].map(String).sort(),
+      }))
+      .sort((a, b) => String(a.whatsappNumber).localeCompare(String(b.whatsappNumber))),
+  });
+  const currentSnapshot = snapshotFor(settings, senders);
+  const hasUnsavedChanges = Boolean(baselineRef.current && baselineRef.current.snapshot !== currentSnapshot);
 
   useEffect(() => {
     let active = true;
+    baselineReadyRef.current = false;
+    baselineRef.current = null;
     setLoading(true);
+    setLoadingAvailableSenders(true);
+    setAvailableSenders([]);
+    setInboxSender(null);
     setError('');
     if (!clinicId || !sharedMode || role !== 'admin') {
       setLoading(false);
@@ -57,8 +85,7 @@ export default function WhatsAppSettings({ clinicId, role, branches = [], shared
 
   useEffect(() => {
     if (loading || loadingAvailableSenders) return;
-    setSenders(current => {
-      const retained = current
+    const retained = senders
         .filter(sender => sender.whatsappNumber || !String(sender.senderKey).startsWith('form:'))
         .filter((sender, index, rows) => rows.findIndex(row => row.whatsappNumber === sender.whatsappNumber) === index);
       const existingNumbers = new Set(retained.map(sender => sender.whatsappNumber));
@@ -71,9 +98,13 @@ export default function WhatsAppSettings({ clinicId, role, branches = [], shared
           branchIds: [],
           active: true,
         }));
-      return missing.length || retained.length !== current.length ? [...retained, ...missing] : current;
-    });
-  }, [loading, loadingAvailableSenders, availableSenders]);
+    const nextSenders = missing.length ? [...retained, ...missing] : retained;
+    if (!baselineReadyRef.current) {
+      baselineRef.current = { snapshot: snapshotFor(settings, nextSenders), settings: { ...settings }, senders: nextSenders };
+      baselineReadyRef.current = true;
+    }
+    if (snapshotFor(settings, nextSenders) !== snapshotFor(settings, senders)) setSenders(nextSenders);
+  }, [loading, loadingAvailableSenders, availableSenders, senders, settings]);
 
   const updateSender = (senderKey, field, value) => {
     setSenders(current => current.map(sender => sender.senderKey === senderKey
@@ -81,19 +112,86 @@ export default function WhatsAppSettings({ clinicId, role, branches = [], shared
       : sender));
   };
 
-  const save = async event => {
-    event.preventDefault();
+  const persistSettings = async () => {
     setSaving(true); setError(''); setNotice('');
     const result = await saveClinicWhatsAppSettings({ clinicId, ...settings, providerMode: 'twilio', senders });
-    if (!result.ok) setError(result.message);
+    if (!result.ok) { setError(result.message); setSaving(false); return false; }
     else {
-      setSettings({ ...result.settings, providerMode: 'twilio' });
+      const nextSettings = { ...result.settings, providerMode: 'twilio' };
+      baselineRef.current = { snapshot: snapshotFor(nextSettings, result.senders), settings: nextSettings, senders: result.senders };
+      baselineReadyRef.current = true;
+      setSettings(nextSettings);
       setSenders(result.senders);
       setEditingAssignments(new Set());
       setNotice(result.message);
     }
     setSaving(false);
+    return true;
   };
+
+  const save = async event => { event.preventDefault(); await persistSettings(); };
+
+  const replayPendingNavigation = () => {
+    const navigate = pendingNavigationRef.current;
+    pendingNavigationRef.current = null;
+    setLeavePromptOpen(false);
+    if (!navigate) return;
+    replayingNavigationRef.current = true;
+    navigate();
+    window.setTimeout(() => { replayingNavigationRef.current = false; }, 0);
+  };
+
+  const discardChanges = () => {
+    const baseline = baselineRef.current;
+    if (baseline) {
+      setSettings({ ...baseline.settings });
+      setSenders([...baseline.senders]);
+      setEditingAssignments(new Set());
+      setError(''); setNotice('');
+    }
+    replayPendingNavigation();
+  };
+
+  useEffect(() => {
+    const onNavigationClick = event => {
+      if (!hasUnsavedChanges || replayingNavigationRef.current || event.defaultPrevented) return;
+      const origin = event.target instanceof Element ? event.target : null;
+      const control = origin?.closest('a[href], .side-nav .nav-item, .sidebar-bottom button, .settings-tabs button, .workspace-menu button, .topbar-actions .search-shortcut, .topbar-profile-button');
+      if (!control || rootRef.current?.contains(control)) return;
+      if (control instanceof HTMLAnchorElement && (control.target === '_blank' || control.hasAttribute('download'))) return;
+      event.preventDefault();
+      event.stopPropagation();
+      pendingNavigationRef.current = () => {
+        if (control instanceof HTMLAnchorElement) window.location.assign(control.href);
+        else control.click();
+      };
+      setLeavePromptOpen(true);
+    };
+    const onBeforeUnload = event => {
+      if (replayingNavigationRef.current || !hasUnsavedChanges) return;
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    const onPopState = event => {
+      if (revertingPopstateRef.current) { revertingPopstateRef.current = false; return; }
+      if (!hasUnsavedChanges || replayingNavigationRef.current) return;
+      const destination = window.location.href;
+      event.stopImmediatePropagation();
+      revertingPopstateRef.current = true;
+      window.history.forward();
+      window.setTimeout(() => { revertingPopstateRef.current = false; }, 500);
+      pendingNavigationRef.current = () => window.location.assign(destination);
+      setLeavePromptOpen(true);
+    };
+    document.addEventListener('click', onNavigationClick, true);
+    window.addEventListener('beforeunload', onBeforeUnload);
+    window.addEventListener('popstate', onPopState, true);
+    return () => {
+      document.removeEventListener('click', onNavigationClick, true);
+      window.removeEventListener('beforeunload', onBeforeUnload);
+      window.removeEventListener('popstate', onPopState, true);
+    };
+  }, [hasUnsavedChanges]);
 
   if (!sharedMode || !clinicId) {
     return <div className="whatsapp-settings-content"><header className="whatsapp-page-heading"><h1>WhatsApp</h1><p>Asigna números y elige qué avisos internos recibir en el CRM.</p></header><div className="whatsapp-settings-pending-notice"><ShieldCheck size={18}/><div><strong>Configuración no disponible</strong><span>Conecta una clínica compartida para administrar los números y avisos.</span></div></div></div>;
@@ -113,7 +211,7 @@ export default function WhatsAppSettings({ clinicId, role, branches = [], shared
   const inboxConnected = connectedNumbers.size > 0;
   const crmNotificationsEnabled = settings.notifyWhatsAppMessages || settings.notifyWhatsAppConfirmations;
 
-  return <div className="whatsapp-settings-content" aria-busy={loading || saving || loadingAvailableSenders}>
+  return <div className="whatsapp-settings-content" ref={rootRef} aria-busy={loading || saving || loadingAvailableSenders}>
     <header className="whatsapp-page-heading"><h1>WhatsApp</h1><p>Asigna números y elige qué avisos internos recibir en el CRM.</p></header>
     {inboxConnected ? <div className="whatsapp-settings-connection-notice"><MessageCircle size={18}/><div><strong>La bandeja de conversaciones está conectada</strong><span>Administra aquí los números y las sucursales que los usan. Los avisos seleccionados aparecerán en el centro de notificaciones del CRM.</span></div></div>
       : <div className="whatsapp-settings-pending-notice"><ShieldCheck size={18}/><div><strong>Configura WhatsApp</strong><span>Vincula los números a sus sucursales y configura los avisos internos del CRM.</span></div></div>}
@@ -151,7 +249,20 @@ export default function WhatsAppSettings({ clinicId, role, branches = [], shared
         </div>
       </section>
       {error && <p className="whatsapp-settings-error" role="alert"><CircleAlert size={15}/>{error}</p>}{notice && <p className="whatsapp-settings-success" role="status"><CircleCheck size={15}/>{notice}</p>}
-      <div className="whatsapp-settings-actions"><button className="button primary" type="submit" disabled={saving || loading}><Save size={15}/>{saving ? 'Guardando…' : 'Guardar configuración'}</button></div>
+      <div className="whatsapp-settings-actions"><button className="button primary" type="submit" disabled={saving || loading || !hasUnsavedChanges}><Save size={15}/>{saving ? 'Guardando…' : 'Guardar configuración'}</button></div>
     </form>}
+    {leavePromptOpen && <div className="whatsapp-unsaved-overlay" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) { pendingNavigationRef.current = null; setLeavePromptOpen(false); } }} onKeyDown={event => { if (event.key === 'Escape') { pendingNavigationRef.current = null; setLeavePromptOpen(false); } }}>
+      <section className="whatsapp-unsaved-dialog" role="alertdialog" aria-modal="true" aria-labelledby="whatsapp-unsaved-title" aria-describedby="whatsapp-unsaved-description">
+        <span className="whatsapp-unsaved-icon"><CircleAlert size={19}/></span>
+        <h2 id="whatsapp-unsaved-title">Tienes cambios sin guardar</h2>
+        <p id="whatsapp-unsaved-description">Guarda tus cambios antes de salir de la configuración de WhatsApp.</p>
+        {error && <p className="whatsapp-settings-error" role="alert">{error}</p>}
+        <div className="whatsapp-unsaved-actions">
+          <button type="button" className="button outline compact" onClick={() => { pendingNavigationRef.current = null; setLeavePromptOpen(false); }}>Seguir editando</button>
+          <button type="button" className="button secondary compact" disabled={saving} onClick={discardChanges}>Descartar y salir</button>
+          <button type="button" className="button primary compact" disabled={saving} onClick={async () => { if (await persistSettings()) replayPendingNavigation(); }}>{saving ? 'Guardando…' : 'Guardar y salir'}</button>
+        </div>
+      </section>
+    </div>}
   </div>;
 }
