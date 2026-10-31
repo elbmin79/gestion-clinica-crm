@@ -16,6 +16,25 @@ function formatAudioTime(seconds = 0) {
   const total = Number.isFinite(seconds) ? Math.max(0, Math.floor(seconds)) : 0;
   return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
 }
+function WhatsAppMessageImage({ src, filename, onExpand }) {
+  const imageRef = useRef(null);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    const image = imageRef.current;
+    if (image?.complete && image.naturalWidth > 0) setLoaded(true);
+  }, [src]);
+
+  return <div className="whatsapp-message-image-wrap">
+    <button type="button" className="whatsapp-message-image-open" onClick={onExpand} aria-label="Ampliar imagen" disabled={!loaded}>
+      <img ref={imageRef} className="whatsapp-message-media" src={src} alt={filename} loading="lazy" onLoad={() => setLoaded(true)} onError={() => setLoaded(false)}/>
+    </button>
+    {loaded && <div className="whatsapp-message-image-actions">
+      <button type="button" onClick={onExpand} aria-label="Ampliar imagen" title="Ampliar"><Expand size={15}/></button>
+      <a href={`${src}&download=1`} aria-label="Descargar imagen" title="Descargar"><Download size={15}/></a>
+    </div>}
+  </div>;
+}
 const audioWaveform = [32, 52, 39, 70, 45, 61, 84, 48, 32, 72, 56, 91, 44, 66, 36, 76, 52, 87, 40, 62, 48, 78, 34, 59, 82, 44, 68, 38, 73, 50, 91, 42, 64, 35, 77, 49];
 function WhatsAppAudioPlayer({ src, filename = 'audio' }) {
   const audioRef = useRef(null);
@@ -215,15 +234,7 @@ export default function WhatsAppInbox({ clinicId = '', sharedMode = false, role 
                 <div className="whatsapp-message-bubble">{item.message.media_content_type?.startsWith('image/') && (() => {
                   const mediaUrl = `/api/whatsapp/media?clinicId=${encodeURIComponent(clinicId)}&messageId=${encodeURIComponent(item.message.id)}`;
                   const filename = readableMediaName(item.message.media_filename);
-                  return <div className="whatsapp-message-image-wrap">
-                    <button type="button" className="whatsapp-message-image-open" onClick={() => setExpandedImage({ src: mediaUrl, filename })} aria-label="Ampliar imagen">
-                      <img className="whatsapp-message-media" src={mediaUrl} alt={filename} loading="lazy"/>
-                    </button>
-                    <div className="whatsapp-message-image-actions">
-                      <button type="button" onClick={() => setExpandedImage({ src: mediaUrl, filename })} aria-label="Ampliar imagen" title="Ampliar"><Expand size={15}/></button>
-                      <a href={`${mediaUrl}&download=1`} aria-label="Descargar imagen" title="Descargar"><Download size={15}/></a>
-                    </div>
-                  </div>;
+                  return <WhatsAppMessageImage src={mediaUrl} filename={filename} onExpand={() => setExpandedImage({ src: mediaUrl, filename })}/>;
                 })()}{item.message.media_content_type?.startsWith('video/') && <video className="whatsapp-message-media" src={`/api/whatsapp/media?clinicId=${encodeURIComponent(clinicId)}&messageId=${encodeURIComponent(item.message.id)}`} aria-label={item.message.media_filename || 'Video compartido'} controls playsInline preload="metadata"/>}{item.message.media_content_type?.startsWith('audio/') && <WhatsAppAudioPlayer src={`/api/whatsapp/media?clinicId=${encodeURIComponent(clinicId)}&messageId=${encodeURIComponent(item.message.id)}`} filename={item.message.media_filename || 'audio'}/>}{item.message.body && <p>{item.message.body}</p>}<div className="whatsapp-message-details"><time dateTime={item.message.created_at}>{formatWhatsAppMessageTime(item.message.created_at)}</time>{item.message.direction === 'outbound' && <span>{item.message.delivery_status === 'failed' ? 'No enviado' : 'Enviado'}</span>}</div></div>
               </article>) : <div className="whatsapp-conversation-empty"><MessageCircle size={28}/><strong>Conversación nueva</strong><span>Los mensajes que se reciban aparecerán aquí.</span></div>}
           </div>
