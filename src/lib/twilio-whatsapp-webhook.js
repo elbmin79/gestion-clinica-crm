@@ -52,7 +52,7 @@ export function createTwilioWhatsAppWebhookHandler({
     const messageSid = String(params.MessageSid || params.SmsMessageSid || '').trim();
     const from = String(params.From || '').replace(/^whatsapp:/i, '').trim();
     const to = String(params.To || '').replace(/^whatsapp:/i, '').trim();
-    if (!/^SM[0-9a-fA-F]{32}$/.test(messageSid)
+    if (!/^(?:SM|MM)[0-9a-fA-F]{32}$/.test(messageSid)
       || !/^\+[1-9]\d{7,14}$/.test(from)
       || !/^\+[1-9]\d{7,14}$/.test(to)) return Response.json({ error: 'Invalid inbound WhatsApp message.' }, { status: 400 });
 

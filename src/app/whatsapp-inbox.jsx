@@ -17,6 +17,7 @@ export default function WhatsAppInbox({ clinicId = '', sharedMode = false, role 
   const [status, setStatus] = useState('loading');
   const [error, setError] = useState('');
   const [sending, setSending] = useState(false);
+  const [sendOutcomeUncertain, setSendOutcomeUncertain] = useState(false);
   const [attachment, setAttachment] = useState(null);
   const [uploadingAttachment, setUploadingAttachment] = useState(false);
   const fileInputRef = useRef(null);
@@ -99,9 +100,13 @@ export default function WhatsAppInbox({ clinicId = '', sharedMode = false, role 
       const conversationId = selected.id;
       const response = await fetch('/api/whatsapp/messages', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ clinicId, conversationId, body, ...(attachment ? { mediaPath: attachment.path } : {}) }) });
       const result = await response.json();
-      if (!response.ok) throw new Error(result.error || 'No se pudo enviar el mensaje.');
+      if (!response.ok) {
+        if (result.uncertain || result.sent) setSendOutcomeUncertain(true);
+        throw new Error(result.error || 'No se pudo enviar el mensaje.');
+      }
       setDraft('');
       removeAttachment();
+      setSendOutcomeUncertain(false);
       await Promise.all([refresh(), (async () => {
         const data = await createClient().from('clinic_whatsapp_messages').select('id,direction,body,delivery_status,created_at,media_object_path,media_content_type,media_filename,media_size_bytes').eq('clinic_id', clinicId).eq('conversation_id', conversationId).order('created_at', { ascending: true }).limit(300);
         if (!data.error) setMessages(data.data || []);
@@ -137,7 +142,8 @@ export default function WhatsAppInbox({ clinicId = '', sharedMode = false, role 
           {canReply ? windowOpen ? <form className="whatsapp-composer" onSubmit={sendMessage}>
             <input ref={fileInputRef} className="whatsapp-file-input" type="file" accept="image/jpeg,image/png,video/mp4" onChange={chooseAttachment} aria-label="Adjuntar imagen o video"/>
             {attachment && <div className="whatsapp-attachment-preview">{attachment.type.startsWith('image/') ? <img src={attachment.previewUrl} alt="Vista previa del archivo"/> : <span className="whatsapp-video-preview">Video</span>}<span className="whatsapp-attachment-name">{attachment.name}</span><button type="button" className="whatsapp-attachment-remove" onClick={removeAttachment} aria-label="Quitar archivo"><X size={15}/></button></div>}
-            <div className="whatsapp-composer-entry"><button type="button" className="whatsapp-attach-button" onClick={() => fileInputRef.current?.click()} disabled={sending || uploadingAttachment} aria-label="Adjuntar imagen o video"><Paperclip size={18}/></button><textarea aria-label="Escribe un mensaje" placeholder="Escribe un mensaje" rows={1} maxLength={4096} value={draft} onChange={event => setDraft(event.target.value)}/><button type="submit" disabled={(!draft.trim() && !attachment) || sending || uploadingAttachment} aria-label="Enviar mensaje"><Send size={17}/>{uploadingAttachment ? 'Cargando…' : sending ? 'Enviando…' : 'Enviar'}</button></div>
+            {sendOutcomeUncertain && <p className="whatsapp-send-uncertain">Comprueba si llegó antes de intentar enviarlo otra vez.</p>}
+            <div className="whatsapp-composer-entry"><button type="button" className="whatsapp-attach-button" onClick={() => fileInputRef.current?.click()} disabled={sending || uploadingAttachment || sendOutcomeUncertain} aria-label="Adjuntar imagen o video"><Paperclip size={18}/></button><textarea aria-label="Escribe un mensaje" placeholder="Escribe un mensaje" rows={1} maxLength={4096} value={draft} onChange={event => setDraft(event.target.value)}/><button type="submit" disabled={(!draft.trim() && !attachment) || sending || uploadingAttachment || sendOutcomeUncertain} aria-label="Enviar mensaje"><Send size={17}/>{uploadingAttachment ? 'Cargando…' : sending ? 'Enviando…' : 'Enviar'}</button></div>
           </form>
             : <footer className="whatsapp-composer-disabled"><MessageCircle size={16}/><span>Para responder, espera a que el contacto envíe un nuevo mensaje.</span></footer>
             : <footer className="whatsapp-composer-disabled"><MessageCircle size={16}/><span>Tu perfil puede consultar esta conversación.</span></footer>}

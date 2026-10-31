@@ -62,11 +62,22 @@ export async function POST(request) {
       method: 'POST', headers: { Authorization: `Basic ${authorization}`, 'Content-Type': 'application/x-www-form-urlencoded' },
       body: form.toString(), signal: AbortSignal.timeout(15000), cache: 'no-store',
     });
-  } catch { return Response.json({ error: 'No se pudo confirmar el envío. Revisa los registros de mensajes antes de intentar otra vez.' }, { status: 502 }); }
+  } catch {
+    console.error('Twilio WhatsApp send outcome is unknown after request timeout.');
+    return Response.json({ error: 'No se pudo confirmar el envío. Comprueba si llegó antes de volver a intentarlo.', uncertain: true }, { status: 502 });
+  }
   let result = {};
   try { result = await response.json(); } catch { /* Report the generic provider error below. */ }
-  if (!response.ok || !/^SM[0-9a-fA-F]{32}$/.test(result.sid || '')) {
-    return Response.json({ error: 'WhatsApp no aceptó el mensaje. Revisa el estado del Sandbox y vuelve a intentar.' }, { status: 502 });
+  const hasMessageSid = /^(?:SM|MM)[0-9a-fA-F]{32}$/.test(result.sid || '');
+  if (!response.ok) {
+    const code = String(result.code || result.error_code || '');
+    const providerMessage = String(result.message || result.error_message || '').replace(/\s+/g, ' ').trim().slice(0, 240);
+    console.error('Twilio rejected WhatsApp send.', { httpStatus: response.status, code: code || null, message: providerMessage || null });
+    return Response.json({ error: `Twilio rechazó el mensaje${code ? ` (${code})` : ''}.${providerMessage ? ` ${providerMessage}` : ''}` }, { status: 502 });
+  }
+  if (!hasMessageSid) {
+    console.error('Twilio WhatsApp send returned success without a valid message SID.', { httpStatus: response.status, status: result.status || null });
+    return Response.json({ error: 'Twilio respondió, pero no confirmó el mensaje. Comprueba si llegó antes de volver a intentarlo.', uncertain: true }, { status: 502 });
   }
   const saved = await service.from('clinic_whatsapp_messages').insert({
     clinic_id: clinicId,
@@ -77,7 +88,10 @@ export async function POST(request) {
     delivery_status: ['queued', 'sent', 'delivered'].includes(result.status) ? result.status : 'queued',
     ...(media ? { media_object_path: media.path, media_content_type: media.contentType, media_filename: media.filename, media_size_bytes: media.size } : {}),
   });
-  if (saved.error) return Response.json({ error: 'El mensaje fue enviado, pero no se pudo guardar en la conversación. No vuelvas a enviarlo todavía.' }, { status: 503 });
+  if (saved.error) {
+    console.error('Sent WhatsApp message could not be saved to the CRM.', { code: saved.error.code || null });
+    return Response.json({ error: 'Twilio envió el mensaje, pero el CRM no pudo guardarlo. Comprueba WhatsApp y no lo vuelvas a enviar.', sent: true, uncertain: true }, { status: 503 });
+  }
   await service.from('clinic_whatsapp_conversations').update({ last_message_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', conversationId).eq('clinic_id', clinicId);
   return Response.json({ ok: true });
 }

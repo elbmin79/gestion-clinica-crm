@@ -30,6 +30,7 @@
 .whatsapp-attachment-preview img{width:44px;height:44px;border-radius:6px;object-fit:cover}
 .whatsapp-video-preview{display:grid;place-items:center;width:44px;height:44px;border-radius:6px;background:var(--green-soft);color:var(--ink);font-size:11px;font-weight:700}
 .whatsapp-attachment-name{max-width:250px;overflow:hidden;color:var(--muted);font-size:12px;text-overflow:ellipsis;white-space:nowrap}
+.whatsapp-send-uncertain{margin:0 5px;color:#a34031;font-size:12px;line-height:1.35}
 .whatsapp-composer .whatsapp-attachment-remove{width:28px;min-width:28px;min-height:28px;padding:0;border:0;background:transparent;color:var(--muted)}
 .whatsapp-composer textarea{flex:1;min-width:0;resize:none;min-height:42px;max-height:120px;border:1px solid var(--line);border-radius:22px;padding:10px 15px;background:var(--canvas);color:var(--ink);font:inherit;font-size:13px;line-height:20px;outline:0}
 .whatsapp-composer textarea:focus{border-color:var(--green);box-shadow:0 0 0 2px color-mix(in srgb,var(--green) 16%,transparent)}
