@@ -34,6 +34,13 @@ export function createReminderDispatchHandler({
     if (!secrets.some(secret => authorized(request, secret))) return Response.json({ error: 'Unauthorized.' }, { status: 401 });
 
     const provider = createProvider({ env });
+    const configuredMode = String(env.WHATSAPP_PROVIDER_MODE || '').trim().toLowerCase();
+    if ((provider.mode === 'twilio' || configuredMode === 'twilio') && env.WHATSAPP_AUTOMATION_ENABLED !== 'true') {
+      if (request.method === 'GET') {
+        return Response.json({ processed: 0, skipped: true, mode: 'twilio', simulated: false, counts: { claimed: 0, sent: 0, failed: 0, unknown: 0, skipped: 0 } }, { headers: { 'Cache-Control': 'no-store' } });
+      }
+      return Response.json({ error: 'WhatsApp appointment reminders are disabled.' }, { status: 503 });
+    }
     if (!['mock', 'twilio'].includes(provider.mode) || provider.available === false) {
       return Response.json({ error: provider.error || 'WhatsApp provider is not configured.' }, { status: 503 });
     }

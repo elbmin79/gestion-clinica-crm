@@ -24,7 +24,7 @@ export default function ClinicServicesSettings({ clinicId, role, permissions = {
   const [branchFilter, setBranchFilter] = useState('Todas');
   const [editing, setEditing] = useState(null);
   const [saving, setSaving] = useState(false);
-  const canManage = !sharedMode || hasClinicPermission(role, permissions, 'team.manage_professionals');
+  const canManage = !sharedMode || hasClinicPermission(role, permissions, 'services.manage');
 
   const refresh = async () => {
     if (!sharedMode || !clinicId) { setServices(initialClinicServices); setStatus('ready'); return; }

@@ -5,17 +5,9 @@ import { createWhatsAppSettingsActions } from './settings-actions-core.js';
 const clinicId = '10000000-0000-0000-0000-000000000001';
 const branchId = '30000000-0000-0000-0000-000000000001';
 const branchNorthId = '30000000-0000-0000-0000-000000000002';
-const testEnv = {
-  TWILIO_WHATSAPP_CONTENT_SID_CONFIRMATION_2D: `HX${'a'.repeat(32)}`,
-  TWILIO_WHATSAPP_CONTENT_SID_REMINDER_1D: `HX${'b'.repeat(32)}`,
-  TWILIO_WHATSAPP_CONTENT_SID_REMINDER_5H: `HX${'c'.repeat(32)}`,
-};
+const testEnv = {};
 
-function fakeDatabase({ role = 'admin', user = { id: '20000000-0000-0000-0000-000000000001' }, failedRead = false, listWhatsAppSenders = async () => [], env = testEnv, getTemplateStatuses = async ({ env: source }) => Object.fromEntries([
-  ['confirmation_2d', 'TWILIO_WHATSAPP_CONTENT_SID_CONFIRMATION_2D'],
-  ['reminder_1d', 'TWILIO_WHATSAPP_CONTENT_SID_REMINDER_1D'],
-  ['reminder_5h', 'TWILIO_WHATSAPP_CONTENT_SID_REMINDER_5H'],
-].map(([kind, key]) => [kind, /^HX[0-9a-f]{32}$/i.test(source[key] || '') ? 'approved' : 'not_configured'])) } = {}) {
+function fakeDatabase({ role = 'admin', user = { id: '20000000-0000-0000-0000-000000000001' }, failedRead = false, listWhatsAppSenders = async () => [], env = testEnv } = {}) {
   const state = { config: null, senders: [] };
   const calls = [];
   const from = table => {
@@ -48,12 +40,12 @@ function fakeDatabase({ role = 'admin', user = { id: '20000000-0000-0000-0000-00
     from,
     async rpc(name, args) {
       calls.push({ name, args });
-      if (name !== 'save_clinic_whatsapp_settings_v2') throw new Error(`Unexpected RPC: ${name}`);
+      if (name !== 'save_clinic_whatsapp_settings_v4') throw new Error(`Unexpected RPC: ${name}`);
       state.config = {
         clinic_id: clinicId,
         provider_mode: args.target_provider_mode,
-        allow_default_fallback: args.target_allow_default_fallback,
-        template_readiness: args.target_template_readiness,
+        notify_whatsapp_messages: args.target_notify_whatsapp_messages,
+        notify_whatsapp_confirmations: args.target_notify_whatsapp_confirmations,
       };
       state.senders = args.target_senders.map(sender => ({
         sender_key: sender.sender_key,
@@ -65,7 +57,7 @@ function fakeDatabase({ role = 'admin', user = { id: '20000000-0000-0000-0000-00
       return { data: true, error: null };
     },
   };
-  return { client, state, calls, actions: createWhatsAppSettingsActions({ createServerClient: async () => client, listWhatsAppSenders, getTemplateStatuses, env }) };
+  return { client, state, calls, actions: createWhatsAppSettingsActions({ createServerClient: async () => client, listWhatsAppSenders, env }) };
 }
 
 test('admin can load and save clinic-scoped WhatsApp settings', async () => {
@@ -75,10 +67,11 @@ test('admin can load and save clinic-scoped WhatsApp settings', async () => {
   ] });
   const initial = await actions.load(clinicId);
   assert.equal(initial.configured, false);
-  assert.deepEqual(initial.settings.templateReadiness, { confirmation_2d: false, reminder_1d: false, reminder_5h: false });
+  assert.deepEqual(initial.settings, { notifyWhatsAppMessages: true, notifyWhatsAppConfirmations: true, providerMode: 'twilio' });
   const saved = await actions.save({
     clinicId,
-    templateReadiness: { confirmation_2d: true, reminder_1d: true, reminder_5h: false },
+    notifyWhatsAppMessages: false,
+    notifyWhatsAppConfirmations: true,
     senders: [
       { whatsappNumber: '+15017122661', displayLabel: 'Sucursal Este', branchId, active: true },
       { whatsappNumber: '+15017122662', displayLabel: 'Sucursal Norte', branchId: branchNorthId, active: true },
@@ -87,22 +80,22 @@ test('admin can load and save clinic-scoped WhatsApp settings', async () => {
   assert.equal(saved.ok, true);
   assert.equal(saved.configured, true);
   assert.equal(saved.senders.length, 2);
-  const savedCall = calls.find(call => call.name === 'save_clinic_whatsapp_settings_v2');
+  const savedCall = calls.find(call => call.name === 'save_clinic_whatsapp_settings_v4');
   assert.equal(savedCall.args.target_provider_mode, 'twilio');
+  assert.equal(savedCall.args.target_notify_whatsapp_messages, false);
+  assert.equal(savedCall.args.target_notify_whatsapp_confirmations, true);
   assert.deepEqual(savedCall.args.target_senders.map(item => item.sender_key), ['twilio:+15017122661', 'twilio:+15017122662']);
   assert.deepEqual(savedCall.args.target_senders.map(item => item.branch_id), [branchId, branchNorthId]);
-  assert.equal(savedCall.args.target_allow_default_fallback, false);
 });
 
 test('rejects non-admin writes, invalid branch identifiers, and settings reads before the migration exists', async () => {
   const receptionist = fakeDatabase({ role: 'receptionist' });
   assert.equal((await receptionist.actions.save({ clinicId, senders: [] })).ok, false);
-  assert.equal(receptionist.calls.some(call => call.name === 'save_clinic_whatsapp_settings_v2'), false);
+  assert.equal(receptionist.calls.some(call => call.name === 'save_clinic_whatsapp_settings_v4'), false);
 
   const admin = fakeDatabase();
   const badBranch = await admin.actions.save({
     clinicId,
-    templateReadiness: { confirmation_2d: true, reminder_1d: true, reminder_5h: true },
     senders: [{ senderKey: 'mock:east', displayLabel: 'East', branchId: 'not-a-uuid' }],
   });
   assert.match(badBranch.message, /sucursal/);
@@ -115,34 +108,20 @@ test('rejects non-admin writes, invalid branch identifiers, and settings reads b
 test('lists registered WhatsApp numbers only for an authenticated clinic admin', async () => {
   const registered = [{ phoneNumber: '+15017122661', displayLabel: 'Clinic Main', senderSid: 'XE-test' }];
   const admin = fakeDatabase({ listWhatsAppSenders: async () => registered });
-  assert.deepEqual(await admin.actions.loadAvailableSenders(clinicId), {
-    ok: true,
-    senders: registered,
-    availableTemplates: { confirmation_2d: true, reminder_1d: true, reminder_5h: true },
-    templateStatuses: { confirmation_2d: 'approved', reminder_1d: 'approved', reminder_5h: 'approved' },
-    deliveryEnabled: false,
-  });
+  assert.deepEqual(await admin.actions.loadAvailableSenders(clinicId), { ok: true, senders: registered, senderLookupError: '' });
 
   const receptionist = fakeDatabase({ role: 'receptionist', listWhatsAppSenders: async () => { throw new Error('must not run'); } });
   const denied = await receptionist.actions.loadAvailableSenders(clinicId);
   assert.equal(denied.ok, false);
-  assert.match(denied.message, /administradora/);
+  assert.match(denied.message, /permiso/);
 });
 
-test('returns live template approval states and refuses pending templates', async () => {
-  const getTemplateStatuses = async () => ({ confirmation_2d: 'pending', reminder_1d: 'approved', reminder_5h: 'not_configured' });
-  const admin = fakeDatabase({ getTemplateStatuses });
-  const loaded = await admin.actions.loadAvailableSenders(clinicId);
-  assert.deepEqual(loaded.templateStatuses, { confirmation_2d: 'pending', reminder_1d: 'approved', reminder_5h: 'not_configured' });
-  assert.deepEqual(loaded.availableTemplates, { confirmation_2d: false, reminder_1d: true, reminder_5h: false });
-
-  const refused = await admin.actions.save({
-    clinicId,
-    templateReadiness: { confirmation_2d: true, reminder_1d: false, reminder_5h: false },
-    senders: [],
-  });
-  assert.equal(refused.ok, false);
-  assert.match(refused.message, /plantilla aprobada antes de activarla/);
+test('loads CRM notification preferences without exposing template setup', async () => {
+  const admin = fakeDatabase();
+  const loaded = await admin.actions.load(clinicId);
+  assert.equal(loaded.ok, true);
+  assert.deepEqual(loaded.settings, { notifyWhatsAppMessages: true, notifyWhatsAppConfirmations: true, providerMode: 'twilio' });
+  assert.equal(Object.hasOwn(loaded.settings, 'templateReadiness'), false);
 });
 
 test('hides stale mock sender assignments from Twilio settings', async () => {
@@ -167,21 +146,20 @@ test('saves clinic WhatsApp sender configuration only with active registered num
   const saved = await actions.save({
     clinicId,
     providerMode: 'twilio',
-    templateReadiness: { confirmation_2d: true, reminder_1d: true, reminder_5h: false },
+    notifyWhatsAppMessages: true,
     senders: [
       { senderKey: 'client-key', whatsappNumber: '+15017122661', displayLabel: 'Clínica', branchId, active: true },
     ],
   });
   assert.equal(saved.ok, true);
-  const call = calls.find(item => item.name === 'save_clinic_whatsapp_settings_v2');
+  const call = calls.find(item => item.name === 'save_clinic_whatsapp_settings_v4');
   assert.equal(call.args.target_provider_mode, 'twilio');
   assert.equal(call.args.target_senders[0].sender_key, 'twilio:+15017122661');
 
   const invalid = await actions.save({
     clinicId,
     providerMode: 'twilio',
-    templateReadiness: { confirmation_2d: false, reminder_1d: false, reminder_5h: false },
-    senders: [{ whatsappNumber: '6861234567', displayLabel: 'Bad' }],
+    senders: [{ whatsappNumber: '6861234567', displayLabel: 'Bad', branchId }],
   });
   assert.equal(invalid.ok, false);
   assert.match(invalid.message, /teléfono internacional válido/);
@@ -189,22 +167,9 @@ test('saves clinic WhatsApp sender configuration only with active registered num
   const unregistered = await actions.save({
     clinicId,
     providerMode: 'twilio',
-    templateReadiness: { confirmation_2d: false, reminder_1d: false, reminder_5h: false },
     senders: [{ whatsappNumber: '+15017122662', displayLabel: 'Not registered', branchId }],
   });
   assert.equal(unregistered.ok, false);
-  assert.match(unregistered.message, /Solo puedes asignar números registrados y activos/);
-  assert.equal(calls.filter(item => item.name === 'save_clinic_whatsapp_settings_v2').length, 1);
-
-  const missingContentId = fakeDatabase({
-    listWhatsAppSenders: async () => [{ phoneNumber: '+15017122661', displayLabel: 'Clinic Main', senderSid: 'XE-test' }],
-    env: {},
-  });
-  const notReady = await missingContentId.actions.save({
-    clinicId,
-    templateReadiness: { confirmation_2d: true, reminder_1d: false, reminder_5h: false },
-    senders: [{ whatsappNumber: '+15017122661', displayLabel: 'Clinic Main', branchId }],
-  });
-  assert.equal(notReady.ok, false);
-  assert.match(notReady.message, /plantilla aprobada antes de activarla/);
+  assert.match(unregistered.message, /números disponibles para WhatsApp/);
+  assert.equal(calls.filter(item => item.name === 'save_clinic_whatsapp_settings_v4').length, 1);
 });

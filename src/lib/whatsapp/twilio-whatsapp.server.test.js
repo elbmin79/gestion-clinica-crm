@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createTwilioWhatsAppProvider, getApprovedWhatsAppTemplates, getWhatsAppTemplateStatuses, listRegisteredTwilioWhatsAppSenders } from './twilio-whatsapp.server.js';
+import { createTwilioWhatsAppProvider, listRegisteredTwilioWhatsAppSenders } from './twilio-whatsapp.server.js';
 
 const env = {
   TWILIO_ACCOUNT_SID: `AC${'a'.repeat(32)}`,
@@ -55,32 +55,6 @@ test('requires account credentials before listing sender numbers', async () => {
   await assert.rejects(listRegisteredTwilioWhatsAppSenders({ env: {}, fetchImpl: async () => { throw new Error('must not call'); } }), /not configured/);
 });
 
-test('only exposes WhatsApp templates approved by Meta for sending', async () => {
-  const templateEnv = {
-    ...env,
-    TWILIO_WHATSAPP_CONTENT_SID_CONFIRMATION_2D: `HX${'a'.repeat(32)}`,
-    TWILIO_WHATSAPP_CONTENT_SID_REMINDER_1D: `HX${'b'.repeat(32)}`,
-    TWILIO_WHATSAPP_CONTENT_SID_REMINDER_5H: `HX${'c'.repeat(32)}`,
-  };
-  const requests = [];
-  const fetchImpl = async url => {
-    requests.push(String(url));
-    const status = String(url).includes(templateEnv.TWILIO_WHATSAPP_CONTENT_SID_CONFIRMATION_2D) ? 'approved'
-      : String(url).includes(templateEnv.TWILIO_WHATSAPP_CONTENT_SID_REMINDER_1D) ? 'pending' : 'rejected';
-    return Response.json({ whatsapp: { status } });
-  };
-  const statuses = await getWhatsAppTemplateStatuses({ env: templateEnv, fetchImpl });
-  assert.deepEqual(statuses, { confirmation_2d: 'approved', reminder_1d: 'pending', reminder_5h: 'rejected' });
-  requests.length = 0;
-  const approved = await getApprovedWhatsAppTemplates({ env: templateEnv, fetchImpl });
-  assert.deepEqual(approved, { confirmation_2d: true, reminder_1d: false, reminder_5h: false });
-  assert.equal(requests.length, 3);
-  assert.ok(requests.every(url => url.startsWith('https://content.twilio.com/v1/Content/H')));
-
-  const missingCredentials = await getApprovedWhatsAppTemplates({ env: {}, fetchImpl: async () => { throw new Error('must not call'); } });
-  assert.deepEqual(missingCredentials, { confirmation_2d: false, reminder_1d: false, reminder_5h: false });
-});
-
 test('sends appointment messages from a configured, approved WhatsApp sender and template', async () => {
   let request;
   const provider = createTwilioWhatsAppProvider({
@@ -99,6 +73,7 @@ test('sends appointment messages from a configured, approved WhatsApp sender and
     sender: { sender_key: 'twilio:+15017122661' },
     recipient: '+15551234567',
     templateKind: 'reminder_1d',
+    contentSid: `HX${'d'.repeat(32)}`,
     context: { appointmentAt: '2026-10-30T20:00:00.000Z' },
   });
 
@@ -114,7 +89,10 @@ test('sends appointment messages from a configured, approved WhatsApp sender and
 test('fails closed when live sending is disabled, credentials are missing, or a template SID is absent', async () => {
   let calls = 0;
   const disabled = createTwilioWhatsAppProvider({ env, fetchImpl: async () => { calls++; } });
-  assert.equal((await disabled.sendTemplate({ sender: { sender_key: 'twilio:+15017122661' }, recipient: '+15551234567', templateKind: 'reminder_1d' })).status, 'failed');
+  assert.equal((await disabled.sendTemplate({ sender: { sender_key: 'twilio:+15017122661' }, recipient: '+15551234567', templateKind: 'reminder_1d', contentSid: `HX${'d'.repeat(32)}` })).status, 'failed');
+
+  const missingCredentials = createTwilioWhatsAppProvider({ env: { TWILIO_WHATSAPP_ENABLED: 'true' }, fetchImpl: async () => { calls++; } });
+  assert.equal((await missingCredentials.sendTemplate({ sender: { sender_key: 'twilio:+15017122661' }, recipient: '+15551234567', templateKind: 'reminder_1d', contentSid: `HX${'d'.repeat(32)}` })).status, 'failed');
 
   const missingTemplate = createTwilioWhatsAppProvider({ env: { ...env, TWILIO_WHATSAPP_ENABLED: 'true' }, fetchImpl: async () => { calls++; } });
   assert.equal((await missingTemplate.sendTemplate({ sender: { sender_key: 'twilio:+15017122661' }, recipient: '+15551234567', templateKind: 'reminder_1d' })).status, 'failed');
@@ -123,18 +101,18 @@ test('fails closed when live sending is disabled, credentials are missing, or a 
 
 test('reports failed responses and uncertain network outcomes without exposing credentials', async () => {
   const network = createTwilioWhatsAppProvider({
-    env: { ...env, TWILIO_WHATSAPP_ENABLED: 'true', TWILIO_WHATSAPP_CONTENT_SID_REMINDER_1D: `HX${'d'.repeat(32)}` },
+      env: { ...env, TWILIO_WHATSAPP_ENABLED: 'true', TWILIO_WHATSAPP_CONTENT_SID_REMINDER_1D: `HX${'d'.repeat(32)}` },
     fetchImpl: async () => { throw new Error('private network details'); },
   });
-  const unknown = await network.sendTemplate({ sender: { sender_key: 'twilio:+15017122661' }, recipient: '+15551234567', templateKind: 'reminder_1d' });
+  const unknown = await network.sendTemplate({ sender: { sender_key: 'twilio:+15017122661' }, recipient: '+15551234567', templateKind: 'reminder_1d', contentSid: `HX${'d'.repeat(32)}` });
   assert.equal(unknown.status, 'unknown');
   assert.doesNotMatch(unknown.error, /private network details|auth-secret/);
 
   const rejected = createTwilioWhatsAppProvider({
-    env: { ...env, TWILIO_WHATSAPP_ENABLED: 'true', TWILIO_WHATSAPP_CONTENT_SID_REMINDER_1D: `HX${'d'.repeat(32)}` },
+      env: { ...env, TWILIO_WHATSAPP_ENABLED: 'true', TWILIO_WHATSAPP_CONTENT_SID_REMINDER_1D: `HX${'d'.repeat(32)}` },
     fetchImpl: async () => Response.json({ code: 63015, message: 'private details' }, { status: 400 }),
   });
-  const failed = await rejected.sendTemplate({ sender: { sender_key: 'twilio:+15017122661' }, recipient: '+15551234567', templateKind: 'reminder_1d' });
+  const failed = await rejected.sendTemplate({ sender: { sender_key: 'twilio:+15017122661' }, recipient: '+15551234567', templateKind: 'reminder_1d', contentSid: `HX${'d'.repeat(32)}` });
   assert.equal(failed.status, 'failed');
   assert.match(failed.error, /63015/);
   assert.doesNotMatch(failed.error, /private details|auth-secret/);

@@ -59,6 +59,7 @@ function templateVariables(appointmentAt, timeZone = 'America/Tijuana') {
 }
 
 export function createTwilioWhatsAppProvider({ env = process.env, fetchImpl = globalThis.fetch } = {}) {
+  const explicitlyEnabled = String(env.TWILIO_WHATSAPP_ENABLED || '').toLowerCase() === 'true';
   const credentialsAvailable = /^AC[0-9a-fA-F]{32}$/.test(String(env.TWILIO_ACCOUNT_SID || '').trim())
     && Boolean(String(env.TWILIO_AUTH_TOKEN || '').trim());
 
@@ -66,7 +67,7 @@ export function createTwilioWhatsAppProvider({ env = process.env, fetchImpl = gl
     mode: 'twilio',
     simulated: false,
     get available() {
-      return credentialsAvailable;
+      return explicitlyEnabled && credentialsAvailable;
     },
     async sendTemplate({ sender, recipient, templateKind, contentSid, context = {} } = {}) {
       const accountSid = String(env.TWILIO_ACCOUNT_SID || '').trim();
@@ -75,6 +76,9 @@ export function createTwilioWhatsAppProvider({ env = process.env, fetchImpl = gl
       const rawRecipient = String(recipient || '').trim();
       const to = rawRecipient.startsWith('whatsapp:') ? rawRecipient : `whatsapp:${rawRecipient}`;
 
+      if (!explicitlyEnabled) {
+        return { status: 'failed', messageId: null, error: 'El envío de WhatsApp está desactivado.', simulated: false };
+      }
       if (!credentialsAvailable) {
         return { status: 'failed', messageId: null, error: 'Faltan las credenciales del servicio de WhatsApp.', simulated: false };
       }

@@ -2,10 +2,10 @@
 import { useEffect,useState } from 'react';
 import { Bell, BellOff, Save, Send, CircleAlert, CircleCheck, LoaderCircle } from 'lucide-react';
 import { createClient } from '../lib/supabase/client';
-import { defaultNotificationPreferences,loadNotificationPreferences,saveNotificationPreferences,demoPreferenceKey } from '../lib/staff-notifications';
+import { notificationPreferencesForRole,loadNotificationPreferences,saveNotificationPreferences,demoPreferenceKey } from '../lib/staff-notifications';
 
 export default function PushSettings({clinicId,sharedMode,role}) {
-  const [preferences,setPreferences]=useState(defaultNotificationPreferences);
+  const [preferences,setPreferences]=useState(()=>notificationPreferencesForRole(role));
   const [state,setState]=useState('loading');
   const [busy,setBusy]=useState(false);
   const [message,setMessage]=useState('');
@@ -25,10 +25,10 @@ export default function PushSettings({clinicId,sharedMode,role}) {
       try{
         if(!sharedMode){
           const saved=JSON.parse(localStorage.getItem(demoPreferenceKey)||'{}');
-          if(active){setPreferences({...defaultNotificationPreferences,...saved});setState('ready');}return;
+          if(active){setPreferences({...notificationPreferencesForRole(role),...saved});setState('ready');}return;
         }
         if(!clinicId)return;
-        const prefs=await loadNotificationPreferences(clinicId);
+        const prefs=await loadNotificationPreferences(clinicId,role);
         const response=await fetch(endpoint,{cache:'no-store'});const status=await response.json();
         if(!response.ok)throw new Error(status.error || 'No se pudo consultar la entrega push.');
         let reg=null,sub=null,linked=false;
@@ -48,7 +48,7 @@ export default function PushSettings({clinicId,sharedMode,role}) {
       }catch(cause){if(active){setError(cause.message);setState('error');}}
     })();
     return()=>{active=false;};
-  },[clinicId,sharedMode]);
+  },[clinicId,sharedMode,role]);
   async function save(event){
     event.preventDefault();setBusy(true);setMessage('');setError('');
     try{if(sharedMode)await saveNotificationPreferences(clinicId,preferences);else localStorage.setItem(demoPreferenceKey,JSON.stringify(preferences));setMessage('Preferencias guardadas.');}
@@ -82,7 +82,7 @@ export default function PushSettings({clinicId,sharedMode,role}) {
     <form onSubmit={save}>
       <fieldset disabled={state!=='ready'||busy} className="push-fields">
         <legend>Qué avisos recibir</legend>
-    <p className="push-hint">{role==='clinician'?'Recibes avisos de citas asignadas a tu perfil profesional.':role==='billing'?'El rol de pagos no recibe avisos de agenda.':'Administración y recepción reciben avisos de toda la clínica; los profesionales, de sus citas asignadas.'} Los avisos del dispositivo no muestran datos de pacientes.</p>
+    <p className="push-hint">{role==='clinician'?'Por defecto, se avisa sobre citas asignadas a tu perfil profesional.':role==='billing'?'Por defecto, los avisos de agenda están desactivados para este rol.':'Por defecto, se avisa sobre la actividad de agenda de la clínica.'} Puedes elegir qué avisos recibes. Los avisos del dispositivo no muestran datos de pacientes.</p>
         {[
           ['new_appointment','Nuevas citas','Cuando se registra una nueva cita.'],
           ['agenda_change','Cambios en la agenda','Cancelaciones y cambios de horario, duración, sucursal o profesional.'],

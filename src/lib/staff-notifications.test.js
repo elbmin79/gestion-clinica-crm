@@ -5,8 +5,16 @@ import {PGlite} from '@electric-sql/pglite';
 import {runInNewContext} from 'node:vm';
 import {validPushSubscription} from './push-validation.js';
 import {dispatchStaffPush,authorizedPushDispatch} from './push-dispatch.js';
+import {notificationPreferencesForRole} from './staff-notifications.js';
 
 const subscription={endpoint:'https://fcm.googleapis.com/fcm/send/test-endpoint',keys:{p256dh:'A'.repeat(87),auth:'A'.repeat(22)}};
+test('push preferences have role-specific defaults while remaining configurable per account',()=>{
+  assert.equal(notificationPreferencesForRole('billing').new_appointment,false);
+  assert.equal(notificationPreferencesForRole('billing').agenda_change,false);
+  assert.equal(notificationPreferencesForRole('clinician').new_appointment,true);
+  assert.equal(notificationPreferencesForRole('receptionist').new_appointment,true);
+  assert.equal(notificationPreferencesForRole('billing').push_enabled,true);
+});
 test('service worker suppresses unapproved notification text and refuses cross-origin notification navigation',async()=>{
   const listeners=new Map(),shown=[],opened=[];
   const worker={location:{origin:'https://crm.example'},addEventListener:(name,handler)=>listeners.set(name,handler),registration:{showNotification:async(title,options)=>shown.push({title,...options})},clients:{matchAll:async()=>[],openWindow:async url=>opened.push(url)}};
@@ -47,12 +55,19 @@ test('PostgreSQL staff alerts enforce recipients, preferences, clinic isolation,
  const db=new PGlite();t.after(()=>db.close());
  const foundation=await readFile(new URL('../../supabase/migrations/20261028221430_202610260001_clinic_crm.sql',import.meta.url),'utf8');
  const migration=await readFile(new URL('../../supabase/migrations/20261030194825_team_push_notifications.sql',import.meta.url),'utf8');
+ const permissionMigration=await readFile(new URL('../../supabase/migrations/20261031082243_permissions_and_settings_scopes.sql',import.meta.url),'utf8');
  await db.exec(`create role anon;create role authenticated;create role service_role bypassrls;create schema auth;create schema private;grant usage on schema private to authenticated,service_role;
  create table auth.users(id uuid primary key);
  create function auth.uid() returns uuid language sql stable as $$select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid$$;
  ${foundation.slice(foundation.indexOf('create table public.clinics'),foundation.indexOf('create table public.patients'))}
  create table public.appointments(id uuid primary key default gen_random_uuid(),clinic_id uuid not null,provider_id uuid,branch_id uuid,starts_at timestamptz,ends_at timestamptz,status text default 'pending',service text);
  ${migration}`);
+ await db.exec(`create table public.public_booking_requests(id uuid primary key default gen_random_uuid(),clinic_id uuid not null);
+ alter table public.staff_notifications add column booking_request_id uuid;
+ alter table public.staff_notifications drop constraint staff_notifications_message_check;
+ alter table public.staff_notifications add constraint staff_notifications_message_check check(message in ('Nueva cita registrada','Cita cancelada','Horario o asignación de cita actualizado','Prueba de notificaciones','Nueva solicitud de cita'));`);
+ await db.exec(permissionMigration.slice(permissionMigration.indexOf('create or replace function private.capture_staff_appointment_alert')));
+ await db.exec('create trigger public_booking_request_notice after insert on public.public_booking_requests for each row execute function private.notify_public_booking_request();');
  const c='10000000-0000-0000-0000-000000000001',other='10000000-0000-0000-0000-000000000002';
  const a='20000000-0000-0000-0000-000000000001',r='20000000-0000-0000-0000-000000000002',p='20000000-0000-0000-0000-000000000003',b='20000000-0000-0000-0000-000000000004',x='20000000-0000-0000-0000-000000000005';
  const provider='30000000-0000-0000-0000-000000000001',nextProvider='30000000-0000-0000-0000-000000000002';
@@ -63,6 +78,7 @@ test('PostgreSQL staff alerts enforce recipients, preferences, clinic isolation,
  select set_config('request.jwt.claim.sub','${a}',false);`);
  const appointment=(await db.query(`insert into public.appointments(clinic_id,provider_id,starts_at,ends_at) values($1,$2,'2026-11-01T16:00Z','2026-11-01T17:00Z') returning id`,[c,provider])).rows[0].id;
  assert.deepEqual((await db.query('select user_id from public.staff_notifications order by user_id')).rows.map(v=>v.user_id),[r,p]);
+ assert.equal((await db.query('select count(*)::int n from public.staff_notifications where user_id=$1',[b])).rows[0].n,0,'billing default does not opt into appointment alerts');
  assert.equal((await db.query('select count(*)::int n from private.staff_push_deliveries')).rows[0].n,1);
  await db.query('update public.appointments set service=$1 where id=$2',['Sensitive patient service',appointment]);
  assert.equal((await db.query('select count(*)::int n from public.staff_notifications')).rows[0].n,2);
@@ -99,9 +115,18 @@ test('PostgreSQL staff alerts enforce recipients, preferences, clinic isolation,
  await db.query(`insert into public.appointments(clinic_id,provider_id,starts_at,ends_at) values($1,$2,'2026-11-02T16:00Z','2026-11-02T17:00Z')`,[c,provider]);
  assert.equal((await db.query('select count(*)::int n from public.staff_notifications')).rows[0].n,before+1,'self opt-in works while clinician new-booking opt-out suppresses their alert');
  assert.equal((await db.query('select count(*)::int n from private.staff_push_deliveries')).rows[0].n,0,'push opt-out retains inbox without queueing');
+ await db.exec(`insert into public.staff_notification_preferences(clinic_id,user_id,new_appointment,agenda_change,push_enabled) values('${c}','${b}',true,true,true);
+ insert into public.staff_push_subscriptions(clinic_id,user_id,endpoint,p256dh,auth) values('${c}','${b}','https://fcm.googleapis.com/fcm/send/billing-endpoint','${subscription.keys.p256dh}','${subscription.keys.auth}');`);
+ await db.query(`insert into public.appointments(clinic_id,provider_id,starts_at,ends_at) values($1,$2,'2026-11-03T16:00Z','2026-11-03T17:00Z')`,[c,provider]);
+ assert.equal((await db.query('select count(*)::int n from public.staff_notifications where user_id=$1',[b])).rows[0].n,1,'billing can opt into appointment alerts');
+ const billingDelivery=(await db.query('select * from public.claim_staff_push(20)')).rows.find(row=>row.endpoint.includes('billing-endpoint'));
+ assert.ok(billingDelivery,'billing preference can enqueue a device alert');
+ assert.equal((await db.query('select public.staff_push_is_eligible($1,$2) ok',[billingDelivery.delivery_id,billingDelivery.token])).rows[0].ok,true,'push dispatcher accepts a configured billing recipient');
  const registered=(await db.query(`insert into public.staff_push_subscriptions(clinic_id,user_id,endpoint,p256dh,auth) values($1,$2,$3,$4,$5) returning id`,[c,a,subscription.endpoint,subscription.keys.p256dh,subscription.keys.auth])).rows[0].id;
  await db.query('select public.queue_staff_push_test($1,$2,$3)',[c,a,registered]);
  await assert.rejects(db.query('select public.queue_staff_push_test($1,$2,$3)',[c,a,registered]),/Wait one minute/);
  const testClaim=(await db.query('select * from public.claim_staff_push(1)')).rows[0];
  assert.equal((await db.query('select public.staff_push_is_eligible($1,$2) ok',[testClaim.delivery_id,testClaim.token])).rows[0].ok,false,'device preference also blocks tests');
+ await db.query(`insert into public.public_booking_requests(clinic_id) values($1)`,[c]);
+ assert.equal((await db.query("select count(*)::int n from public.staff_notifications where user_id=$1 and message='Nueva solicitud de cita'",[b])).rows[0].n,1,'billing preference also enables public booking alerts');
 });

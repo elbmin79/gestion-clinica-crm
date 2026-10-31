@@ -1,12 +1,17 @@
 import { createClient } from './supabase/client.js';
 export const defaultNotificationPreferences={new_appointment:true,agenda_change:true,include_self:false,push_enabled:true};
-export async function loadNotificationPreferences(clinicId) {
+export function notificationPreferencesForRole(role) {
+  if (role === 'billing') return {...defaultNotificationPreferences,new_appointment:false,agenda_change:false};
+  if (role === 'clinician') return {...defaultNotificationPreferences,new_appointment:true,agenda_change:true};
+  return {...defaultNotificationPreferences};
+}
+export async function loadNotificationPreferences(clinicId,role) {
   const client=createClient();
   const {data:{user}}=await client.auth.getUser();
   if(!user)throw new Error('Inicia sesión para configurar los avisos.');
   const {data,error}=await client.from('staff_notification_preferences').select('new_appointment,agenda_change,include_self,push_enabled').eq('clinic_id',clinicId).eq('user_id',user.id).maybeSingle();
   if(error)throw new Error('No se pudieron cargar las preferencias. Revisa la conexión y la migración de notificaciones.');
-  return {...defaultNotificationPreferences,...data};
+  return {...notificationPreferencesForRole(role),...data};
 }
 export async function saveNotificationPreferences(clinicId,preferences) {
   const client=createClient();

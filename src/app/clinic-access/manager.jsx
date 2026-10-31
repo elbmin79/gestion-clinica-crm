@@ -131,6 +131,7 @@ export default function ClinicAccessManager({ clinicId }) {
         return;
       }
       setConfirmAction(null);
+      if (type === 'revoke') setPermissionEditor(null);
       setReloadKey(value => value + 1);
     } catch {
       setConfirmAction(null);
@@ -177,10 +178,9 @@ export default function ClinicAccessManager({ clinicId }) {
           return <article className="clinic-access-member" key={member.userId}>
             <AccountIdentity account={member} className="clinic-access-member-identity"/>
             <span className="clinic-access-role">{roleLabels[member.role] || 'Acceso personalizado'}</span>
-            <div className="clinic-access-member-controls">
-              {member.role !== 'admin' && member.userId !== currentUserId && <><button className="clinic-access-edit" type="button" onClick={() => openMemberPermissionEditor(member)} disabled={Boolean(savingUserId) || editorSaving}>Editar permisos</button><button className="clinic-access-revoke" type="button" onClick={() => requestMemberChange(member, '__revoke__')} disabled={Boolean(savingUserId) || editorSaving}>Revocar</button></>}
-              {member.role === 'admin' && <span className="clinic-access-admin-lock">Acceso completo</span>}
-            </div>
+            {member.role !== 'admin' && member.userId !== currentUserId && <div className="clinic-access-member-controls">
+              <button className="clinic-access-edit" type="button" onClick={() => openMemberPermissionEditor(member)} disabled={Boolean(savingUserId) || editorSaving}>Editar permisos</button>
+            </div>}
           </article>;
         })
           : <div className="empty-inline">Aún no hay cuentas asignadas a esta clínica.</div>}
@@ -191,10 +191,15 @@ export default function ClinicAccessManager({ clinicId }) {
       <header><div><span>ACCESO A LA CLÍNICA</span><h2 id="clinic-access-permissions-title">{permissionEditor.type === 'assign' ? 'Configurar acceso' : 'Editar permisos'}</h2><p>{permissionEditor.account?.name || permissionEditor.account?.email || permissionEditor.member?.name || permissionEditor.member?.email}</p></div><button type="button" aria-label="Cerrar" disabled={editorSaving} onClick={() => setPermissionEditor(null)}>×</button></header>
       <div className="clinic-access-permissions-body">
         <label className="clinic-access-template-select"><span>Plantilla inicial</span><select value={permissionEditor.role} disabled={editorSaving} onChange={event => setEditorRole(event.target.value)}>{CLINIC_ROLES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select><small>La plantilla rellena los permisos; puedes ajustarlos antes de guardar.</small></label>
-        <div className="clinic-access-read-rule"><span className="clinic-access-read-check">✓</span><div><strong>Lectura completa en la clínica</strong><p>Todos pueden consultar las secciones y su contenido. WhatsApp se configura por separado.</p></div></div>
-        {permissionEditor.role === 'admin' ? <div className="clinic-access-admin-note">La plantilla de administrador siempre conserva acceso completo y no se puede personalizar.</div> : <div className="clinic-access-permission-groups">{CLINIC_PERMISSION_GROUPS.map(group => <section className="clinic-access-permission-group" key={group.id}><h3>{group.title}</h3><div>{group.permissions.map(([permission, label]) => <label className="clinic-access-permission-option" key={permission}><input type="checkbox" checked={permissionEditor.permissions[permission] === true} onChange={event => setEditorPermission(permission, event.target.checked)} disabled={editorSaving}/><span>{label}</span></label>)}</div></section>)}</div>}
+        <div className="clinic-access-read-rule"><span className="clinic-access-read-check">✓</span><div><strong>Lectura completa en la clínica</strong><p>Todos pueden consultar los módulos, incluida Agenda Pública. WhatsApp solo aparece cuando se habilita; los permisos de acción controlan qué puede modificarse.</p></div></div>
+        {permissionEditor.role === 'admin' ? <div className="clinic-access-admin-note">La plantilla de administrador siempre conserva acceso completo y no se puede personalizar.</div> : <div className="clinic-access-permission-groups">{CLINIC_PERMISSION_GROUPS.map(group => <section className={`clinic-access-permission-group${group.id === 'settings' ? ' clinic-access-permission-group--settings' : ''}`} key={group.id}><h3>{group.title}</h3><div>{group.permissions.map(([permission, label]) => permission === 'availability.scope' ? <label className="clinic-access-permission-option clinic-access-scope-option" key={permission}><span>{label}</span><select value={permissionEditor.permissions[permission] || 'none'} onChange={event => setEditorPermission(permission, event.target.value)} disabled={editorSaving}><option value="none">Sin permisos</option><option value="self">Solo mi agenda</option><option value="branch">Una sucursal</option><option value="clinic">Toda la clínica</option></select></label> : <label className="clinic-access-permission-option" key={permission}><input type="checkbox" checked={permissionEditor.permissions[permission] === true} onChange={event => setEditorPermission(permission, event.target.checked)} disabled={editorSaving}/><span>{label}</span></label>)}</div></section>)}</div>}
       </div>
-      <footer><button className="button secondary" type="button" onClick={() => setPermissionEditor(null)} disabled={editorSaving}>Cancelar</button><button className="button primary" type="button" onClick={savePermissionEditor} disabled={editorSaving}>{editorSaving ? 'Guardando…' : permissionEditor.type === 'assign' ? 'Dar acceso' : 'Guardar permisos'}</button></footer>
+      <footer>
+        {permissionEditor.type === 'update' && <button className="clinic-access-revoke" type="button" onClick={() => requestMemberChange(permissionEditor.member, '__revoke__')} disabled={editorSaving} aria-label={`Revocar el acceso de ${permissionEditor.member.name || permissionEditor.member.email}`}>Revocar acceso</button>}
+        <span className="clinic-access-permissions-footer-spacer" aria-hidden="true"/>
+        <button className="button secondary" type="button" onClick={() => setPermissionEditor(null)} disabled={editorSaving}>Cancelar</button>
+        <button className="button primary" type="button" onClick={savePermissionEditor} disabled={editorSaving}>{editorSaving ? 'Guardando…' : permissionEditor.type === 'assign' ? 'Dar acceso' : 'Guardar permisos'}</button>
+      </footer>
     </section>
   </div>}
   {confirmAction && <div className="clinic-access-confirm-backdrop" onMouseDown={event => event.target === event.currentTarget && !savingUserId && setConfirmAction(null)}>

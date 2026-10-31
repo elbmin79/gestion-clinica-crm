@@ -15,7 +15,7 @@ export default function PublicAgendaSettings({clinicId,clinicName,role,permissio
   const [status,setStatus]=useState('loading'),[busy,setBusy]=useState(''),[error,setError]=useState(''),[notice,setNotice]=useState(''),[filter,setFilter]=useState('pending');
   const [readiness,setReadiness]=useState({configured:false});
   const loadVersion=useRef(0);
-  const canRead=sharedMode&&clinicId,canManage=!sharedMode||hasClinicPermission(role,permissions,'settings.manage');
+  const canRead=sharedMode&&clinicId,canManage=!sharedMode||hasClinicPermission(role,permissions,'public_agenda.manage');
   const canReview=action=>!sharedMode||hasClinicPermission(role,permissions,action);
   async function load(){
     if(!canRead)return;const version=++loadVersion.current;setError('');setStatus('loading');
@@ -93,7 +93,7 @@ export default function PublicAgendaSettings({clinicId,clinicName,role,permissio
     <form onSubmit={save}>
       <fieldset className="public-agenda-fields" disabled={!canManage||status!=='ready'||Boolean(busy)}>
         <section className="public-agenda-section"><div className="google-calendar-section-heading"><div><strong>Página de reservas</strong><span>Define el enlace y cuándo puede usarse.</span></div><label className="public-agenda-toggle"><input type="checkbox" checked={settings.published} onChange={e=>updateSetting('published',e.target.checked)}/> Publicada</label></div>
-          <div className="public-agenda-grid"><label>Identificador del enlace<input name="slug" required minLength={3} maxLength={60} pattern="[a-z0-9][a-z0-9-]{2,59}" value={settings.slug} onChange={e=>updateSetting('slug',e.target.value)} placeholder="mi-clinica"/></label>
+          <div className="public-agenda-grid"><label>Identificador del enlace<input name="slug" required minLength={3} maxLength={60} pattern="[a-z0-9][a-z0-9\\-]{2,59}" value={settings.slug} onChange={e=>updateSetting('slug',e.target.value)} placeholder="mi-clinica"/></label>
           <label>Anticipación mínima (minutos)<input name="minNotice" type="number" required min={0} max={43200} value={settings.min_notice_minutes} onChange={e=>updateSetting('min_notice_minutes',e.target.value)}/></label>
           <label>Días por adelantado<input name="maxDays" type="number" required min={1} max={365} value={settings.max_days} onChange={e=>updateSetting('max_days',e.target.value)}/></label>
           <label>Separación entre citas (minutos)<input name="buffer" type="number" required min={0} max={120} value={settings.buffer_minutes} onChange={e=>updateSetting('buffer_minutes',e.target.value)}/></label></div>

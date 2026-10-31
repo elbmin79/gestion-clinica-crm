@@ -8,8 +8,8 @@ export const whatsappTemplateKinds = Object.freeze({
 
 export function resolveWhatsAppProviderMode(env = process.env) {
   const configured = String(env.WHATSAPP_PROVIDER_MODE || '').trim().toLowerCase();
-  if (/^AC[0-9a-fA-F]{32}$/.test(String(env.TWILIO_ACCOUNT_SID || '').trim()) && String(env.TWILIO_AUTH_TOKEN || '').trim()) return 'twilio';
-  if (configured === 'mock' && env.NODE_ENV === 'test') return 'mock';
+  if (configured === 'twilio' && String(env.TWILIO_WHATSAPP_ENABLED || '').toLowerCase() === 'true') return 'twilio';
+  if (configured === 'mock') return 'mock';
   return 'disabled';
 }
 
