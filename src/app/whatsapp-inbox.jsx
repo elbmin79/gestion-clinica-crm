@@ -456,7 +456,7 @@ export default function WhatsAppInbox({ clinicId = '', sharedMode = false, role 
           </form>
             : <footer className="whatsapp-composer-dock"><span className="whatsapp-composer-dock-copy"><MessageCircle size={16}/><span>{draft || attachment ? 'Tienes un borrador pendiente' : 'La conversación está en modo lectura'}</span></span><button type="button" className="whatsapp-composer-open" onClick={() => setComposerOpen(true)} aria-expanded={false} aria-controls="whatsapp-message-composer"><PencilLine size={16}/><span>{draft || attachment ? 'Continuar escribiendo' : 'Escribir mensaje'}</span></button></footer>
             : <footer className="whatsapp-composer-disabled"><MessageCircle size={16}/><span>Para responder, espera a que el contacto envíe un nuevo mensaje.</span></footer>
-            : <footer className="whatsapp-composer-disabled"><MessageCircle size={16}/><span>Tu perfil puede consultar esta conversación.</span></footer>}
+            : null}
         </> : <div className="whatsapp-conversation-empty"><MessageCircle size={28}/><strong>Tu bandeja de WhatsApp</strong><span>{sharedMode ? 'Envía un WhatsApp al número del Sandbox para iniciar una conversación.' : 'Conecta la clínica para recibir mensajes.'}</span></div>}
       </main>
     </div>
