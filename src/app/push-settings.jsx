@@ -94,12 +94,13 @@ export default function PushSettings({clinicId,sharedMode,role}) {
     </form>
     <section className="push-device" aria-labelledby="push-device-title"><div className="google-calendar-section-heading"><div><strong id="push-device-title">Este dispositivo</strong>
       <span>{!supported?'Este navegador no admite notificaciones push. Usa un navegador compatible y una conexión segura.':permission==='denied'?'Permiso bloqueado. Habilita las notificaciones desde la configuración del sitio en tu navegador.':device?'Dispositivo activado para esta clínica.':'Este dispositivo no está activado para esta clínica.'}</span></div><span className="settings-option-status">{device?'Activado':permission==='denied'?'Bloqueado':'Sin activar'}</span></div>
+      <div className="push-device-footer"><div className="push-device-copy">
       {sharedMode&&!server.configured&&state==='ready'&&<p>Los avisos dentro del CRM están disponibles. Para entregar push, configura las claves VAPID y el proceso de envío del servidor.</p>}
       <p>En iPhone o iPad, agrega primero el CRM a la pantalla de inicio y ábrelo desde ahí.</p>
       <p>Activar este navegador en otra clínica mueve el registro de este dispositivo a esa clínica.</p>
-      <div className="push-actions"><button type="button" className="button outline compact" disabled={busy||state!=='ready'||!sharedMode||!supported||!registration||!server.configured||permission==='denied'||Boolean(device)} onClick={()=>deviceAction('enable')}><Bell size={14}/> Activar este dispositivo</button>
+      </div><div className="push-actions"><button type="button" className="button outline compact" disabled={busy||state!=='ready'||!sharedMode||!supported||!registration||!server.configured||permission==='denied'||Boolean(device)} onClick={()=>deviceAction('enable')}><Bell size={14}/> Activar este dispositivo</button>
       <button type="button" className="button secondary compact" disabled={busy||!device} onClick={()=>deviceAction('disable')}><BellOff size={14}/> Desactivar este dispositivo</button>
-      <button type="button" className="button outline compact" disabled={busy||!device||!server.configured} onClick={()=>deviceAction('test')}><Send size={14}/> Enviar prueba</button></div>
+      <button type="button" className="button outline compact" disabled={busy||!device||!server.configured} onClick={()=>deviceAction('test')}><Send size={14}/> Enviar prueba</button></div></div>
     </section>
   </div>;
 }

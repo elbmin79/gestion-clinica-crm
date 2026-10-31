@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Check, CircleAlert, CircleCheck, LoaderCircle, MessageCircle, Pencil, Save, ShieldCheck, Trash2, MessageSquareText, CalendarCheck2 } from 'lucide-react';
+import { Check, CircleAlert, CircleCheck, MessageCircle, Pencil, Save, ShieldCheck, Trash2, MessageSquareText, CalendarCheck2 } from 'lucide-react';
 import { loadAvailableWhatsAppSenders, loadClinicWhatsAppSettings, saveClinicWhatsAppSettings } from './whatsapp-settings-actions.js';
 import { hasClinicPermission } from '../lib/clinic-permissions.js';
 
@@ -10,6 +10,18 @@ const initialSettings = {
   notifyWhatsAppMessages: true,
   notifyWhatsAppConfirmations: true,
 };
+
+function WhatsAppSettingsSkeleton() {
+  return <div className="whatsapp-settings-skeleton" role="status" aria-label="Cargando configuración de WhatsApp">
+    <div className="whatsapp-skeleton-banner"><span className="whatsapp-skeleton-icon"/><span className="whatsapp-skeleton-copy"><i className="whatsapp-skeleton-block"/><i className="whatsapp-skeleton-block"/></span></div>
+    <div className="whatsapp-settings-summary whatsapp-skeleton-summary">
+      {['Bandeja de conversaciones', 'Números conectados', 'Números asignables', 'Avisos en el CRM'].map(label => <div key={label}><span>{label}</span><i className="whatsapp-skeleton-block"/></div>)}
+    </div>
+    <section className="whatsapp-settings-section whatsapp-skeleton-section"><div className="whatsapp-settings-heading"><div><i className="whatsapp-skeleton-block is-title"/><i className="whatsapp-skeleton-block is-description"/></div><i className="whatsapp-skeleton-block is-action"/></div><i className="whatsapp-skeleton-block is-helper"/><div className="whatsapp-skeleton-sender"><i className="whatsapp-skeleton-block is-number"/><i className="whatsapp-skeleton-block is-branches"/><i className="whatsapp-skeleton-block is-action"/></div></section>
+    <section className="whatsapp-settings-section whatsapp-skeleton-section"><div className="whatsapp-settings-heading"><div><i className="whatsapp-skeleton-block is-title"/><i className="whatsapp-skeleton-block is-description"/></div></div><div className="whatsapp-skeleton-options"><i className="whatsapp-skeleton-block is-option"/><i className="whatsapp-skeleton-block is-option"/></div></section>
+    <div className="whatsapp-skeleton-actions"><i className="whatsapp-skeleton-block is-action"/></div>
+  </div>;
+}
 
 export default function WhatsAppSettings({ clinicId, role, permissions = {}, branches = [], sharedMode }) {
   const canView = !sharedMode || hasClinicPermission(role, permissions, 'whatsapp.view');
@@ -208,6 +220,7 @@ export default function WhatsAppSettings({ clinicId, role, permissions = {}, bra
     && availableSenders.some(available => available.phoneNumber === sender.whatsappNumber)
     && sender.branchIds?.length > 0;
   const readySenderCount = senders.filter(validSender).length;
+  const isInitialLoading = loading || loadingAvailableSenders;
   const connectedNumbers = new Set([
     inboxSender?.phoneNumber,
     ...availableSenders.map(sender => sender.phoneNumber),
@@ -217,10 +230,11 @@ export default function WhatsAppSettings({ clinicId, role, permissions = {}, bra
 
   return <div className="whatsapp-settings-content" ref={rootRef} aria-busy={loading || saving || loadingAvailableSenders}>
     <header className="whatsapp-page-heading"><h1>WhatsApp</h1><p>Asigna números y elige qué avisos internos recibir en el CRM.</p></header>
+    {isInitialLoading ? <WhatsAppSettingsSkeleton/> : <>
     {inboxConnected ? <div className="whatsapp-settings-connection-notice"><MessageCircle size={18}/><div><strong>La bandeja de conversaciones está conectada</strong><span>Administra aquí los números y las sucursales que los usan. Los avisos seleccionados aparecerán en el centro de notificaciones del CRM.</span></div></div>
       : <div className="whatsapp-settings-pending-notice"><ShieldCheck size={18}/><div><strong>Configura WhatsApp</strong><span>Vincula los números a sus sucursales y configura los avisos internos del CRM.</span></div></div>}
-    <div className="whatsapp-settings-summary"><div><span>Bandeja de conversaciones</span><strong>{loading || loadingAvailableSenders ? 'Cargando…' : inboxConnected ? 'Conectada' : 'No conectada'}</strong></div><div><span>Números conectados</span><strong>{loadingAvailableSenders ? 'Cargando…' : connectedNumbers.size}</strong></div><div><span>Números asignables</span><strong>{loading || loadingAvailableSenders ? 'Cargando…' : availableSenders.length ? `${readySenderCount} de ${availableSenders.length} asignados` : 'Sin números disponibles para asignar'}</strong></div><div><span>Avisos en el CRM</span><strong>{loading ? 'Cargando…' : crmNotificationsEnabled ? 'Activados' : 'Desactivados'}</strong></div></div>
-    {loading ? <p className="whatsapp-settings-loading"><LoaderCircle size={16}/> Cargando configuración…</p> : <form className="whatsapp-settings-form" onSubmit={save}>
+    <div className="whatsapp-settings-summary"><div><span>Bandeja de conversaciones</span><strong>{inboxConnected ? 'Conectada' : 'No conectada'}</strong></div><div><span>Números conectados</span><strong>{connectedNumbers.size}</strong></div><div><span>Números asignables</span><strong>{availableSenders.length ? `${readySenderCount} de ${availableSenders.length} asignados` : 'Sin números disponibles para asignar'}</strong></div><div><span>Avisos en el CRM</span><strong>{crmNotificationsEnabled ? 'Activados' : 'Desactivados'}</strong></div></div>
+    <form className="whatsapp-settings-form" onSubmit={save}>
       <section className="whatsapp-settings-section"><div className="whatsapp-settings-heading"><div><h3>Números de WhatsApp</h3><p>Asigna un número a una o varias sucursales.</p></div></div>
         <p className="whatsapp-settings-helper">Pulsa «Editar sucursales» para cambiar dónde se usa cada número.</p>
         {senderLookupError && <p className="whatsapp-settings-error" role="status"><CircleAlert size={15}/>{senderLookupError}</p>}
@@ -254,7 +268,8 @@ export default function WhatsAppSettings({ clinicId, role, permissions = {}, bra
       </section>
       {error && <p className="whatsapp-settings-error" role="alert"><CircleAlert size={15}/>{error}</p>}{notice && <p className="whatsapp-settings-success" role="status"><CircleCheck size={15}/>{notice}</p>}
       <div className="whatsapp-settings-actions"><button className="button primary" type="submit" disabled={saving || loading || !hasUnsavedChanges}><Save size={15}/>{saving ? 'Guardando…' : 'Guardar configuración'}</button></div>
-    </form>}
+    </form>
+    </>}
     {leavePromptOpen && <div className="whatsapp-unsaved-overlay" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) { pendingNavigationRef.current = null; setLeavePromptOpen(false); } }} onKeyDown={event => { if (event.key === 'Escape') { pendingNavigationRef.current = null; setLeavePromptOpen(false); } }}>
       <section className="whatsapp-unsaved-dialog" role="alertdialog" aria-modal="true" aria-labelledby="whatsapp-unsaved-title" aria-describedby="whatsapp-unsaved-description">
         <span className="whatsapp-unsaved-icon"><CircleAlert size={19}/></span>
