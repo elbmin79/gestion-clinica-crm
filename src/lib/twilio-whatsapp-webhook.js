@@ -4,18 +4,73 @@ import { resolveInboundTwilioWhatsAppSender } from './whatsapp/clinic-routing.js
 import { downloadTwilioWhatsAppMedia, getWhatsAppMediaType, WHATSAPP_MEDIA_BUCKET } from './whatsapp/media.server.js';
 
 const webhookPath = '/api/webhooks/twilio/whatsapp';
+const statusWebhookPath = '/api/webhooks/twilio/whatsapp/status';
 
-function canonicalWebhookUrl(request, env) {
+function canonicalWebhookUrl(request, env, path = webhookPath) {
   const baseUrl = String(env.TWILIO_WEBHOOK_PUBLIC_BASE_URL || '').trim();
   if (!baseUrl) return null;
   try {
     const base = new URL(baseUrl);
     if (base.protocol !== 'https:' && !['localhost', '127.0.0.1'].includes(base.hostname)) return null;
     const incoming = new URL(request.url);
-    return `${base.origin}${webhookPath}${incoming.search}`;
+    return `${base.origin}${path}${incoming.search}`;
   } catch {
     return null;
   }
+}
+
+function twilioWhatsAppStatusCallbackUrl(env) {
+  const baseUrl = String(env.TWILIO_WEBHOOK_PUBLIC_BASE_URL || '').trim();
+  try {
+    const base = new URL(baseUrl);
+    if (base.protocol !== 'https:' && !['localhost', '127.0.0.1'].includes(base.hostname)) return null;
+    return `${base.origin}${statusWebhookPath}`;
+  } catch {
+    return null;
+  }
+}
+
+const validOutboundStatuses = new Set(['queued', 'sending', 'sent', 'delivered', 'read', 'failed', 'undelivered', 'canceled', 'unknown']);
+
+export function createTwilioWhatsAppStatusWebhookHandler({ createServiceClient, env = process.env } = {}) {
+  return async function POST(request) {
+    const authToken = String(env.TWILIO_AUTH_TOKEN || '').trim();
+    const accountSid = String(env.TWILIO_ACCOUNT_SID || '').trim();
+    const requestUrl = canonicalWebhookUrl(request, env, statusWebhookPath);
+    const signature = request.headers.get('x-twilio-signature') || '';
+    if (!authToken || !/^AC[0-9a-fA-F]{32}$/.test(accountSid) || !requestUrl || !signature) {
+      return Response.json({ error: 'Twilio webhook is not configured.' }, { status: 503 });
+    }
+    if (!request.headers.get('content-type')?.toLowerCase().startsWith('application/x-www-form-urlencoded')) {
+      return Response.json({ error: 'Unsupported webhook content type.' }, { status: 415 });
+    }
+    const rawBody = await request.text();
+    if (rawBody.length > 65536) return Response.json({ error: 'Webhook payload is too large.' }, { status: 413 });
+    const params = Object.fromEntries(new URLSearchParams(rawBody));
+    let valid = false;
+    try { valid = twilio.validateRequest(authToken, signature, requestUrl, params); } catch { valid = false; }
+    if (!valid) return Response.json({ error: 'Invalid Twilio signature.' }, { status: 401 });
+    if (params.AccountSid !== accountSid) return Response.json({ error: 'Twilio account mismatch.' }, { status: 403 });
+
+    const messageSid = String(params.MessageSid || params.SmsSid || params.SmsMessageSid || '').trim();
+    if (!/^(?:SM|MM)[0-9a-fA-F]{32}$/.test(messageSid)) return Response.json({ error: 'Invalid Twilio message SID.' }, { status: 400 });
+    const reportedStatus = String(params.MessageStatus || params.SmsStatus || params.status || '').trim().toLowerCase();
+    const deliveryStatus = String(params.EventType || '').trim().toUpperCase() === 'READ' || reportedStatus === 'read'
+      ? 'read'
+      : reportedStatus;
+    if (!validOutboundStatuses.has(deliveryStatus)) return new Response(null, { status: 204 });
+
+    const client = createServiceClient?.();
+    if (!client) return Response.json({ error: 'Server-side Supabase configuration is incomplete.' }, { status: 503 });
+    const { error } = await client.rpc('apply_twilio_whatsapp_message_status', {
+      target_message_sid: messageSid,
+      target_delivery_status: deliveryStatus,
+      target_error_code: String(params.ErrorCode || '').slice(0, 64) || null,
+      target_error_message: String(params.ChannelStatusMessage || '').replace(/\s+/g, ' ').trim().slice(0, 500) || null,
+    });
+    if (error) return Response.json({ error: 'Could not save WhatsApp message status.' }, { status: 503 });
+    return new Response(null, { status: 204 });
+  };
 }
 
 function emptyTwiML() {
@@ -145,4 +200,4 @@ export function createTwilioWhatsAppWebhookHandler({
   };
 }
 
-export { canonicalWebhookUrl };
+export { canonicalWebhookUrl, twilioWhatsAppStatusCallbackUrl };

@@ -80,6 +80,11 @@
 .whatsapp-image-dialog-canvas{display:grid;flex:1;place-items:center;min-width:0;min-height:0;margin-top:12px;padding:12px;border:1px solid color-mix(in srgb,var(--line) 20%,transparent);border-radius:12px;overflow:hidden;background:color-mix(in srgb,var(--canvas) 16%,transparent)}
 .whatsapp-image-dialog-canvas img{display:block;width:auto;height:auto;max-width:100%;max-height:100%;object-fit:contain;border-radius:8px}
 .whatsapp-message-details{position:relative;top:2px;display:inline-flex;align-items:center;gap:6px;margin:0 0 0 9px;white-space:nowrap;vertical-align:baseline;font-size:10px;line-height:1.2}
+.whatsapp-message-status{display:inline-flex;align-items:center;gap:3px;font-size:9px;font-weight:550;line-height:1.15}
+.whatsapp-message-status svg{flex:none}
+.whatsapp-message-status.is-pending,.whatsapp-message-status.is-sent,.whatsapp-message-status.is-delivered{color:var(--muted)}
+.whatsapp-message-status.is-read{color:#58a8e6;font-weight:700}
+.whatsapp-message-status.is-failed{color:#dc776e;font-weight:650}
 .whatsapp-composer{display:flex;align-items:center;gap:10px;padding:10px 14px;border-top:1px solid var(--line);background:var(--paper)}
 .whatsapp-composer-entry{display:flex;align-items:center;gap:10px;flex:1;min-width:0}
 .whatsapp-file-input{display:none}
@@ -125,6 +130,8 @@ html[data-theme="light"] .whatsapp-message-history{background:var(--canvas)}
 html[data-theme="light"] .whatsapp-message-row.is-inbound .whatsapp-message-bubble{border-color:var(--wa-border);background:var(--wa-inbound);color:#342832;box-shadow:0 2px 5px rgb(57 35 49 / 9%)}
 html[data-theme="light"] .whatsapp-message-row.is-outbound .whatsapp-message-bubble{border-color:#ad8296;background:var(--wa-outbound);color:#342832;box-shadow:0 2px 5px rgb(57 35 49 / 12%)}
 html[data-theme="light"] .whatsapp-message-row.is-outbound .whatsapp-message-details,html[data-theme="light"] .whatsapp-message-row.is-outbound .whatsapp-message-status{color:#51404c}
+html[data-theme="light"] .whatsapp-message-status.is-read{color:#2376aa}
+html[data-theme="light"] .whatsapp-message-status.is-failed{color:#ac493f}
 html[data-theme="light"] .whatsapp-day-divider span{border-color:#b59eac;background:#fbf5f8;color:#493845}
 html[data-theme="light"] .whatsapp-audio-player{color:#342832}
 html[data-theme="light"] .whatsapp-audio-play{background:#8e526e;color:#fff}

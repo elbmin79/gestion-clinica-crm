@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, Ban, ChevronDown, ChevronRight, ChevronUp, Download, EllipsisVertical, Expand, MessageCircle, Paperclip, Search, Send, Trash2, X } from 'lucide-react';
+import { AlertCircle, ArrowLeft, Ban, Check, CheckCheck, ChevronDown, ChevronRight, ChevronUp, Clock3, Download, EllipsisVertical, Expand, MessageCircle, Paperclip, Search, Send, Trash2, X } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { buildWhatsAppTimeline, formatWhatsAppMessageTime, formatWhatsAppThreadTime } from '@/lib/whatsapp/time-format.js';
 import './whatsapp-inbox.css';
@@ -15,6 +15,24 @@ function readableMediaName(name = '') {
 function formatAudioTime(seconds = 0) {
   const total = Number.isFinite(seconds) ? Math.max(0, Math.floor(seconds)) : 0;
   return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
+}
+function WhatsAppDeliveryStatus({ status, errorCode, errorMessage }) {
+  const states = {
+    queued: { label: 'En cola', Icon: Clock3, tone: 'pending' },
+    sending: { label: 'Enviando', Icon: Clock3, tone: 'pending' },
+    sent: { label: 'Enviado', Icon: Check, tone: 'sent' },
+    delivered: { label: 'Entregado', Icon: CheckCheck, tone: 'delivered' },
+    read: { label: 'Visto', Icon: CheckCheck, tone: 'read' },
+    failed: { label: 'Falló el envío', Icon: AlertCircle, tone: 'failed' },
+    undelivered: { label: 'No entregado', Icon: AlertCircle, tone: 'failed' },
+    canceled: { label: 'Cancelado', Icon: AlertCircle, tone: 'failed' },
+  };
+  const state = states[status] || { label: 'Enviado', Icon: Check, tone: 'sent' };
+  const title = errorCode || errorMessage
+    ? [state.label, errorCode && `Código ${errorCode}`, errorMessage].filter(Boolean).join(' · ')
+    : state.label;
+  const { Icon } = state;
+  return <span className={`whatsapp-message-status is-${state.tone}`} title={title} aria-label={title}><Icon size={12}/><span>{state.label}</span></span>;
 }
 function highlightSearchText(text, query) {
   const value = String(text || '');
@@ -218,7 +236,7 @@ export default function WhatsAppInbox({ clinicId = '', sharedMode = false, role 
     if (!selected) { setMessages([]); setMessageHistoryConversationId(''); return; }
     let active = true;
     const load = async () => {
-      const result = await createClient().from('clinic_whatsapp_messages').select('id,direction,body,delivery_status,created_at,media_object_path,media_content_type,media_filename,media_size_bytes')
+      const result = await createClient().from('clinic_whatsapp_messages').select('id,direction,body,delivery_status,delivery_error_code,delivery_error_message,created_at,media_object_path,media_content_type,media_filename,media_size_bytes')
         .eq('clinic_id', clinicId).eq('conversation_id', selected.id).order('created_at', { ascending: true }).limit(300);
       if (!active) return;
       if (result.error) { setError('No se pudieron cargar los mensajes.'); return; }
@@ -337,7 +355,7 @@ export default function WhatsAppInbox({ clinicId = '', sharedMode = false, role 
       removeAttachment();
       setSendOutcomeUncertain(false);
       await Promise.all([refresh(), (async () => {
-        const data = await createClient().from('clinic_whatsapp_messages').select('id,direction,body,delivery_status,created_at,media_object_path,media_content_type,media_filename,media_size_bytes').eq('clinic_id', clinicId).eq('conversation_id', conversationId).order('created_at', { ascending: true }).limit(300);
+        const data = await createClient().from('clinic_whatsapp_messages').select('id,direction,body,delivery_status,delivery_error_code,delivery_error_message,created_at,media_object_path,media_content_type,media_filename,media_size_bytes').eq('clinic_id', clinicId).eq('conversation_id', conversationId).order('created_at', { ascending: true }).limit(300);
         if (!data.error) { setMessages(data.data || []); setMessageHistoryConversationId(conversationId); }
       })()]);
     } catch (sendError) { setError(sendError.message); }
@@ -396,7 +414,7 @@ export default function WhatsAppInbox({ clinicId = '', sharedMode = false, role 
                   const mediaUrl = `/api/whatsapp/media?clinicId=${encodeURIComponent(clinicId)}&messageId=${encodeURIComponent(item.message.id)}`;
                   const filename = readableMediaName(item.message.media_filename);
                   return <WhatsAppMessageImage src={mediaUrl} filename={filename} onExpand={() => setExpandedImage({ src: mediaUrl, filename })} onMediaLoad={keepLatestVisible}/>;
-                })()}{item.message.media_content_type?.startsWith('video/') && <video className="whatsapp-message-media" src={`/api/whatsapp/media?clinicId=${encodeURIComponent(clinicId)}&messageId=${encodeURIComponent(item.message.id)}`} aria-label={item.message.media_filename || 'Video compartido'} controls playsInline preload="metadata" onLoadedMetadata={keepLatestVisible}/ >}{item.message.media_content_type?.startsWith('audio/') && <WhatsAppAudioPlayer src={`/api/whatsapp/media?clinicId=${encodeURIComponent(clinicId)}&messageId=${encodeURIComponent(item.message.id)}`} filename={item.message.media_filename || 'audio'}/>}{item.message.body && <p>{highlightSearchText(item.message.body, messageQuery)}</p>}<div className="whatsapp-message-details"><time dateTime={item.message.created_at}>{formatWhatsAppMessageTime(item.message.created_at)}</time>{item.message.direction === 'outbound' && <span>{item.message.delivery_status === 'failed' ? 'No enviado' : 'Enviado'}</span>}</div></div>
+                })()}{item.message.media_content_type?.startsWith('video/') && <video className="whatsapp-message-media" src={`/api/whatsapp/media?clinicId=${encodeURIComponent(clinicId)}&messageId=${encodeURIComponent(item.message.id)}`} aria-label={item.message.media_filename || 'Video compartido'} controls playsInline preload="metadata" onLoadedMetadata={keepLatestVisible}/ >}{item.message.media_content_type?.startsWith('audio/') && <WhatsAppAudioPlayer src={`/api/whatsapp/media?clinicId=${encodeURIComponent(clinicId)}&messageId=${encodeURIComponent(item.message.id)}`} filename={item.message.media_filename || 'audio'}/>}{item.message.body && <p>{highlightSearchText(item.message.body, messageQuery)}</p>}<div className="whatsapp-message-details"><time dateTime={item.message.created_at}>{formatWhatsAppMessageTime(item.message.created_at)}</time>{item.message.direction === 'outbound' && <WhatsAppDeliveryStatus status={item.message.delivery_status} errorCode={item.message.delivery_error_code} errorMessage={item.message.delivery_error_message}/>}</div></div>
               </article>) : <div className="whatsapp-conversation-empty"><MessageCircle size={28}/><strong>Conversación nueva</strong><span>Los mensajes que se reciban aparecerán aquí.</span></div>}
           </div>
           {(!isAtLatestMessage || newMessageCount > 0) && <button type="button" className="whatsapp-jump-to-latest" onClick={() => scrollToLatest('smooth')} aria-label={newMessageCount ? `Ver ${newMessageCount} mensajes nuevos` : 'Ir al último mensaje'}>

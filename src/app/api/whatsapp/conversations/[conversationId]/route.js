@@ -44,17 +44,24 @@ export async function DELETE(request, { params }) {
   if (!conversation) return Response.json({ error: 'No se encontró la conversación.' }, { status: 404 });
 
   const paths = [];
+  const messageSids = [];
   for (let offset = 0; ; offset += 1000) {
-    const { data, error } = await context.service.from('clinic_whatsapp_messages').select('media_object_path')
-      .eq('clinic_id', context.clinicId).eq('conversation_id', conversationId).not('media_object_path', 'is', null)
+    const { data, error } = await context.service.from('clinic_whatsapp_messages').select('media_object_path,twilio_message_sid')
+      .eq('clinic_id', context.clinicId).eq('conversation_id', conversationId)
       .range(offset, offset + 999);
     if (error) return Response.json({ error: 'No se pudieron preparar los archivos de la conversación para eliminar.' }, { status: 503 });
     paths.push(...(data || []).map(item => item.media_object_path).filter(Boolean));
+    messageSids.push(...(data || []).map(item => item.twilio_message_sid).filter(Boolean));
     if ((data || []).length < 1000) break;
   }
   for (let offset = 0; offset < paths.length; offset += 1000) {
     const { error } = await context.service.storage.from(WHATSAPP_MEDIA_BUCKET).remove(paths.slice(offset, offset + 1000));
     if (error) return Response.json({ error: 'No se pudieron eliminar todos los archivos. La conversación sigue disponible.' }, { status: 503 });
+  }
+  for (let offset = 0; offset < messageSids.length; offset += 1000) {
+    const { error } = await context.service.from('clinic_whatsapp_message_status_events').delete()
+      .in('twilio_message_sid', messageSids.slice(offset, offset + 1000));
+    if (error) return Response.json({ error: 'No se pudieron eliminar los estados guardados. La conversación sigue disponible.' }, { status: 503 });
   }
   const { data: deleted, error: deleteError } = await context.service.from('clinic_whatsapp_conversations').delete()
     .eq('clinic_id', context.clinicId).eq('id', conversationId).select('id').maybeSingle();

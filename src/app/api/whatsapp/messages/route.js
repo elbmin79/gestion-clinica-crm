@@ -1,6 +1,7 @@
 import { Buffer } from 'node:buffer';
 import { createClient } from '@/lib/supabase/server';
 import { createServiceClient } from '@/lib/supabase/service-client';
+import { twilioWhatsAppStatusCallbackUrl } from '@/lib/twilio-whatsapp-webhook';
 import { getWhatsAppMediaType, hasWhatsAppMediaSignature, isWhatsAppMediaPath, WHATSAPP_MEDIA_BUCKET } from '@/lib/whatsapp/media.server.js';
 
 export const runtime = 'nodejs';
@@ -35,6 +36,8 @@ export async function POST(request) {
   if (!/^AC[0-9a-fA-F]{32}$/.test(accountSid) || !authToken) return Response.json({ error: 'Falta configurar la conexión de WhatsApp.' }, { status: 503 });
   const from = String(conversation.sender_phone || '').trim();
   if (!/^\+[1-9]\d{7,14}$/.test(from) || !/^\+[1-9]\d{7,14}$/.test(conversation.contact_phone)) return Response.json({ error: 'El remitente o destinatario no es válido.' }, { status: 400 });
+  const statusCallbackUrl = twilioWhatsAppStatusCallbackUrl(process.env);
+  if (!statusCallbackUrl) return Response.json({ error: 'No está configurada la URL pública para recibir los estados de WhatsApp.' }, { status: 503 });
   const authorization = Buffer.from(`${accountSid}:${authToken}`).toString('base64');
   let media = null;
   if (mediaPath) {
@@ -53,6 +56,7 @@ export async function POST(request) {
     media = { path: mediaPath, contentType, size: bytes.length, filename: `${filenameStem}.${type.extension}`, kind: type.kind };
   }
   const form = new URLSearchParams({ To: `whatsapp:${conversation.contact_phone}`, From: `whatsapp:${from}` });
+  form.set('StatusCallback', statusCallbackUrl);
   if (body) form.set('Body', body);
   if (media) {
     const { data: signed, error: signError } = await service.storage.from(WHATSAPP_MEDIA_BUCKET).createSignedUrl(media.path, 3600, { download: false });
@@ -82,19 +86,29 @@ export async function POST(request) {
     console.error('Twilio WhatsApp send returned success without a valid message SID.', { httpStatus: response.status, status: result.status || null });
     return Response.json({ error: 'Twilio respondió, pero no confirmó el mensaje. Comprueba si llegó antes de volver a intentarlo.', uncertain: true }, { status: 502 });
   }
+  const initialStatus = ['queued', 'sending', 'sent', 'delivered', 'read', 'failed', 'undelivered', 'canceled'].includes(String(result.status || '').toLowerCase())
+    ? String(result.status).toLowerCase()
+    : 'queued';
   const saved = await service.from('clinic_whatsapp_messages').insert({
     clinic_id: clinicId,
     conversation_id: conversationId,
     direction: 'outbound',
     body,
     twilio_message_sid: result.sid,
-    delivery_status: ['queued', 'sent', 'delivered'].includes(result.status) ? result.status : 'queued',
+    delivery_status: initialStatus,
     ...(media ? { media_object_path: media.path, media_content_type: media.contentType, media_filename: media.filename, media_size_bytes: media.size } : {}),
   });
   if (saved.error) {
     console.error('Sent WhatsApp message could not be saved to the CRM.', { code: saved.error.code || null });
     return Response.json({ error: 'Twilio envió el mensaje, pero el CRM no pudo guardarlo. Comprueba WhatsApp y no lo vuelvas a enviar.', sent: true, uncertain: true }, { status: 503 });
   }
+  const statusSaved = await service.rpc('apply_twilio_whatsapp_message_status', {
+    target_message_sid: result.sid,
+    target_delivery_status: initialStatus,
+    target_error_code: null,
+    target_error_message: null,
+  });
+  if (statusSaved.error) console.error('Initial WhatsApp delivery status could not be synchronized.', { code: statusSaved.error.code || null });
   await service.from('clinic_whatsapp_conversations').update({ last_message_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', conversationId).eq('clinic_id', clinicId);
   return Response.json({ ok: true });
 }
