@@ -17,7 +17,7 @@ async function setup() {
     create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid $$;
     create function auth.jwt() returns jsonb language sql stable as $$ select jsonb_build_object('email',current_setting('request.jwt.claim.email',true)) $$;
     create table public.clinics(id uuid primary key);
-    create table public.clinic_memberships(clinic_id uuid references public.clinics,user_id uuid references auth.users,role text,permissions jsonb default '{}',primary key(clinic_id,user_id));
+    create table public.clinic_memberships(clinic_id uuid references public.clinics,user_id uuid references auth.users on delete cascade,role text,permissions jsonb default '{}',primary key(clinic_id,user_id));
     create function private.has_clinic_access(c uuid,r text[]) returns boolean language sql stable security definer as $$
       select exists(select 1 from public.clinic_memberships where clinic_id=c and user_id=auth.uid() and role=any(r)) $$;
     grant usage on schema auth,private to authenticated,service_role;
@@ -27,6 +27,7 @@ async function setup() {
     insert into public.clinic_memberships values('${clinic}','${admin}','admin','{}'),('${otherClinic}','${stranger}','admin','{}');`);
   await db.exec(await readFile(new URL('../../supabase/migrations/20261031174240_clinic_invitations.sql', import.meta.url),'utf8'));
   await db.exec(await readFile(new URL('../../supabase/migrations/20261031175123_invitation_password_completion.sql', import.meta.url),'utf8'));
+  await db.exec(await readFile(new URL('../../supabase/migrations/20261031180520_invitation_user_deletion.sql', import.meta.url),'utf8'));
   return db;
 }
 
@@ -116,4 +117,32 @@ test('RLS isolates invitations and authenticated clients cannot mutate or activa
   await assert.rejects(db.exec("update public.clinic_invitations set role='admin'"),/permission denied/);
   await identity(admin,'admin@example.com');
   assert.equal((await db.query('select * from public.clinic_invitations')).rows.length,1);
+});
+
+test('deleting an accepted Auth user preserves the clinic and invitation history', async t => {
+  const db = await setup(); t.after(() => db.close());
+  const invitation = await prepare(db);
+  await db.query("update auth.users set encrypted_password='chosen-password-hash' where id=$1",[recipient]);
+  await db.query('update public.clinic_invitations set password_set_at=now() where id=$1',[invitation.id]);
+  await accept(db,invitation.id);
+  await db.query('delete from auth.users where id=$1',[recipient]);
+  const history = (await db.query('select * from public.clinic_invitations where id=$1',[invitation.id])).rows[0];
+  assert.equal(history.status,'accepted'); assert.equal(history.accepted_by,null);
+  assert.equal(history.email,'new@example.com'); assert.ok(history.accepted_at);
+  assert.equal((await db.query('select * from public.clinic_memberships where user_id=$1',[recipient])).rows.length,0);
+  assert.equal((await db.query('select * from public.clinics where id=$1',[clinic])).rows.length,1);
+  // Re-registering the email must not revive the deleted account's access.
+  await db.query('insert into auth.users(id,email,encrypted_password,email_confirmed_at) values($1,$2,$3,now())',[recipient,'new@example.com','newhash']);
+  await assert.rejects(accept(db,invitation.id),/invitation_unavailable/);
+});
+
+test('deleted inviter references are cleared without allowing pending invitations to activate', async t => {
+  const db = await setup(); t.after(() => db.close());
+  const invitation = await prepare(db);
+  await db.query('delete from public.clinic_memberships where user_id=$1',[admin]);
+  await db.query('delete from auth.users where id=$1',[admin]);
+  assert.equal((await db.query('select invited_by from public.clinic_invitations where id=$1',[invitation.id])).rows[0].invited_by,null);
+  await db.query("update auth.users set encrypted_password='hash' where id=$1",[recipient]);
+  await db.query('update public.clinic_invitations set password_set_at=now() where id=$1',[invitation.id]);
+  await assert.rejects(accept(db,invitation.id),/inviter_no_longer_admin/);
 });
