@@ -108,9 +108,7 @@
 .whatsapp-composer-open{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:38px;padding:0 14px;border:1px solid color-mix(in srgb,var(--green) 34%,var(--line));border-radius:999px;background:var(--green-soft);color:var(--ink);font:inherit;font-size:12px;font-weight:700;cursor:pointer;transition:background 150ms ease,border-color 150ms ease,transform 180ms cubic-bezier(.16,1,.3,1)}
 .whatsapp-composer-open:hover{border-color:var(--green);background:color-mix(in srgb,var(--green-soft) 72%,var(--green));transform:translateY(-1px)}
 .whatsapp-composer-open:focus-visible,.whatsapp-composer-close:focus-visible{outline:2px solid var(--green);outline-offset:2px}
-.whatsapp-composer.is-revealing{display:grid;grid-template-columns:minmax(0,1fr);gap:8px;padding:10px 14px 12px;animation:whatsapp-composer-enter 260ms cubic-bezier(.16,1,.3,1) both}
-.whatsapp-composer-heading{display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:24px;color:var(--muted);font-size:10px;line-height:1.3}
-.whatsapp-composer-heading strong{color:var(--ink);font-weight:700}
+.whatsapp-composer.is-revealing{display:grid;grid-template-columns:minmax(0,1fr);gap:0;padding:8px 12px 10px;animation:whatsapp-composer-enter 260ms cubic-bezier(.16,1,.3,1) both}
 .whatsapp-composer .whatsapp-composer-close{display:grid;width:30px;min-width:30px;min-height:30px;height:30px;place-items:center;padding:0;border:1px solid transparent;border-radius:50%;background:transparent;color:var(--muted);font-size:initial;cursor:pointer;transition:background 140ms ease,color 140ms ease,border-color 140ms ease}
 .whatsapp-composer .whatsapp-composer-close:hover{border-color:var(--line);background:var(--canvas);color:var(--ink);filter:none}
 .whatsapp-composer-dock button:focus-visible{outline:2px solid var(--green);outline-offset:2px}
@@ -118,7 +116,6 @@
 html[data-theme="light"] .whatsapp-composer-dock{border-top-color:#b9a4b1;background:#fff9fc}
 html[data-theme="light"] .whatsapp-composer-open{border-color:#b49dab;background:#f1e3ea;color:#342832}
 html[data-theme="light"] .whatsapp-composer-open:hover{border-color:#8e526e;background:#e8cfda}
-html[data-theme="light"] .whatsapp-composer-heading{color:#62525d}
 html[data-theme="light"] .whatsapp-composer .whatsapp-composer-close:hover{border-color:#c5b1bd;background:#f4e9ef;color:#342832}
 @media(prefers-reduced-motion:reduce){.whatsapp-composer.is-revealing{animation:none}.whatsapp-composer-open{transition:none}}
 .whatsapp-inbox-error{margin:0;padding:10px 13px;border-radius:7px;background:#fff0ed;color:#a34031;font-size:13px}
