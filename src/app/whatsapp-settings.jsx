@@ -33,6 +33,7 @@ export default function WhatsAppSettings({ clinicId, role, branches = [], shared
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [senderLookupError, setSenderLookupError] = useState('');
+  const [senderActionMessage, setSenderActionMessage] = useState('');
   const [notice, setNotice] = useState('');
   const [settings, setSettings] = useState(initialSettings);
   const [senders, setSenders] = useState([]);
@@ -87,6 +88,36 @@ export default function WhatsAppSettings({ clinicId, role, branches = [], shared
     setSenders(current => [...current, { senderKey, whatsappNumber: '', displayLabel: `WhatsApp ${current.length + 1}`, branchId: '', active: true }]);
   };
 
+  const handleLinkSender = async () => {
+    if (loadingAvailableSenders) return;
+    setLoadingAvailableSenders(true);
+    setSenderLookupError('');
+    setSenderActionMessage('');
+    try {
+      const result = await loadAvailableWhatsAppSenders(clinicId);
+      setInboxSender(result.inboxSender || null);
+      setAvailableTemplates(result.availableTemplates || initialAvailableTemplates);
+      setTemplateStatuses({ ...initialTemplateStatuses, ...(result.templateStatuses || {}) });
+      setDeliveryEnabled(result.deliveryEnabled === true);
+      if (!result.ok) {
+        setSenderLookupError(result.message);
+        return;
+      }
+      setAvailableSenders(result.senders);
+      if (!result.senders.length) {
+        setSenderActionMessage(connectedInboxNumber
+          ? 'El número conectado a la bandeja no aparece como remitente asignable a sucursales. Cuando haya un número de WhatsApp activo para el negocio, aparecerá aquí para seleccionarlo.'
+          : 'No hay números disponibles para asignar. Registra y activa un número de WhatsApp para que aparezca aquí.');
+        return;
+      }
+      addSender();
+    } catch {
+      setSenderLookupError('No se pudieron consultar los números disponibles. Inténtalo de nuevo.');
+    } finally {
+      setLoadingAvailableSenders(false);
+    }
+  };
+
   const save = async event => {
     event.preventDefault();
     setSaving(true); setError(''); setNotice('');
@@ -116,17 +147,18 @@ export default function WhatsAppSettings({ clinicId, role, branches = [], shared
   const whatsappReady = deliveryEnabled && readySenderCount > 0
     && templateKinds.some(([kind]) => settings.templateReadiness[kind] && availableTemplates[kind]);
 
-  return <div className="whatsapp-settings-content" aria-busy={loading || saving}>
+  return <div className="whatsapp-settings-content" aria-busy={loading || saving || loadingAvailableSenders}>
     <header className="whatsapp-page-heading"><h1>WhatsApp</h1><p>Configura confirmaciones y recordatorios de citas.</p></header>
     {connectedInboxNumber ? <div className="whatsapp-settings-connection-notice"><MessageCircle size={18}/><div><strong>La bandeja de conversaciones está conectada</strong><span>La bandeja recibe y responde mensajes con {connectedInboxNumber}.{whatsappReady ? ' Los avisos automáticos de citas también están configurados.' : ' Para activar avisos automáticos, asigna un número activo a cada sucursal y configura plantillas aprobadas.'}</span></div></div>
       : <div className={whatsappReady ? 'whatsapp-settings-live-notice' : 'whatsapp-settings-pending-notice'}><ShieldCheck size={18}/><div><strong>{whatsappReady ? 'Notificaciones configuradas' : 'Configura tus notificaciones'}</strong><span>Vincula remitentes ya registrados y activa las plantillas aprobadas que usarás para citas.</span></div></div>}
-    <div className="whatsapp-settings-summary"><div><span>Bandeja de conversaciones</span><strong>{loading ? 'Cargando…' : connectedInboxNumber ? 'Conectada' : 'No conectada'}</strong></div><div><span>Número conectado</span><strong>{loading ? '—' : connectedInboxNumber || 'Sin configurar'}</strong></div><div><span>Números asignables</span><strong>{loading || loadingAvailableSenders ? 'Cargando…' : availableSenders.length ? `${readySenderCount} de ${availableSenders.length} asignados` : 'Sin números activos'}</strong></div><div><span>Avisos automáticos de citas</span><strong>{loading ? 'Cargando…' : whatsappReady ? 'Activos' : 'En configuración'}</strong></div></div>
+    <div className="whatsapp-settings-summary"><div><span>Bandeja de conversaciones</span><strong>{loading ? 'Cargando…' : connectedInboxNumber ? 'Conectada' : 'No conectada'}</strong></div><div><span>Número conectado</span><strong>{loading ? '—' : connectedInboxNumber || 'Sin configurar'}</strong></div><div><span>Números asignables</span><strong>{loading || loadingAvailableSenders ? 'Cargando…' : availableSenders.length ? `${readySenderCount} de ${availableSenders.length} asignados` : 'Sin números disponibles para asignar'}</strong></div><div><span>Avisos automáticos de citas</span><strong>{loading ? 'Cargando…' : whatsappReady ? 'Activos' : 'En configuración'}</strong></div></div>
     {loading ? <p className="whatsapp-settings-loading"><LoaderCircle size={16}/> Cargando configuración…</p> : <form className="whatsapp-settings-form" onSubmit={save}>
-      <section className="whatsapp-settings-section"><div className="whatsapp-settings-heading"><div><h3>Números de WhatsApp</h3><p>Asigna a cada sucursal el número que usará para responder y enviar avisos.</p></div><button className="button outline compact" type="button" onClick={addSender} disabled={loadingAvailableSenders || availableSenders.length === 0} title={availableSenders.length === 0 ? 'No hay números activos disponibles para asignar.' : undefined}><Plus size={15}/> Vincular remitente</button></div>
+      <section className="whatsapp-settings-section"><div className="whatsapp-settings-heading"><div><h3>Números de WhatsApp</h3><p>Asigna a cada sucursal el número que usará para responder y enviar avisos.</p></div><button className="button outline compact" type="button" onClick={handleLinkSender} disabled={loadingAvailableSenders}><Plus size={15}/>{loadingAvailableSenders ? 'Buscando…' : 'Vincular remitente'}</button></div>
         <p className="whatsapp-settings-helper">Aquí eliges números de WhatsApp activos y asignas cada uno a una sucursal. Cada sucursal necesita su propio número para los avisos automáticos.</p>
         {connectedInboxNumber && <div className="whatsapp-connected-number-row"><span><MessageCircle size={16}/></span><div><strong>Número conectado a la bandeja</strong><small>{connectedInboxNumber} · Recibe y responde conversaciones</small></div><b>Conectado</b></div>}
         {senderLookupError && <p className="whatsapp-settings-error" role="status"><CircleAlert size={15}/>{senderLookupError}</p>}
-        {!senderLookupError && !loadingAvailableSenders && availableSenders.length === 0 && <p className="whatsapp-settings-empty">{connectedInboxNumber ? 'El número conectado a la bandeja recibe y responde mensajes, pero no está disponible para asignarlo a una sucursal. Los números asignables aparecerán aquí cuando estén activos para WhatsApp.' : 'No hay números activos disponibles para asignar. Cuando actives un número para WhatsApp, aparecerá aquí.'}</p>}
+        {senderActionMessage && <p className="whatsapp-settings-empty" role="status">{senderActionMessage}</p>}
+        {!senderLookupError && !senderActionMessage && !loadingAvailableSenders && availableSenders.length === 0 && <p className="whatsapp-settings-empty">{connectedInboxNumber ? 'El número conectado a la bandeja recibe y responde mensajes, pero no está disponible para asignarlo a una sucursal. Los números asignables aparecerán aquí cuando estén activos para WhatsApp.' : 'No hay números disponibles para asignar. Cuando haya un número activo para WhatsApp, aparecerá aquí.'}</p>}
         {senders.length ? <div className="whatsapp-sender-list">{senders.map((sender, index) => <div className="whatsapp-sender-row" key={sender.senderKey}>
           <label className="whatsapp-sender-label">Etiqueta<input maxLength={120} value={sender.displayLabel} onChange={event => updateSender(sender.senderKey, 'displayLabel', event.target.value)} placeholder={`Número WhatsApp ${index + 1}`} required/></label>
           <label className="whatsapp-sender-address">Número registrado<select value={sender.whatsappNumber || ''} onChange={event => updateSender(sender.senderKey, 'whatsappNumber', event.target.value)} required><option value="">Selecciona un número activo</option>{sender.whatsappNumber && !availableSenders.some(item => item.phoneNumber === sender.whatsappNumber) && <option value={sender.whatsappNumber}>{sender.whatsappNumber} · no disponible</option>}{availableSenders.map(item => <option key={item.phoneNumber} value={item.phoneNumber}>{item.phoneNumber}</option>)}</select></label>
