@@ -6,6 +6,10 @@ export const WHATSAPP_MEDIA_TYPES = Object.freeze({
   'image/jpeg': { extension: 'jpg', kind: 'image', maxBytes: 5 * 1024 * 1024 },
   'image/png': { extension: 'png', kind: 'image', maxBytes: 5 * 1024 * 1024 },
   'video/mp4': { extension: 'mp4', kind: 'video', maxBytes: 16 * 1024 * 1024 },
+  'audio/ogg': { extension: 'ogg', kind: 'audio', maxBytes: 16 * 1024 * 1024 },
+  'audio/mpeg': { extension: 'mp3', kind: 'audio', maxBytes: 16 * 1024 * 1024 },
+  'audio/mp4': { extension: 'm4a', kind: 'audio', maxBytes: 16 * 1024 * 1024 },
+  'audio/3gpp': { extension: '3gp', kind: 'audio', maxBytes: 16 * 1024 * 1024 },
 });
 
 export function getWhatsAppMediaType(contentType) {
@@ -18,6 +22,10 @@ export function hasWhatsAppMediaSignature(bytes, contentType) {
     case 'image/jpeg': return data.length >= 3 && data[0] === 0xff && data[1] === 0xd8 && data[2] === 0xff;
     case 'image/png': return data.length >= 8 && data.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
     case 'video/mp4': return data.length >= 12 && data.toString('ascii', 4, 8) === 'ftyp';
+    case 'audio/ogg': return data.length >= 4 && data.toString('ascii', 0, 4) === 'OggS';
+    case 'audio/mpeg': return data.length >= 3 && (data.toString('ascii', 0, 3) === 'ID3' || (data[0] === 0xff && (data[1] & 0xe0) === 0xe0));
+    case 'audio/mp4': return data.length >= 12 && data.toString('ascii', 4, 8) === 'ftyp';
+    case 'audio/3gpp': return data.length >= 12 && data.toString('ascii', 4, 8) === 'ftyp';
     default: return false;
   }
 }
@@ -56,5 +64,5 @@ export function isWhatsAppMediaPath(path, clinicId, conversationId) {
   const prefix = `${clinicId}/${conversationId}/`;
   return typeof path === 'string'
     && path.startsWith(prefix)
-    && /^[0-9a-f-]{36}\.(?:jpg|png|webp|mp4)$/i.test(path.slice(prefix.length));
+    && /^[0-9a-f-]{36}\.(?:jpg|png|webp|mp4|ogg|mp3|m4a|3gp)$/i.test(path.slice(prefix.length));
 }

@@ -12,6 +12,36 @@ function readableMediaName(name = '') {
   if (!value || /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}\.(?:jpe?g|png|webp)$/i.test(value) || /^image-[\da-f]{6}\.(?:jpe?g|png|webp)$/i.test(value)) return 'Imagen compartida';
   return value;
 }
+function formatAudioTime(seconds = 0) {
+  const total = Number.isFinite(seconds) ? Math.max(0, Math.floor(seconds)) : 0;
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
+}
+const audioWaveform = [32, 52, 39, 70, 45, 61, 84, 48, 32, 72, 56, 91, 44, 66, 36, 76, 52, 87, 40, 62, 48, 78, 34, 59, 82, 44, 68, 38, 73, 50, 91, 42, 64, 35, 77, 49];
+function WhatsAppAudioPlayer({ src, filename = 'audio' }) {
+  const audioRef = useRef(null);
+  const [playing, setPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [playbackError, setPlaybackError] = useState(false);
+  const progress = duration ? currentTime / duration : 0;
+  const togglePlayback = () => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (audio.paused) void audio.play().catch(() => setPlaying(false));
+    else audio.pause();
+  };
+  return <div className="whatsapp-audio-player" role="group" aria-label="Mensaje de audio">
+    <audio ref={audioRef} src={src} preload="metadata" onLoadedMetadata={event => setDuration(Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 0)} onDurationChange={event => setDuration(Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 0)} onTimeUpdate={event => setCurrentTime(event.currentTarget.currentTime)} onPlay={() => { setPlaybackError(false); setPlaying(true); }} onPause={() => setPlaying(false)} onError={() => { setPlaybackError(true); setPlaying(false); }} onEnded={() => { setPlaying(false); setCurrentTime(0); }}/>
+    <button className="whatsapp-audio-play" type="button" onClick={togglePlayback} aria-label={playing ? 'Pausar audio' : 'Reproducir audio'}>{playing ? <span className="whatsapp-audio-pause-icon" aria-hidden="true"/> : <span className="whatsapp-audio-play-icon" aria-hidden="true"/>}</button>
+    <div className="whatsapp-audio-track">
+      <div className="whatsapp-audio-waveform" aria-hidden="true">{audioWaveform.map((height, index) => <span className={progress >= (index + 1) / audioWaveform.length ? 'is-played' : ''} style={{ height: `${height}%` }} key={index}/>)}</div>
+      <input type="range" min="0" max={duration || 1} step="0.1" value={Math.min(currentTime, duration || 0)} disabled={!duration} onChange={event => { if (audioRef.current) audioRef.current.currentTime = Number(event.target.value); }} aria-label="Posición del audio" style={{ '--audio-progress': `${progress * 100}%` }}/>
+      <div className="whatsapp-audio-time"><time>{formatAudioTime(currentTime)}</time><time>{formatAudioTime(duration)}</time></div>
+      {playbackError && <span className="whatsapp-audio-error">No se pudo reproducir este audio.</span>}
+    </div>
+    <a className="whatsapp-audio-download" href={`${src}&download=1`} aria-label={`Descargar ${filename}`} title="Descargar audio"><Download size={15}/></a>
+  </div>;
+}
 
 export default function WhatsAppInbox({ clinicId = '', sharedMode = false, role = '' }) {
   const [conversations, setConversations] = useState([]);
@@ -194,7 +224,7 @@ export default function WhatsAppInbox({ clinicId = '', sharedMode = false, role 
                       <a href={`${mediaUrl}&download=1`} aria-label="Descargar imagen" title="Descargar"><Download size={15}/></a>
                     </div>
                   </div>;
-                })()}{item.message.media_content_type?.startsWith('video/') && <video className="whatsapp-message-media" src={`/api/whatsapp/media?clinicId=${encodeURIComponent(clinicId)}&messageId=${encodeURIComponent(item.message.id)}`} aria-label={item.message.media_filename || 'Video compartido'} controls playsInline preload="metadata"/>}{item.message.body && <p>{item.message.body}</p>}<div className="whatsapp-message-details"><time dateTime={item.message.created_at}>{formatWhatsAppMessageTime(item.message.created_at)}</time>{item.message.direction === 'outbound' && <span>{item.message.delivery_status === 'failed' ? 'No enviado' : 'Enviado'}</span>}</div></div>
+                })()}{item.message.media_content_type?.startsWith('video/') && <video className="whatsapp-message-media" src={`/api/whatsapp/media?clinicId=${encodeURIComponent(clinicId)}&messageId=${encodeURIComponent(item.message.id)}`} aria-label={item.message.media_filename || 'Video compartido'} controls playsInline preload="metadata"/>}{item.message.media_content_type?.startsWith('audio/') && <WhatsAppAudioPlayer src={`/api/whatsapp/media?clinicId=${encodeURIComponent(clinicId)}&messageId=${encodeURIComponent(item.message.id)}`} filename={item.message.media_filename || 'audio'}/>}{item.message.body && <p>{item.message.body}</p>}<div className="whatsapp-message-details"><time dateTime={item.message.created_at}>{formatWhatsAppMessageTime(item.message.created_at)}</time>{item.message.direction === 'outbound' && <span>{item.message.delivery_status === 'failed' ? 'No enviado' : 'Enviado'}</span>}</div></div>
               </article>) : <div className="whatsapp-conversation-empty"><MessageCircle size={28}/><strong>Conversación nueva</strong><span>Los mensajes que se reciban aparecerán aquí.</span></div>}
           </div>
           {canReply ? windowOpen ? <form className="whatsapp-composer" onSubmit={sendMessage}>
