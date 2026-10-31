@@ -35,20 +35,33 @@ export function createWhatsAppSettingsActions({
   }
 
   async function readSettings(client, clinicId) {
-    const [{ data: config, error: configError }, { data: senders, error: sendersError }] = await Promise.all([
+    const [
+      { data: config, error: configError },
+      { data: senders, error: sendersError },
+      { data: branchAssignments, error: branchAssignmentsError },
+    ] = await Promise.all([
       client.from('clinic_whatsapp_configurations')
         .select('clinic_id, provider_mode, template_readiness, updated_at')
         .eq('clinic_id', clinicId).maybeSingle(),
       client.from('clinic_whatsapp_senders')
         .select('sender_key, display_label, branch_id, is_default, active')
         .eq('clinic_id', clinicId).eq('active', true).order('created_at', { ascending: true }),
+      client.from('clinic_whatsapp_sender_branches')
+        .select('sender_key, branch_id')
+        .eq('clinic_id', clinicId),
     ]);
-    if (configError || sendersError) return { error: 'No se pudo cargar la configuración de WhatsApp. Verifica que la base de datos esté actualizada.' };
+    if (configError || sendersError || branchAssignmentsError) return { error: 'No se pudo cargar la configuración de WhatsApp. Verifica que la base de datos esté actualizada.' };
+    const branchIdsBySender = new Map();
+    for (const assignment of branchAssignments || []) {
+      const branchIds = branchIdsBySender.get(assignment.sender_key) || [];
+      branchIds.push(assignment.branch_id);
+      branchIdsBySender.set(assignment.sender_key, branchIds);
+    }
     const clinicSenders = (senders || []).filter(sender => twilioSenderKeyPattern.test(sender.sender_key)).map(sender => ({
       senderKey: sender.sender_key,
       whatsappNumber: sender.sender_key.slice('twilio:'.length),
       displayLabel: sender.display_label,
-      branchId: sender.branch_id || '',
+      branchIds: branchIdsBySender.get(sender.sender_key) || (sender.branch_id ? [sender.branch_id] : []),
       active: sender.active !== false,
     }));
     return {
@@ -108,16 +121,24 @@ export function createWhatsAppSettingsActions({
       if (templateKinds.some(kind => readiness[kind] && !availableTemplates[kind])) {
         return { ok: false, message: 'Configura en el servidor la plantilla aprobada antes de activarla aquí.' };
       }
-      if (senders.some(sender => !uuidPattern.test(String(sender?.branchId || '')))) {
-        return { ok: false, message: 'Asigna cada número de WhatsApp a una sucursal.' };
+      const normalizedSenders = senders.map(sender => ({
+        ...sender,
+        branchIds: Array.isArray(sender?.branchIds) ? sender.branchIds : sender?.branchId ? [sender.branchId] : [],
+      }));
+      if (normalizedSenders.some(sender => !sender.branchIds.length
+        || sender.branchIds.length > 100
+        || sender.branchIds.some(branchId => !uuidPattern.test(String(branchId || ''))))) {
+        return { ok: false, message: 'Selecciona al menos una sucursal para cada número de WhatsApp.' };
       }
-      if (new Set(senders.map(sender => String(sender.branchId))).size !== senders.length) {
-        return { ok: false, message: 'Asigna un número distinto a cada sucursal.' };
+      const assignedBranches = normalizedSenders.flatMap(sender => sender.branchIds.map(String));
+      if (new Set(assignedBranches).size !== assignedBranches.length) {
+        return { ok: false, message: 'Cada sucursal solo puede estar vinculada a un número de WhatsApp.' };
       }
-      const safeSenders = senders.map(sender => ({
+      const safeSenders = normalizedSenders.map(sender => ({
         sender_key: `twilio:${String(sender?.whatsappNumber || '').trim()}`,
         display_label: String(sender?.displayLabel || '').trim(),
-        branch_id: sender?.branchId || null,
+        branch_id: sender.branchIds[0],
+        branch_ids: sender.branchIds,
         is_default: false,
         active: sender?.active !== false,
       }));
