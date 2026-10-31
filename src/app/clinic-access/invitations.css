@@ -9,7 +9,7 @@
 }
 .clinic-invite-intro { grid-column: 1 / -1; }
 .clinic-invite-intro h3, .clinic-invitations h3 { margin: 0 0 6px; font-size: 15px; color: var(--ink); }
-.clinic-invite-intro p { margin: 0; max-width: 65ch; color: var(--muted); font-size: 13px; line-height: 1.6; }
+.clinic-invite-intro p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.6; }
 .clinic-invite-form label { display: grid; gap: 8px; min-width: 0; font-size: 13px; font-weight: 700; color: var(--ink); }
 .clinic-invite-form input, .clinic-invite-form select {
   width: 100%; min-height: 44px; padding: 10px 12px; border: 1px solid var(--line);
