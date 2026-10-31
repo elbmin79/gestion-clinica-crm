@@ -12,6 +12,7 @@ export async function GET(request) {
   const url = new URL(request.url);
   const clinicId = url.searchParams.get('clinicId') || '';
   const messageId = url.searchParams.get('messageId') || '';
+  const download = url.searchParams.get('download') === '1';
   if (!/^[\da-f-]{36}$/i.test(clinicId) || !/^[\da-f-]{36}$/i.test(messageId)) return Response.json({ error: 'Archivo no encontrado.' }, { status: 404 });
   const { data: membership } = await session.from('clinic_memberships').select('role').eq('clinic_id', clinicId).eq('user_id', user.id).maybeSingle();
   if (!membership || !['admin', 'receptionist'].includes(membership.role)) return Response.json({ error: 'No tienes permiso para ver este archivo.' }, { status: 403 });
@@ -19,7 +20,8 @@ export async function GET(request) {
   if (!message?.media_object_path || !message.media_content_type) return Response.json({ error: 'Archivo no encontrado.' }, { status: 404 });
   const service = createServiceClient();
   if (!service) return Response.json({ error: 'El servicio de archivos no está disponible.' }, { status: 503 });
-  const { data, error } = await service.storage.from(WHATSAPP_MEDIA_BUCKET).createSignedUrl(message.media_object_path, 3600, { download: false });
+  const downloadName = String(message.media_filename || 'whatsapp-media').replace(/[\\/\r\n\0]/g, '_').slice(0, 120);
+  const { data, error } = await service.storage.from(WHATSAPP_MEDIA_BUCKET).createSignedUrl(message.media_object_path, 3600, { download: download ? downloadName : false });
   if (error || !data?.signedUrl) return Response.json({ error: 'No se pudo abrir el archivo.' }, { status: 503 });
   return new Response(null, { status: 302, headers: { Location: data.signedUrl, 'Cache-Control': 'private, no-store', 'Referrer-Policy': 'no-referrer' } });
 }

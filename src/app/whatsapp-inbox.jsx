@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { MessageCircle, Paperclip, Search, Send, X } from 'lucide-react';
+import { Download, Expand, MessageCircle, Paperclip, Search, Send, X } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { buildWhatsAppTimeline, formatWhatsAppMessageTime, formatWhatsAppThreadTime } from '@/lib/whatsapp/time-format.js';
 import './whatsapp-inbox.css';
@@ -18,9 +18,11 @@ export default function WhatsAppInbox({ clinicId = '', sharedMode = false, role 
   const [error, setError] = useState('');
   const [sending, setSending] = useState(false);
   const [sendOutcomeUncertain, setSendOutcomeUncertain] = useState(false);
+  const [expandedImage, setExpandedImage] = useState(null);
   const [attachment, setAttachment] = useState(null);
   const [uploadingAttachment, setUploadingAttachment] = useState(false);
   const fileInputRef = useRef(null);
+  const imageDialogRef = useRef(null);
   const selectedIdRef = useRef('');
   const canReply = ['admin', 'receptionist'].includes(role);
 
@@ -49,6 +51,12 @@ export default function WhatsAppInbox({ clinicId = '', sharedMode = false, role 
       return null;
     });
   }, [selected?.id]);
+
+  useEffect(() => {
+    const dialog = imageDialogRef.current;
+    if (expandedImage && dialog && !dialog.open) dialog.showModal();
+    if (!expandedImage && dialog?.open) dialog.close();
+  }, [expandedImage]);
 
   useEffect(() => {
     if (!selected) { setMessages([]); return; }
@@ -98,7 +106,7 @@ export default function WhatsAppInbox({ clinicId = '', sharedMode = false, role 
     setSending(true); setError('');
     try {
       const conversationId = selected.id;
-      const response = await fetch('/api/whatsapp/messages', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ clinicId, conversationId, body, ...(attachment ? { mediaPath: attachment.path } : {}) }) });
+      const response = await fetch('/api/whatsapp/messages', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ clinicId, conversationId, body, ...(attachment ? { mediaPath: attachment.path, mediaFilename: attachment.name } : {}) }) });
       const result = await response.json();
       if (!response.ok) {
         if (result.uncertain || result.sent) setSendOutcomeUncertain(true);
@@ -136,7 +144,19 @@ export default function WhatsAppInbox({ clinicId = '', sharedMode = false, role 
             {messages.length ? buildWhatsAppTimeline(messages).map(item => item.type === 'day'
               ? <div className="whatsapp-day-divider" role="separator" key={item.key}><span>{item.label}</span></div>
               : <article className={`whatsapp-message-row is-${item.message.direction}`} key={item.key}>
-                <div className="whatsapp-message-bubble">{item.message.media_content_type?.startsWith('image/') && <img className="whatsapp-message-media" src={`/api/whatsapp/media?clinicId=${encodeURIComponent(clinicId)}&messageId=${encodeURIComponent(item.message.id)}`} alt={item.message.media_filename || 'Imagen compartida'} loading="lazy"/>}{item.message.media_content_type?.startsWith('video/') && <video className="whatsapp-message-media" src={`/api/whatsapp/media?clinicId=${encodeURIComponent(clinicId)}&messageId=${encodeURIComponent(item.message.id)}`} aria-label={item.message.media_filename || 'Video compartido'} controls playsInline preload="metadata"/>}{item.message.body && <p>{item.message.body}</p>}<div className="whatsapp-message-details"><time dateTime={item.message.created_at}>{formatWhatsAppMessageTime(item.message.created_at)}</time>{item.message.direction === 'outbound' && <span>{item.message.delivery_status === 'failed' ? 'No enviado' : 'Enviado'}</span>}</div></div>
+                <div className="whatsapp-message-bubble">{item.message.media_content_type?.startsWith('image/') && (() => {
+                  const mediaUrl = `/api/whatsapp/media?clinicId=${encodeURIComponent(clinicId)}&messageId=${encodeURIComponent(item.message.id)}`;
+                  const filename = item.message.media_filename || 'imagen-compartida';
+                  return <div className="whatsapp-message-image-wrap">
+                    <button type="button" className="whatsapp-message-image-open" onClick={() => setExpandedImage({ src: mediaUrl, filename })} aria-label="Ampliar imagen">
+                      <img className="whatsapp-message-media" src={mediaUrl} alt={filename} loading="lazy"/>
+                    </button>
+                    <div className="whatsapp-message-image-actions">
+                      <button type="button" onClick={() => setExpandedImage({ src: mediaUrl, filename })} aria-label="Ampliar imagen" title="Ampliar"><Expand size={15}/></button>
+                      <a href={`${mediaUrl}&download=1`} aria-label="Descargar imagen" title="Descargar"><Download size={15}/></a>
+                    </div>
+                  </div>;
+                })()}{item.message.media_content_type?.startsWith('video/') && <video className="whatsapp-message-media" src={`/api/whatsapp/media?clinicId=${encodeURIComponent(clinicId)}&messageId=${encodeURIComponent(item.message.id)}`} aria-label={item.message.media_filename || 'Video compartido'} controls playsInline preload="metadata"/>}{item.message.body && <p>{item.message.body}</p>}<div className="whatsapp-message-details"><time dateTime={item.message.created_at}>{formatWhatsAppMessageTime(item.message.created_at)}</time>{item.message.direction === 'outbound' && <span>{item.message.delivery_status === 'failed' ? 'No enviado' : 'Enviado'}</span>}</div></div>
               </article>) : <div className="whatsapp-conversation-empty"><MessageCircle size={28}/><strong>Conversación nueva</strong><span>Los mensajes que se reciban aparecerán aquí.</span></div>}
           </div>
           {canReply ? windowOpen ? <form className="whatsapp-composer" onSubmit={sendMessage}>
@@ -150,6 +170,15 @@ export default function WhatsAppInbox({ clinicId = '', sharedMode = false, role 
         </> : <div className="whatsapp-conversation-empty"><MessageCircle size={28}/><strong>Tu bandeja de WhatsApp</strong><span>{sharedMode ? 'Envía un WhatsApp al número del Sandbox para iniciar una conversación.' : 'Conecta la clínica para recibir mensajes.'}</span></div>}
       </main>
     </div>
+    <dialog ref={imageDialogRef} className="whatsapp-image-dialog" aria-label="Vista ampliada de imagen" onClose={() => setExpandedImage(null)} onClick={event => { if (event.target === imageDialogRef.current) imageDialogRef.current.close(); }}>
+      {expandedImage && <div className="whatsapp-image-dialog-content">
+        <div className="whatsapp-image-dialog-actions">
+          <a href={`${expandedImage.src}&download=1`} aria-label="Descargar imagen" title="Descargar imagen"><Download size={18}/></a>
+          <button type="button" onClick={() => imageDialogRef.current?.close()} aria-label="Cerrar imagen" title="Cerrar"><X size={18}/></button>
+        </div>
+        <img src={expandedImage.src} alt={expandedImage.filename}/>
+      </div>}
+    </dialog>
     {error && <p role="alert" className="whatsapp-inbox-error">{error}</p>}
   </section>;
 }

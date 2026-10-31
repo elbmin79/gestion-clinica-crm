@@ -47,7 +47,9 @@ export async function POST(request) {
       return Response.json({ error: 'El archivo no es compatible o supera el límite permitido.' }, { status: 400 });
     }
     if (type.kind === 'video' && body) return Response.json({ error: 'WhatsApp no permite texto junto con video. Envía el texto aparte o borra el texto antes de enviar el video.' }, { status: 400 });
-    media = { path: mediaPath, contentType, size: bytes.length, filename: `${mediaPath.split('/').at(-1)}`, kind: type.kind };
+    const requestedFilename = String(payload?.mediaFilename || '').split(/[\\/]/).pop().replace(/[^\p{L}\p{N}._ -]/gu, '_').trim();
+    const filenameStem = requestedFilename.replace(/\.[^.]+$/, '').slice(0, 100) || (type.kind === 'video' ? 'video' : 'imagen');
+    media = { path: mediaPath, contentType, size: bytes.length, filename: `${filenameStem}.${type.extension}`, kind: type.kind };
   }
   const form = new URLSearchParams({ To: `whatsapp:${conversation.contact_phone}`, From: `whatsapp:${from}` });
   if (body) form.set('Body', body);
