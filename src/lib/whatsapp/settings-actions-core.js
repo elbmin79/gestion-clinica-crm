@@ -6,6 +6,14 @@ const templateKinds = ['confirmation_2d', 'reminder_1d', 'reminder_5h'];
 const defaultReadiness = Object.freeze({ confirmation_2d: false, reminder_1d: false, reminder_5h: false });
 const defaultTemplateStatuses = Object.freeze({ confirmation_2d: 'not_configured', reminder_1d: 'not_configured', reminder_5h: 'not_configured' });
 
+function configuredSandboxSender(env) {
+  const phoneNumber = String(env.TWILIO_WHATSAPP_SANDBOX_FROM || '').trim().replace(/^whatsapp:/i, '');
+  const credentialsAvailable = /^AC[0-9a-fA-F]{32}$/.test(String(env.TWILIO_ACCOUNT_SID || '').trim()) && Boolean(env.TWILIO_AUTH_TOKEN);
+  return env.TWILIO_WHATSAPP_SANDBOX_ENABLED === 'true' && credentialsAvailable && /^\+[1-9]\d{7,14}$/.test(phoneNumber)
+    ? { phoneNumber, displayLabel: 'Sandbox de WhatsApp' }
+    : null;
+}
+
 export function createWhatsAppSettingsActions({
   createServerClient,
   env = process.env,
@@ -70,13 +78,14 @@ export function createWhatsAppSettingsActions({
     const templateStatuses = { ...defaultTemplateStatuses, ...await getTemplateStatuses({ env }) };
     const availableTemplates = Object.fromEntries(templateKinds.map(kind => [kind, templateStatuses[kind] === 'approved']));
     const deliveryEnabled = env.TWILIO_WHATSAPP_ENABLED === 'true' && env.WHATSAPP_AUTOMATION_ENABLED === 'true';
+    const sandboxSender = configuredSandboxSender(env);
     try {
       const context = await authorizedAdmin(clinicId);
       if (context.error) return { ok: false, message: context.error };
       const senders = await listWhatsAppSenders({ env });
-      return { ok: true, senders, availableTemplates, templateStatuses, deliveryEnabled };
+      return { ok: true, senders, availableTemplates, templateStatuses, deliveryEnabled, ...(sandboxSender ? { sandboxSender } : {}) };
     } catch {
-      return { ok: false, message: 'No se pudieron consultar los números registrados. Verifica la conexión del servidor.', availableTemplates, templateStatuses, deliveryEnabled };
+      return { ok: false, message: 'No se pudieron consultar los números registrados. Verifica la conexión del servidor.', availableTemplates, templateStatuses, deliveryEnabled, ...(sandboxSender ? { sandboxSender } : {}) };
     }
   }
 

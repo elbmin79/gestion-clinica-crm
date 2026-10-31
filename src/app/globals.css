@@ -1036,6 +1036,11 @@ html[data-theme="dark"] .profile-signature-preview,html[data-theme="dark"] .prof
 .whatsapp-settings-live-notice div{display:grid;gap:3px;min-width:0}
 .whatsapp-settings-live-notice strong{font-size:13px}
 .whatsapp-settings-live-notice span{font-size:12px;line-height:1.5}
+.whatsapp-settings-sandbox-notice{display:flex;align-items:flex-start;gap:11px;padding:13px 14px;border:1px solid color-mix(in srgb,var(--green) 36%,var(--line));border-radius:8px;background:color-mix(in srgb,var(--green-soft) 88%,var(--paper));color:var(--ink)}
+.whatsapp-settings-sandbox-notice>svg{flex:none;margin-top:1px;color:var(--green)}
+.whatsapp-settings-sandbox-notice div{display:grid;gap:3px;min-width:0}
+.whatsapp-settings-sandbox-notice strong{font-size:13px}
+.whatsapp-settings-sandbox-notice span{font-size:12px;line-height:1.5}
 .whatsapp-settings-summary{display:flex;gap:26px;padding:3px 2px}
 .whatsapp-settings-summary>div{min-width:150px}
 .whatsapp-settings-summary span{color:var(--muted);font-size:11px}
@@ -1052,6 +1057,12 @@ html[data-theme="dark"] .profile-signature-preview,html[data-theme="dark"] .prof
 .whatsapp-sender-list{display:grid;gap:8px}
 .whatsapp-sender-row{display:grid;grid-template-columns:minmax(150px,1fr) minmax(170px,1fr) auto 34px;align-items:end;gap:10px;padding:10px;border:1px solid var(--line);border-radius:7px;background:var(--canvas)}
 .whatsapp-sender-row:has(.whatsapp-sender-address){grid-template-columns:minmax(130px,1fr) minmax(150px,1fr) minmax(160px,1fr) auto 34px}
+.whatsapp-sandbox-sender-row{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--line);border-radius:7px;background:var(--canvas)}
+.whatsapp-sandbox-sender-row>span{display:grid;place-items:center;width:32px;height:32px;flex:none;border-radius:8px;background:var(--green-soft);color:var(--green)}
+.whatsapp-sandbox-sender-row>div{display:grid;gap:2px;min-width:0;flex:1}
+.whatsapp-sandbox-sender-row strong{color:var(--ink);font-size:12px}
+.whatsapp-sandbox-sender-row small{color:var(--muted);font-size:11px}
+.whatsapp-sandbox-sender-row b{flex:none;color:var(--green);font-size:11px;font-weight:700}
 .whatsapp-sender-label,.whatsapp-sender-branch,.whatsapp-test-controls label{display:grid;gap:5px;color:var(--muted);font-size:11px;font-weight:700}
 .whatsapp-sender-label input,.whatsapp-sender-address input,.whatsapp-sender-address select,.whatsapp-sender-branch select,.whatsapp-test-controls select{width:100%;min-height:36px;border:1px solid var(--line);border-radius:6px;padding:0 9px;background:var(--paper);color:var(--ink);font-size:12px}
 .whatsapp-settings-helper{margin:0;color:var(--muted);font-size:12px;line-height:1.5}
