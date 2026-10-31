@@ -1,4 +1,5 @@
 import { listRegisteredTwilioWhatsAppSenders } from './twilio-whatsapp.server.js';
+import { hasClinicPermission } from '../clinic-permissions.js';
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const twilioSenderKeyPattern = /^twilio:\+[1-9]\d{7,14}$/;
@@ -19,7 +20,7 @@ export function createWhatsAppSettingsActions({
   env = process.env,
   listWhatsAppSenders = listRegisteredTwilioWhatsAppSenders,
 } = {}) {
-  async function authorizedAdmin(clinicId) {
+  async function authorized(clinicId, permission) {
     if (!uuidPattern.test(String(clinicId || ''))) return { error: 'Selecciona una clínica válida.' };
     if (typeof createServerClient !== 'function') return { error: 'La conexión con la clínica no está configurada.' };
     let client;
@@ -28,8 +29,8 @@ export function createWhatsAppSettingsActions({
     const { data: authData, error: authError } = await client.auth.getUser();
     if (authError || !authData?.user) return { error: 'Inicia sesión de nuevo para administrar WhatsApp.' };
     const { data: membership, error: membershipError } = await client
-      .from('clinic_memberships').select('role').eq('clinic_id', clinicId).eq('user_id', authData.user.id).maybeSingle();
-    if (membershipError || membership?.role !== 'admin') return { error: 'Solo una persona administradora puede configurar WhatsApp.' };
+      .from('clinic_memberships').select('role, permissions').eq('clinic_id', clinicId).eq('user_id', authData.user.id).maybeSingle();
+    if (membershipError || !membership || !hasClinicPermission(membership.role, membership.permissions, permission)) return { error: 'No tienes permiso para administrar WhatsApp.' };
     return { client };
   }
 
@@ -76,7 +77,7 @@ export function createWhatsAppSettingsActions({
 
   async function load(clinicId) {
     try {
-      const context = await authorizedAdmin(clinicId);
+      const context = await authorized(clinicId, 'whatsapp.view');
       if (context.error) return { ok: false, message: context.error };
       const result = await readSettings(context.client, clinicId);
       return result.error ? { ok: false, message: result.error } : { ok: true, ...result };
@@ -89,7 +90,7 @@ export function createWhatsAppSettingsActions({
     let senderLookupError = '';
     const inboxSender = configuredInboxSender(env);
     try {
-      const context = await authorizedAdmin(clinicId);
+      const context = await authorized(clinicId, 'whatsapp.manage');
       if (context.error) return { ok: false, message: context.error };
       const senderResult = await Promise.allSettled([listWhatsAppSenders({ env })]).then(results => results[0]);
       const registeredSenders = senderResult.status === 'fulfilled' ? senderResult.value : [];
@@ -108,7 +109,7 @@ export function createWhatsAppSettingsActions({
   async function save(input) {
     try {
       const clinicId = input?.clinicId;
-      const context = await authorizedAdmin(clinicId);
+      const context = await authorized(clinicId, 'whatsapp.manage');
       if (context.error) return { ok: false, message: context.error };
       const providerMode = 'twilio';
       const senders = Array.isArray(input?.senders) ? input.senders : null;

@@ -3,10 +3,17 @@
 import { createClient } from '../../lib/supabase/server';
 import { createServiceClient } from '../../lib/supabase/service-client';
 import { hiddenDirectoryUserIds, isHiddenDirectoryAccount } from '../../lib/account-visibility';
+import { CLINIC_PERMISSION_KEYS, sanitizeClinicPermissions } from '../../lib/clinic-permissions.js';
 
 const clinicIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const allowedRoles = new Set(['admin', 'clinician', 'receptionist', 'billing']);
 const userPageSize = 1000;
+
+function validPermissionPayload(value) {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    && Object.keys(value).every(key => CLINIC_PERMISSION_KEYS.includes(key))
+    && Object.values(value).every(item => typeof item === 'boolean');
+}
 
 async function authorizeClinicAdmin(clinicId) {
   if (typeof clinicId !== 'string' || !clinicIdPattern.test(clinicId)) {
@@ -69,7 +76,7 @@ export async function loadClinicAccessData(clinicId) {
 
     const { data: rows, error } = await context.serviceClient
       .from('clinic_memberships')
-      .select('user_id, role, created_at')
+      .select('user_id, role, permissions, created_at')
       .eq('clinic_id', clinicId)
       .order('created_at', { ascending: true });
 
@@ -88,6 +95,7 @@ export async function loadClinicAccessData(clinicId) {
           email: user?.email || '',
           avatarUrl: profileAvatarUrl(context.serviceClient, user),
           role: row.role,
+          permissions: row.permissions || {},
         };
       })),
     ]);
@@ -110,7 +118,7 @@ export async function loadClinicAccessData(clinicId) {
   }
 }
 
-export async function assignClinicAccess({ clinicId, userId, role }) {
+export async function assignClinicAccess({ clinicId, userId, role, permissions }) {
   try {
     const context = await authorizeClinicAdmin(clinicId);
     if (context.error) return { ok: false, message: context.error };
@@ -119,6 +127,7 @@ export async function assignClinicAccess({ clinicId, userId, role }) {
       return { ok: false, message: 'Selecciona una cuenta registrada.' };
     }
     if (!allowedRoles.has(role)) return { ok: false, message: 'Selecciona un rol válido.' };
+    if (!validPermissionPayload(permissions)) return { ok: false, message: 'Revisa los permisos seleccionados.' };
 
     const { data, error: targetError } = await context.serviceClient.auth.admin.getUserById(userId);
     if (targetError) return { ok: false, message: 'No se pudo verificar la cuenta seleccionada.' };
@@ -131,7 +140,7 @@ export async function assignClinicAccess({ clinicId, userId, role }) {
 
     const { error: insertError } = await context.sessionClient
       .from('clinic_memberships')
-      .insert({ clinic_id: clinicId, user_id: targetUser.id, role });
+      .insert({ clinic_id: clinicId, user_id: targetUser.id, role, permissions: sanitizeClinicPermissions(permissions, role) });
 
     if (insertError?.code === '23505') {
       return { ok: false, message: 'Esa cuenta ya tiene acceso a esta clínica.' };
@@ -156,32 +165,28 @@ async function clinicAdminCount(context, clinicId) {
   return { count: count || 0, error };
 }
 
-export async function updateClinicAccessRole({ clinicId, userId, role }) {
+export async function updateClinicAccessRole({ clinicId, userId, role, permissions }) {
   try {
     const context = await authorizeClinicAdmin(clinicId);
     if (context.error) return { ok: false, message: context.error };
     if (typeof userId !== 'string' || !clinicIdPattern.test(userId)) return { ok: false, message: 'Selecciona una cuenta válida.' };
     if (isHiddenDirectoryAccount({ id: userId })) return { ok: false, message: 'No se encontró el acceso de esa cuenta.' };
     if (!allowedRoles.has(role)) return { ok: false, message: 'Selecciona un rol válido.' };
+    if (!validPermissionPayload(permissions)) return { ok: false, message: 'Revisa los permisos seleccionados.' };
 
     const { data: member, error: memberError } = await context.sessionClient
       .from('clinic_memberships')
-      .select('role')
+      .select('role, permissions')
       .eq('clinic_id', clinicId)
       .eq('user_id', userId)
       .maybeSingle();
     if (memberError || !member) return { ok: false, message: 'No se encontró el acceso de esa cuenta.' };
-    if (member.role === role) return { ok: true, message: 'Ese rol ya está asignado.' };
-
-    if (member.role === 'admin' && role !== 'admin') {
-      const { count, error } = await clinicAdminCount(context, clinicId);
-      if (error) return { ok: false, message: 'No se pudo verificar el equipo administrador.' };
-      if (count <= 1) return { ok: false, message: 'Asigna primero otro administrador para conservar acceso administrativo a la clínica.' };
-    }
+    if (member.role === 'admin') return { ok: false, message: 'Los permisos de una cuenta administradora no se pueden modificar.' };
+    if (member.role === role && JSON.stringify(member.permissions || {}) === JSON.stringify(sanitizeClinicPermissions(permissions, role))) return { ok: true, message: 'Los permisos no han cambiado.' };
 
     const { error: updateError } = await context.sessionClient
       .from('clinic_memberships')
-      .update({ role })
+      .update({ role, permissions: sanitizeClinicPermissions(permissions, role) })
       .eq('clinic_id', clinicId)
       .eq('user_id', userId);
     if (updateError?.code === '23514') return { ok: false, message: 'La clínica debe conservar al menos una persona administradora.' };
@@ -207,6 +212,8 @@ export async function revokeClinicAccess({ clinicId, userId }) {
       .eq('user_id', userId)
       .maybeSingle();
     if (memberError || !member) return { ok: false, message: 'No se encontró el acceso de esa cuenta.' };
+
+    if (member.role === 'admin') return { ok: false, message: 'No se puede revocar el acceso de otra cuenta administradora.' };
 
     if (member.role === 'admin') {
       const { count, error } = await clinicAdminCount(context, clinicId);

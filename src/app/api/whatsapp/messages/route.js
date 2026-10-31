@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server';
 import { createServiceClient } from '@/lib/supabase/service-client';
 import { twilioWhatsAppStatusCallbackUrl } from '@/lib/twilio-whatsapp-webhook';
 import { getWhatsAppMediaType, hasWhatsAppMediaSignature, isWhatsAppMediaPath, WHATSAPP_MEDIA_BUCKET } from '@/lib/whatsapp/media.server.js';
+import { hasClinicPermission } from '@/lib/clinic-permissions.js';
 
 export const runtime = 'nodejs';
 
@@ -20,8 +21,8 @@ export async function POST(request) {
   if (!/^[\da-f-]{36}$/i.test(clinicId) || !/^[\da-f-]{36}$/i.test(conversationId) || (!body && !mediaPath) || body.length > 4096) {
     return Response.json({ error: 'Escribe un mensaje o adjunta una imagen o video.' }, { status: 400 });
   }
-  const { data: membership } = await session.from('clinic_memberships').select('role').eq('clinic_id', clinicId).eq('user_id', user.id).maybeSingle();
-  if (!membership || !['admin', 'receptionist'].includes(membership.role)) return Response.json({ error: 'No tienes permiso para responder desde esta clínica.' }, { status: 403 });
+  const { data: membership } = await session.from('clinic_memberships').select('role,permissions').eq('clinic_id', clinicId).eq('user_id', user.id).maybeSingle();
+  if (!membership || !hasClinicPermission(membership.role, membership.permissions, 'whatsapp.reply')) return Response.json({ error: 'No tienes permiso para responder desde esta clínica.' }, { status: 403 });
   const service = createServiceClient();
   if (!service) return Response.json({ error: 'El servicio de mensajería no está disponible.' }, { status: 503 });
   const { data: conversation } = await service.from('clinic_whatsapp_conversations').select('id,clinic_id,contact_phone,sender_phone,last_inbound_at,blocked_at').eq('clinic_id', clinicId).eq('id', conversationId).maybeSingle();

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { createClinicRemindersStore } from './clinic-reminders';
 
-export function useClinicReminders(enabled, clinicId, role, timeZone) {
+export function useClinicReminders(enabled, clinicId, role, timeZone, permissions = {}) {
   const [reminders, setReminders] = useState([]);
   const [status, setStatus] = useState(enabled ? 'loading' : 'idle');
   const [reloadKey, setReloadKey] = useState(0);
@@ -11,11 +11,6 @@ export function useClinicReminders(enabled, clinicId, role, timeZone) {
 
   useEffect(() => {
     if (!enabled) { setReminders([]); setStatus('idle'); return; }
-    if (!['admin', 'receptionist'].includes(role)) {
-      setReminders([]);
-      setStatus(clinicId ? 'no_access' : 'loading');
-      return;
-    }
     if (!clinicId || !timeZone) { setReminders([]); setStatus('loading'); return; }
     let cancelled = false;
     setStatus('loading');
@@ -23,7 +18,7 @@ export function useClinicReminders(enabled, clinicId, role, timeZone) {
       .then(result => { if (!cancelled) { setReminders(result); setStatus('ready'); } })
       .catch(() => { if (!cancelled) { setReminders([]); setStatus('error'); } });
     return () => { cancelled = true; };
-  }, [enabled, clinicId, role, timeZone, reloadKey]);
+  }, [enabled, clinicId, role, permissions, timeZone, reloadKey]);
 
   return { reminders, status, refresh };
 }

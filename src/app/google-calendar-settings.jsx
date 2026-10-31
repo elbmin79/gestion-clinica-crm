@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { CalendarDays, CircleAlert, CircleCheck, ExternalLink, LoaderCircle, Link2, RefreshCw, Unlink } from 'lucide-react';
+import { hasClinicPermission } from '../lib/clinic-permissions.js';
 
 function callbackMessage() {
   const result = new URLSearchParams(window.location.search).get('googleCalendar');
@@ -16,7 +17,7 @@ function formatDate(value) {
   return new Intl.DateTimeFormat('es-MX', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(value));
 }
 
-export default function GoogleCalendarSettings({ clinicId, role, sharedMode }) {
+export default function GoogleCalendarSettings({ clinicId, role, permissions = {}, sharedMode }) {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [syncing, setSyncing] = useState(false);
@@ -29,7 +30,7 @@ export default function GoogleCalendarSettings({ clinicId, role, sharedMode }) {
   const [notice, setNotice] = useState('');
 
   const loadStatus = useCallback(async () => {
-    if (!clinicId || !sharedMode || !['admin', 'clinician'].includes(role)) { setLoading(false); return; }
+    if (!clinicId || !sharedMode) { setLoading(false); return; }
     setLoading(true);
     setError('');
     try {
@@ -43,7 +44,7 @@ export default function GoogleCalendarSettings({ clinicId, role, sharedMode }) {
     } catch (loadError) {
       setError(loadError.message || 'No se pudo cargar la conexión con Google Calendar.');
     } finally { setLoading(false); }
-  }, [clinicId, role, sharedMode]);
+  }, [clinicId, role, sharedMode, permissions]);
 
   const loadCalendars = useCallback(async () => {
     if (!connection || !clinicId) { setCalendars([]); return; }

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, ArrowLeft, Ban, Check, CheckCheck, ChevronDown, ChevronRight, ChevronUp, Clock3, Download, EllipsisVertical, Expand, MessageCircle, Paperclip, PencilLine, Search, Send, Trash2, X } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
+import { hasClinicPermission } from '@/lib/clinic-permissions.js';
 import { buildWhatsAppTimeline, formatWhatsAppMessageTime, formatWhatsAppThreadTime } from '@/lib/whatsapp/time-format.js';
 import './whatsapp-inbox.css';
 
@@ -100,7 +101,7 @@ function WhatsAppAudioPlayer({ src, filename = 'audio' }) {
   </div>;
 }
 
-export default function WhatsAppInbox({ clinicId = '', sharedMode = false, role = '' }) {
+export default function WhatsAppInbox({ clinicId = '', sharedMode = false, role = '', permissions = {} }) {
   const [conversations, setConversations] = useState([]);
   const [messages, setMessages] = useState([]);
   const [messageHistoryConversationId, setMessageHistoryConversationId] = useState('');
@@ -134,7 +135,8 @@ export default function WhatsAppInbox({ clinicId = '', sharedMode = false, role 
   const shouldFollowLatestRef = useRef(true);
   const observedMessagesRef = useRef({ conversationId: '', ids: new Set() });
   const selectedIdRef = useRef('');
-  const canReply = ['admin', 'receptionist'].includes(role);
+  const canReply = !sharedMode || hasClinicPermission(role, permissions, 'whatsapp.reply');
+  const canManageConversations = !sharedMode || hasClinicPermission(role, permissions, 'whatsapp.manage');
   const scrollToLatest = useCallback((behavior = 'smooth') => {
     const history = messageHistoryRef.current;
     if (!history) return;
@@ -328,6 +330,7 @@ export default function WhatsAppInbox({ clinicId = '', sharedMode = false, role 
     finally { setActionBusy(false); }
   };
   const renderConversationMenu = (conversation, source) => {
+    if (!canManageConversations) return null;
     const menuKey = `${source}:${conversation.id}`;
     return <div className={`whatsapp-conversation-menu${openMenuId === menuKey ? ' is-open' : ''}`}>
     <button type="button" className="whatsapp-icon-action" aria-label={`Acciones para ${conversation.contact_name || conversation.contact_phone}`} aria-haspopup="menu" aria-expanded={openMenuId === menuKey} onClick={event => { event.stopPropagation(); setOpenMenuId(current => current === menuKey ? '' : menuKey); }}>{source === 'thread' ? <ChevronDown size={18}/> : <EllipsisVertical size={19}/>}</button>

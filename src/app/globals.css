@@ -1182,6 +1182,39 @@ html[data-theme="dark"] .whatsapp-settings-loading{color:#bba9b7}
 .clinic-access-confirm-revoke{border:1px solid #aa405b;background:#aa405b;color:#fff}
 .clinic-access-confirm-revoke:hover{background:#93364d}
 .clinic-access-role{flex:none;border:1px solid var(--line);border-radius:999px;padding:4px 9px;background:var(--canvas);color:var(--muted);font-size:11px;font-weight:700;white-space:nowrap}
+.clinic-access-member{grid-template-columns:minmax(0,1fr) auto minmax(190px,auto)}
+.clinic-access-member-controls{justify-content:flex-end;gap:10px}
+.clinic-access-member-controls .clinic-access-edit{width:auto;padding:7px 10px;border:1px solid var(--line);border-radius:8px;color:var(--ink);text-decoration:none}
+.clinic-access-member-controls .clinic-access-edit:hover:not(:disabled){background:var(--canvas);text-decoration:none}
+.clinic-access-revoke{border:0;padding:7px 5px;background:transparent;color:var(--muted);font-size:12px;font-weight:700}
+.clinic-access-revoke:hover:not(:disabled){color:var(--red);text-decoration:underline;text-underline-offset:3px}
+.clinic-access-revoke:disabled{cursor:not-allowed;opacity:.5}
+.clinic-access-admin-lock{color:var(--muted);font-size:11px;font-weight:700;text-align:right}
+.clinic-access-permissions-modal{display:grid;grid-template-rows:auto minmax(0,1fr) auto;width:min(760px,100%);max-height:min(88vh,900px);overflow:hidden;border:1px solid var(--line);border-radius:16px;background:var(--paper);color:var(--ink);box-shadow:0 28px 90px #09060b66}
+.clinic-access-permissions-modal>header{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;padding:22px 24px 18px;border-bottom:1px solid var(--line)}
+.clinic-access-permissions-modal>header span{color:var(--muted);font-size:10px;font-weight:800;letter-spacing:.12em}
+.clinic-access-permissions-modal>header h2{margin:6px 0 3px;color:var(--ink);font-size:21px}
+.clinic-access-permissions-modal>header p{margin:0;color:var(--muted);font-size:13px}
+.clinic-access-permissions-modal>header button{width:32px;height:32px;border:1px solid var(--line);border-radius:9px;background:var(--canvas);color:var(--muted);font-size:22px;line-height:1}
+.clinic-access-permissions-body{overflow-y:auto;padding:18px 24px}
+.clinic-access-template-select{display:grid;grid-template-columns:minmax(0,1fr) minmax(190px,260px);align-items:center;gap:8px 16px;margin-bottom:14px;color:var(--ink);font-size:13px;font-weight:700}
+.clinic-access-template-select select{height:38px;border:1px solid var(--line);border-radius:9px;padding:0 11px;background:var(--canvas);color:var(--ink);font:inherit;font-size:13px}
+.clinic-access-template-select small{grid-column:1/-1;color:var(--muted);font-size:11px;font-weight:400}
+.clinic-access-read-rule{display:flex;align-items:flex-start;gap:11px;margin-bottom:14px;border:1px solid color-mix(in srgb,var(--green) 30%,var(--line));border-radius:11px;padding:12px;background:color-mix(in srgb,var(--green-soft) 62%,var(--paper))}
+.clinic-access-read-check{display:grid;place-items:center;flex:none;width:21px;height:21px;border-radius:50%;background:var(--green);color:#fff;font-size:13px;font-weight:900}
+.clinic-access-read-rule strong{display:block;color:var(--ink);font-size:12px}
+.clinic-access-read-rule p{margin:3px 0 0;color:var(--muted);font-size:11px;line-height:1.45}
+.clinic-access-permission-groups{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.clinic-access-permission-group{min-width:0;border:1px solid var(--line);border-radius:11px;padding:12px 13px}
+.clinic-access-permission-group h3{margin:0 0 10px;color:var(--ink);font-size:12px}
+.clinic-access-permission-group>div{display:grid;gap:8px}
+.clinic-access-permission-option{display:flex;align-items:center;gap:9px;color:var(--muted);font-size:11px;line-height:1.3;cursor:pointer}
+.clinic-access-permission-option input{width:15px;height:15px;margin:0;accent-color:var(--accent);cursor:pointer}
+.clinic-access-permission-option input:disabled{cursor:not-allowed}
+.clinic-access-admin-note{border:1px solid var(--line);border-radius:11px;padding:14px;background:var(--canvas);color:var(--muted);font-size:12px}
+.clinic-access-permissions-modal>footer{display:flex;justify-content:flex-end;gap:9px;padding:14px 24px 18px;border-top:1px solid var(--line)}
+html[data-theme="dark"] .clinic-access-read-rule{background:color-mix(in srgb,var(--green) 12%,var(--paper))}
+@media(max-width:700px){.clinic-access-member{grid-template-columns:minmax(0,1fr) auto;gap:8px}.clinic-access-member-identity{grid-column:1/-1}.clinic-access-member-role{grid-column:1}.clinic-access-member-controls{grid-column:2;align-self:center}.clinic-access-permissions-modal{max-height:92vh}.clinic-access-permissions-modal>header,.clinic-access-permissions-body{padding-right:17px;padding-left:17px}.clinic-access-permission-groups{grid-template-columns:1fr}.clinic-access-template-select{grid-template-columns:1fr}.clinic-access-template-select small{grid-column:auto}.clinic-access-permissions-modal>footer{padding:13px 17px 16px}}
 
 /* Notification inbox, anchored to the top-bar bell. */
 .notification-center{position:relative;display:flex;align-items:center}

@@ -2,19 +2,21 @@
 import {useEffect,useRef,useState} from 'react';
 import {CalendarDays,Check,CheckCircle2,CircleAlert,ExternalLink,Plus,RefreshCw,Save,Trash2,X} from 'lucide-react';
 import {createClient} from '../lib/supabase/client';
+import {hasClinicPermission} from '../lib/clinic-permissions.js';
 
 const days=['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
 const minuteText=value=>value===null||value===''?'':`${String(Math.floor(Number(value)/60)%24).padStart(2,'0')}:${String(Number(value)%60).padStart(2,'0')}`;
 const minuteValue=(value,end=false)=>{if(!value)return null;const [hour,minute]=value.split(':').map(Number);return end&&hour===0&&minute===0?1440:hour*60+minute;};
 const slugFor=name=>(name||'mi-clinica').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,60);
 
-export default function PublicAgendaSettings({clinicId,clinicName,role,sharedMode,branches=[],providers=[],services=[],patients=[],timeZone,onApproved}){
+export default function PublicAgendaSettings({clinicId,clinicName,role,permissions={},sharedMode,branches=[],providers=[],services=[],patients=[],timeZone,onApproved}){
   const [settings,setSettings]=useState({slug:slugFor(clinicName),published:false,min_notice_minutes:1440,max_days:90,buffer_minutes:0,require_email:false});
   const [offers,setOffers]=useState([]),[hours,setHours]=useState([]),[requests,setRequests]=useState([]),[patientLinks,setPatientLinks]=useState({});
   const [status,setStatus]=useState('loading'),[busy,setBusy]=useState(''),[error,setError]=useState(''),[notice,setNotice]=useState(''),[filter,setFilter]=useState('pending');
   const [readiness,setReadiness]=useState({configured:false});
   const loadVersion=useRef(0);
-  const canRead=sharedMode&&clinicId&&['admin','receptionist'].includes(role),canManage=role==='admin';
+  const canRead=sharedMode&&clinicId,canManage=!sharedMode||hasClinicPermission(role,permissions,'settings.manage');
+  const canReview=action=>!sharedMode||hasClinicPermission(role,permissions,action);
   async function load(){
     if(!canRead)return;const version=++loadVersion.current;setError('');setStatus('loading');
     const client=createClient();
@@ -64,6 +66,8 @@ export default function PublicAgendaSettings({clinicId,clinicName,role,sharedMod
     }catch(cause){setError(cause.message||'No se pudo guardar la configuración.');}finally{setBusy('');}
   }
   async function review(request,action){
+    const requiredPermission=action==='approve'?'agenda.create':'agenda.cancel';
+    if(!canReview(requiredPermission)){setError('Tu cuenta no tiene permiso para realizar esta acción de agenda.');return;}
     if(busy)return;setBusy(request.id);setError('');setNotice('');
     try{
       const {data,error}=await createClient().rpc('review_public_booking',{p_request:request.id,p_action:action,p_patient:patientLinks[request.id]||null});
@@ -125,7 +129,7 @@ export default function PublicAgendaSettings({clinicId,clinicName,role,sharedMod
     <section className="public-agenda-requests" aria-labelledby="public-requests-title"><div className="google-calendar-section-heading"><div><strong id="public-requests-title">Solicitudes de pacientes</strong><span>Últimas 100 solicitudes. Revisa los datos y el expediente antes de aprobar.</span></div><button className="button outline compact" type="button" disabled={Boolean(busy)} onClick={()=>{setBusy('refresh');void refreshRequests().finally(()=>setBusy(''));}}><RefreshCw size={14}/> Actualizar solicitudes</button></div>
       <label className="public-agenda-request-filter">Estado<select value={filter} onChange={e=>setFilter(e.target.value)}><option value="pending">Por revisar</option><option value="approved">Aprobadas</option><option value="rejected">Rechazadas</option><option value="all">Todas</option></select></label>
       {requests.filter(r=>filter==='all'||r.status===filter).map(r=><article className="public-agenda-request" key={r.id}><div><strong>{r.full_name}</strong><span>{r.service_name} · {dateText(r.starts_at)}</span><span>{r.phone}{r.email?` · ${r.email}`:''}</span><span>Anticipo requerido: {Number(r.deposit_amount).toFixed(2)} MXN · Folio {r.id.slice(0,8)}</span></div>
-        {r.status==='pending'?<div className="public-agenda-review"><label>Expediente<select aria-label={`Expediente para ${r.full_name}`} value={patientLinks[r.id]||''} onChange={e=>setPatientLinks(current=>({...current,[r.id]:e.target.value}))}><option value="">Crear nuevo expediente al aprobar</option>{patients.filter(p=>p.databaseId).map(p=><option key={p.databaseId} value={p.databaseId}>{p.name} · {p.id}</option>)}</select></label><div><button className="button primary compact" type="button" disabled={Boolean(busy)} onClick={()=>review(r,'approve')}><Check size={14}/> Crear cita pendiente</button><button className="button secondary compact" type="button" disabled={Boolean(busy)} onClick={()=>review(r,'reject')}><X size={14}/> Rechazar</button></div></div>:<span className="settings-option-status">{r.status==='approved'?'Aprobada':'Rechazada'}</span>}
+        {r.status==='pending'?<div className="public-agenda-review">{canReview('agenda.create')&&<label>Expediente<select aria-label={`Expediente para ${r.full_name}`} value={patientLinks[r.id]||''} onChange={e=>setPatientLinks(current=>({...current,[r.id]:e.target.value}))}><option value="">Crear nuevo expediente al aprobar</option>{patients.filter(p=>p.databaseId).map(p=><option key={p.databaseId} value={p.databaseId}>{p.name} · {p.id}</option>)}</select></label>}<div>{canReview('agenda.create')&&<button className="button primary compact" type="button" disabled={Boolean(busy)} onClick={()=>review(r,'approve')}><Check size={14}/> Crear cita pendiente</button>}{canReview('agenda.cancel')&&<button className="button secondary compact" type="button" disabled={Boolean(busy)} onClick={()=>review(r,'reject')}><X size={14}/> Rechazar</button>}</div></div>:<span className="settings-option-status">{r.status==='approved'?'Aprobada':'Rechazada'}</span>}
         {r.appointment_id&&<a className="text-link" href={`/agenda?clinic=${clinicId}&appointment=${r.appointment_id}`}>Ver cita en agenda</a>}
       </article>)}
       {!requests.some(r=>filter==='all'||r.status===filter)&&<p className="public-agenda-hint">No hay solicitudes en este estado.</p>}

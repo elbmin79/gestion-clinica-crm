@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { createServiceClient } from '@/lib/supabase/service-client';
 import { WHATSAPP_MEDIA_BUCKET } from '@/lib/whatsapp/media.server.js';
+import { hasClinicPermission } from '@/lib/clinic-permissions.js';
 
 export const runtime = 'nodejs';
 
@@ -14,8 +15,8 @@ export async function GET(request) {
   const messageId = url.searchParams.get('messageId') || '';
   const download = url.searchParams.get('download') === '1';
   if (!/^[\da-f-]{36}$/i.test(clinicId) || !/^[\da-f-]{36}$/i.test(messageId)) return Response.json({ error: 'Archivo no encontrado.' }, { status: 404 });
-  const { data: membership } = await session.from('clinic_memberships').select('role').eq('clinic_id', clinicId).eq('user_id', user.id).maybeSingle();
-  if (!membership || !['admin', 'receptionist'].includes(membership.role)) return Response.json({ error: 'No tienes permiso para ver este archivo.' }, { status: 403 });
+  const { data: membership } = await session.from('clinic_memberships').select('role,permissions').eq('clinic_id', clinicId).eq('user_id', user.id).maybeSingle();
+  if (!membership || !hasClinicPermission(membership.role, membership.permissions, 'whatsapp.view')) return Response.json({ error: 'No tienes permiso para ver este archivo.' }, { status: 403 });
   const { data: message } = await session.from('clinic_whatsapp_messages').select('media_object_path,media_content_type,media_filename').eq('clinic_id', clinicId).eq('id', messageId).maybeSingle();
   if (!message?.media_object_path || !message.media_content_type) return Response.json({ error: 'Archivo no encontrado.' }, { status: 404 });
   const service = createServiceClient();

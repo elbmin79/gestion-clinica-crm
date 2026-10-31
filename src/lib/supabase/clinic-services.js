@@ -3,7 +3,7 @@ import { initialClinicServices, normalizeServiceRow } from '../clinic-services.j
 
 function raise(error, fallback) {
   if (!error) return;
-  if (error.code === '42501') throw new Error('Solo una persona administradora puede modificar el catálogo.');
+  if (error.code === '42501') throw new Error('Tu cuenta no tiene permiso para modificar el catálogo de servicios.');
   if (error.code === '42P01' || error.code === 'PGRST205') throw new Error('Falta aplicar la migración del catálogo de servicios.');
   throw new Error(error.message || fallback);
 }

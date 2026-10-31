@@ -63,7 +63,7 @@ function mapDocument(row) {
 }
 
 async function fetchDirectory(client, clinicId, role) {
-  const canReadDiagnoses = ['admin', 'clinician'].includes(role);
+  const canReadDiagnoses = true; // All clinic members may read the full patient record.
   const [patientResult, businessResult, branchResult, providerResult, assignmentResult, diagnosisResult, documentResult, activityResult, templateResult, encounterResult, fileResult, botoxResult] = await Promise.all([
     client.from('patients').select('id, record_number, full_name, email, phone, service_summary, status, primary_branch_id, primary_provider_id, appointment_whatsapp_opt_in, appointment_whatsapp_opt_in_at, appointment_whatsapp_opt_in_source, created_at, updated_at').eq('clinic_id', clinicId).order('created_at', { ascending: false }),
     client.from('businesses').select('id, name, active').eq('clinic_id', clinicId).order('name'),

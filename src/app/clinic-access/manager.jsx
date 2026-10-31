@@ -2,15 +2,9 @@
 
 import { useEffect, useState } from 'react';
 import { assignClinicAccess, loadClinicAccessData, revokeClinicAccess, updateClinicAccessRole } from './actions';
+import { CLINIC_PERMISSION_GROUPS, CLINIC_ROLES, permissionsForPreset, sanitizeClinicPermissions } from '../../lib/clinic-permissions.js';
 
-const roles = [
-  ['admin', 'Administrador'],
-  ['clinician', 'Profesional clínico'],
-  ['receptionist', 'Recepción'],
-  ['billing', 'Pagos'],
-];
-
-const roleLabels = Object.fromEntries(roles);
+const roleLabels = Object.fromEntries(CLINIC_ROLES);
 
 function AccountIdentity({ account, className }) {
   const [failedUrl, setFailedUrl] = useState('');
@@ -30,13 +24,12 @@ export default function ClinicAccessManager({ clinicId }) {
   const [members, setMembers] = useState([]);
   const [accounts, setAccounts] = useState([]);
   const [currentUserId, setCurrentUserId] = useState('');
-  const [roleByUser, setRoleByUser] = useState({});
   const [loading, setLoading] = useState(true);
   const [savingUserId, setSavingUserId] = useState('');
   const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
-  const [editingUserId, setEditingUserId] = useState('');
   const [confirmAction, setConfirmAction] = useState(null);
+  const [permissionEditor, setPermissionEditor] = useState(null);
+  const [editorSaving, setEditorSaving] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
@@ -61,9 +54,8 @@ export default function ClinicAccessManager({ clinicId }) {
   }, [clinicId, reloadKey]);
 
   useEffect(() => {
-    setRoleByUser({});
-    setEditingUserId('');
     setConfirmAction(null);
+    setPermissionEditor(null);
   }, [clinicId]);
 
   useEffect(() => {
@@ -75,32 +67,51 @@ export default function ClinicAccessManager({ clinicId }) {
     return () => window.removeEventListener('keydown', closeOnEscape);
   }, [confirmAction, savingUserId]);
 
-  const assignAccount = async account => {
-    setSavingUserId(account.userId);
+  const openAccountPermissionEditor = account => setPermissionEditor({ type: 'assign', account, role: 'clinician', permissions: permissionsForPreset('clinician') });
+  const openMemberPermissionEditor = member => {
+    if (member.role === 'admin') return;
+    setPermissionEditor({ type: 'update', member, role: member.role, permissions: sanitizeClinicPermissions(member.permissions, member.role) });
+  };
+  const setEditorRole = role => setPermissionEditor(current => current ? { ...current, role, permissions: permissionsForPreset(role) } : current);
+  const setEditorPermission = (permission, value) => setPermissionEditor(current => {
+    if (!current) return current;
+    const permissions = { ...current.permissions, [permission]: value };
+    if (permission === 'whatsapp.view' && !value) {
+      permissions['whatsapp.reply'] = false;
+      permissions['whatsapp.manage'] = false;
+    }
+    if (permission === 'whatsapp.reply' && value) permissions['whatsapp.view'] = true;
+    if (permission === 'whatsapp.manage' && value) permissions['whatsapp.view'] = true;
+    return { ...current, permissions };
+  });
+  const savePermissionEditor = async () => {
+    if (!permissionEditor) return;
+    setEditorSaving(true);
     setError('');
-    setSuccess('');
     try {
-      const role = roleByUser[account.userId] || 'clinician';
-      const result = await assignClinicAccess({ clinicId, userId: account.userId, role });
+      const permissions = sanitizeClinicPermissions(permissionEditor.permissions, permissionEditor.role);
+      const result = permissionEditor.type === 'assign'
+        ? await assignClinicAccess({ clinicId, userId: permissionEditor.account.userId, role: permissionEditor.role, permissions })
+        : await updateClinicAccessRole({ clinicId, userId: permissionEditor.member.userId, role: permissionEditor.role, permissions });
       if (!result.ok) {
         setError(result.message);
         return;
       }
+      setPermissionEditor(null);
       setReloadKey(value => value + 1);
     } catch {
-      setError('No se pudo asignar acceso a la clínica.');
+      setError(permissionEditor.type === 'assign' ? 'No se pudo asignar acceso a la clínica.' : 'No se pudieron guardar los permisos.');
     } finally {
-      setSavingUserId('');
+      setEditorSaving(false);
     }
   };
 
   const requestMemberChange = (member, value) => {
-    setEditingUserId('');
     if (value === '__revoke__') {
       setConfirmAction({ type: 'revoke', member });
       return;
     }
-    if (roles.some(([role]) => role === value) && value !== member.role) {
+    if (CLINIC_ROLES.some(([role]) => role === value) && value !== member.role) {
       setConfirmAction({ type: 'role', member, role: value });
     }
   };
@@ -110,7 +121,6 @@ export default function ClinicAccessManager({ clinicId }) {
     const { member, type, role } = confirmAction;
     setSavingUserId(member.userId);
     setError('');
-    setSuccess('');
     try {
       const result = type === 'role'
         ? await updateClinicAccessRole({ clinicId, userId: member.userId, role })
@@ -120,14 +130,6 @@ export default function ClinicAccessManager({ clinicId }) {
         setError(result.message);
         return;
       }
-      if (type === 'role') {
-        setSuccess(`${member.name || member.email}: rol actualizado a ${roleLabels[role]}.`);
-      }
-      if (type === 'revoke') setRoleByUser(current => {
-        const next = { ...current };
-        delete next[member.userId];
-        return next;
-      });
       setConfirmAction(null);
       setReloadKey(value => value + 1);
     } catch {
@@ -156,18 +158,11 @@ export default function ClinicAccessManager({ clinicId }) {
       </div>
       <div className="clinic-access-pending-list">
         {accounts.map(account => {
-          const role = roleByUser[account.userId] || 'clinician';
-          const saving = savingUserId === account.userId;
           return <article className="clinic-access-pending-row" key={account.userId}>
             <AccountIdentity account={account} className="clinic-access-account"/>
             {account.confirmed ? <>
-              <div className="clinic-access-role-field">
-                <select aria-label={`Rol para ${account.name || account.email}`} value={role} onChange={event => setRoleByUser(current => ({ ...current, [account.userId]: event.target.value }))} disabled={Boolean(savingUserId)}>
-                  {roles.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-                </select>
-              </div>
-              <button className="button primary compact" type="button" onClick={() => assignAccount(account)} disabled={Boolean(savingUserId)}>
-                {saving ? 'Asignando…' : 'Asignar rol'}
+              <button className="button primary compact" type="button" onClick={() => openAccountPermissionEditor(account)} disabled={Boolean(savingUserId) || editorSaving}>
+                Configurar acceso
               </button>
             </> : <span className="clinic-access-unconfirmed">Correo sin confirmar</span>}
           </article>;
@@ -175,31 +170,33 @@ export default function ClinicAccessManager({ clinicId }) {
       </div>
     </section>}
     {error && <p className="clinic-access-message is-error" role="alert">{error}</p>}
-    {success && <p className="clinic-access-message" role="status">{success}</p>}
     <div className="clinic-access-list" aria-live="polite">
       <div className="clinic-access-list-heading">Cuentas con acceso{!loading&&` · ${members.length}`}</div>
       {loading ? <div className="empty-inline">Cargando cuentas…</div>
         : members.length ? members.map(member => {
-          const isEditing = editingUserId === member.userId;
-          const isLastAdmin = member.role === 'admin' && members.filter(item => item.role === 'admin').length <= 1;
           return <article className="clinic-access-member" key={member.userId}>
             <AccountIdentity account={member} className="clinic-access-member-identity"/>
-            <div className="clinic-access-member-role">
-              <select value={member.role} onChange={event => requestMemberChange(member, event.target.value)} disabled={Boolean(savingUserId) || isLastAdmin || !isEditing} aria-label={`Rol de ${member.name || member.email}`}>
-                {roles.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-                <optgroup label="Acceso">
-                  <option value="__revoke__">Revocar acceso</option>
-                </optgroup>
-              </select>
-            </div>
+            <span className="clinic-access-role">{roleLabels[member.role] || 'Acceso personalizado'}</span>
             <div className="clinic-access-member-controls">
-              {member.userId !== currentUserId && <button className="clinic-access-edit" type="button" onClick={() => setEditingUserId(isEditing ? '' : member.userId)} disabled={Boolean(savingUserId) || isLastAdmin}>{isEditing ? 'Cancelar' : 'Editar'}</button>}
+              {member.role !== 'admin' && member.userId !== currentUserId && <><button className="clinic-access-edit" type="button" onClick={() => openMemberPermissionEditor(member)} disabled={Boolean(savingUserId) || editorSaving}>Editar permisos</button><button className="clinic-access-revoke" type="button" onClick={() => requestMemberChange(member, '__revoke__')} disabled={Boolean(savingUserId) || editorSaving}>Revocar</button></>}
+              {member.role === 'admin' && <span className="clinic-access-admin-lock">Acceso completo</span>}
             </div>
           </article>;
         })
           : <div className="empty-inline">Aún no hay cuentas asignadas a esta clínica.</div>}
     </div>
   </section>
+  {permissionEditor && <div className="clinic-access-confirm-backdrop" onMouseDown={event => event.target === event.currentTarget && !editorSaving && setPermissionEditor(null)}>
+    <section className="clinic-access-permissions-modal" role="dialog" aria-modal="true" aria-labelledby="clinic-access-permissions-title">
+      <header><div><span>ACCESO A LA CLÍNICA</span><h2 id="clinic-access-permissions-title">{permissionEditor.type === 'assign' ? 'Configurar acceso' : 'Editar permisos'}</h2><p>{permissionEditor.account?.name || permissionEditor.account?.email || permissionEditor.member?.name || permissionEditor.member?.email}</p></div><button type="button" aria-label="Cerrar" disabled={editorSaving} onClick={() => setPermissionEditor(null)}>×</button></header>
+      <div className="clinic-access-permissions-body">
+        <label className="clinic-access-template-select"><span>Plantilla inicial</span><select value={permissionEditor.role} disabled={editorSaving} onChange={event => setEditorRole(event.target.value)}>{CLINIC_ROLES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select><small>La plantilla rellena los permisos; puedes ajustarlos antes de guardar.</small></label>
+        <div className="clinic-access-read-rule"><span className="clinic-access-read-check">✓</span><div><strong>Lectura completa en la clínica</strong><p>Todos pueden consultar las secciones y su contenido. WhatsApp se configura por separado.</p></div></div>
+        {permissionEditor.role === 'admin' ? <div className="clinic-access-admin-note">La plantilla de administrador siempre conserva acceso completo y no se puede personalizar.</div> : <div className="clinic-access-permission-groups">{CLINIC_PERMISSION_GROUPS.map(group => <section className="clinic-access-permission-group" key={group.id}><h3>{group.title}</h3><div>{group.permissions.map(([permission, label]) => <label className="clinic-access-permission-option" key={permission}><input type="checkbox" checked={permissionEditor.permissions[permission] === true} onChange={event => setEditorPermission(permission, event.target.checked)} disabled={editorSaving}/><span>{label}</span></label>)}</div></section>)}</div>}
+      </div>
+      <footer><button className="button secondary" type="button" onClick={() => setPermissionEditor(null)} disabled={editorSaving}>Cancelar</button><button className="button primary" type="button" onClick={savePermissionEditor} disabled={editorSaving}>{editorSaving ? 'Guardando…' : permissionEditor.type === 'assign' ? 'Dar acceso' : 'Guardar permisos'}</button></footer>
+    </section>
+  </div>}
   {confirmAction && <div className="clinic-access-confirm-backdrop" onMouseDown={event => event.target === event.currentTarget && !savingUserId && setConfirmAction(null)}>
     <section className="clinic-access-confirm-modal" role="alertdialog" aria-modal="true" aria-labelledby="clinic-access-confirm-title" aria-describedby="clinic-access-confirm-description">
       <h2 id="clinic-access-confirm-title">¿Estás seguro?</h2>

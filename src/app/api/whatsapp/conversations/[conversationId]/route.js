@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { createServiceClient } from '@/lib/supabase/service-client';
 import { WHATSAPP_MEDIA_BUCKET } from '@/lib/whatsapp/media.server.js';
+import { hasClinicPermission } from '@/lib/clinic-permissions.js';
 
 export const runtime = 'nodejs';
 
@@ -13,8 +14,8 @@ async function getAuthorizedContext(request) {
   try { payload = await request.json(); } catch { return { response: Response.json({ error: 'Solicitud inválida.' }, { status: 400 }) }; }
   const clinicId = String(payload?.clinicId || '');
   if (!/^[\da-f-]{36}$/i.test(clinicId)) return { response: Response.json({ error: 'Selecciona una clínica válida.' }, { status: 400 }) };
-  const { data: membership } = await session.from('clinic_memberships').select('role').eq('clinic_id', clinicId).eq('user_id', user.id).maybeSingle();
-  if (!membership || !['admin', 'receptionist'].includes(membership.role)) return { response: Response.json({ error: 'No tienes permiso para administrar esta conversación.' }, { status: 403 }) };
+  const { data: membership } = await session.from('clinic_memberships').select('role,permissions').eq('clinic_id', clinicId).eq('user_id', user.id).maybeSingle();
+  if (!membership || !hasClinicPermission(membership.role, membership.permissions, 'whatsapp.manage')) return { response: Response.json({ error: 'No tienes permiso para administrar esta conversación.' }, { status: 403 }) };
   const service = createServiceClient();
   if (!service) return { response: Response.json({ error: 'El servicio de WhatsApp no está disponible.' }, { status: 503 }) };
   return { clinicId, service, payload };

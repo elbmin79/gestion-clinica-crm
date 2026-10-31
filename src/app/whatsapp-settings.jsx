@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Check, CircleAlert, CircleCheck, LoaderCircle, MessageCircle, Pencil, Save, ShieldCheck, Trash2, MessageSquareText, CalendarCheck2 } from 'lucide-react';
 import { loadAvailableWhatsAppSenders, loadClinicWhatsAppSettings, saveClinicWhatsAppSettings } from './whatsapp-settings-actions.js';
+import { hasClinicPermission } from '../lib/clinic-permissions.js';
 
 const initialSettings = {
   providerMode: 'twilio',
@@ -10,7 +11,9 @@ const initialSettings = {
   notifyWhatsAppConfirmations: true,
 };
 
-export default function WhatsAppSettings({ clinicId, role, branches = [], sharedMode }) {
+export default function WhatsAppSettings({ clinicId, role, permissions = {}, branches = [], sharedMode }) {
+  const canView = !sharedMode || hasClinicPermission(role, permissions, 'whatsapp.view');
+  const canManage = !sharedMode || hasClinicPermission(role, permissions, 'whatsapp.manage');
   const [loading, setLoading] = useState(true);
   const [loadingAvailableSenders, setLoadingAvailableSenders] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -55,7 +58,7 @@ export default function WhatsAppSettings({ clinicId, role, branches = [], shared
     setAvailableSenders([]);
     setInboxSender(null);
     setError('');
-    if (!clinicId || !sharedMode || role !== 'admin') {
+    if (!clinicId || !sharedMode || !canView) {
       setLoading(false);
       return () => { active = false; };
     }
@@ -71,6 +74,7 @@ export default function WhatsAppSettings({ clinicId, role, branches = [], shared
     }).catch(() => {
       if (active) { setError('No se pudo cargar la configuración de WhatsApp.'); setLoading(false); }
     });
+    if (!canManage) { setLoadingAvailableSenders(false); return () => { active = false; }; }
     loadAvailableWhatsAppSenders(clinicId).then(result => {
       if (!active) return;
       setInboxSender(result.inboxSender || null);
@@ -81,7 +85,7 @@ export default function WhatsAppSettings({ clinicId, role, branches = [], shared
       if (active) { setInboxSender(null); setSenderLookupError('No se pudieron consultar los números registrados.'); setAvailableSenders([]); setLoadingAvailableSenders(false); }
     });
     return () => { active = false; };
-  }, [clinicId, role, sharedMode]);
+  }, [clinicId, role, permissions, sharedMode, canView, canManage]);
 
   useEffect(() => {
     if (loading || loadingAvailableSenders) return;
@@ -196,8 +200,8 @@ export default function WhatsAppSettings({ clinicId, role, branches = [], shared
   if (!sharedMode || !clinicId) {
     return <div className="whatsapp-settings-content"><header className="whatsapp-page-heading"><h1>WhatsApp</h1><p>Asigna números y elige qué avisos internos recibir en el CRM.</p></header><div className="whatsapp-settings-pending-notice"><ShieldCheck size={18}/><div><strong>Configuración no disponible</strong><span>Conecta una clínica compartida para administrar los números y avisos.</span></div></div></div>;
   }
-  if (role !== 'admin') {
-    return <div className="whatsapp-settings-content"><header className="whatsapp-page-heading"><h1>WhatsApp</h1><p>Asigna números y elige qué avisos internos recibir en el CRM.</p></header><div className="whatsapp-settings-pending-notice"><ShieldCheck size={18}/><div><strong>Configuración solo para administración</strong><span>Una persona administradora de la clínica puede configurar los números y avisos.</span></div></div></div>;
+  if (!canManage) {
+    return <div className="whatsapp-settings-content"><header className="whatsapp-page-heading"><h1>WhatsApp</h1><p>Asigna números y elige qué avisos internos recibir en el CRM.</p></header><div className="whatsapp-settings-pending-notice"><ShieldCheck size={18}/><div><strong>Solo lectura</strong><span>Puedes consultar la configuración; solicita a una persona con permisos que la cambie.</span></div></div></div>;
   }
 
   const validSender = sender => sender.active

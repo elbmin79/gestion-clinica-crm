@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Archive, Check, CircleAlert, Plus, RotateCcw, Search, ShieldCheck, Sparkles } from 'lucide-react';
 import { initialClinicServices, serviceCategories, serviceSetupState } from '../lib/clinic-services';
+import { hasClinicPermission } from '../lib/clinic-permissions.js';
 import { createClinicServicesStore } from '../lib/supabase/clinic-services';
 
 const money = amount => Number(amount).toLocaleString('es-MX', { maximumFractionDigits: 2 });
@@ -13,7 +14,7 @@ const displayOffer = item => {
   return `${item.kind === 'package' ? 'Paquete' : 'Sesión'} · ${amount}${item.sessions ? ` · ${item.sessions} sesiones` : item.kind === 'package' ? ' · sesiones por definir' : ''}`;
 };
 
-export default function ClinicServicesSettings({ clinicId, role, branches = [], providers = [], sharedMode = true, onCatalogChange }) {
+export default function ClinicServicesSettings({ clinicId, role, permissions = {}, branches = [], providers = [], sharedMode = true, onCatalogChange }) {
   const [services, setServices] = useState([]);
   const [status, setStatus] = useState('loading');
   const [error, setError] = useState('');
@@ -23,7 +24,7 @@ export default function ClinicServicesSettings({ clinicId, role, branches = [], 
   const [branchFilter, setBranchFilter] = useState('Todas');
   const [editing, setEditing] = useState(null);
   const [saving, setSaving] = useState(false);
-  const canManage = !sharedMode || role === 'admin';
+  const canManage = !sharedMode || hasClinicPermission(role, permissions, 'team.manage_professionals');
 
   const refresh = async () => {
     if (!sharedMode || !clinicId) { setServices(initialClinicServices); setStatus('ready'); return; }

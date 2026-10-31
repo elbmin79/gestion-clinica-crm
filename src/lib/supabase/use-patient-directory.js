@@ -11,6 +11,7 @@ export function usePatientDirectory(enabled) {
   const [clinicId, setClinicId] = useState('');
   const [memberships, setMemberships] = useState([]);
   const [role, setRole] = useState('');
+  const [permissions, setPermissions] = useState({});
   const [timeZone, setTimeZone] = useState('America/Tijuana');
   const [directory, setDirectory] = useState(emptyDirectory);
   const [status, setStatus] = useState(enabled ? 'loading' : 'idle');
@@ -34,6 +35,7 @@ export function usePatientDirectory(enabled) {
       setClinicId('');
       setMemberships([]);
       setRole('');
+      setPermissions({});
       setTimeZone('America/Tijuana');
       setDirectory(emptyDirectory);
       return;
@@ -48,12 +50,12 @@ export function usePatientDirectory(enabled) {
       const userResult = await client.auth.getUser();
       if (userResult.error || !userResult.data.user) {
         try { window.sessionStorage.removeItem(selectedClinicStorageKey); } catch { /* Ignore unavailable browser storage. */ }
-        if (!cancelled) { setClinicId(''); setMemberships([]); setRole(''); setTimeZone('America/Tijuana'); setDirectory(emptyDirectory); setStatus('signed_out'); }
+        if (!cancelled) { setClinicId(''); setMemberships([]); setRole(''); setPermissions({}); setTimeZone('America/Tijuana'); setDirectory(emptyDirectory); setStatus('signed_out'); }
         return;
       }
 
       const membershipResult = await client.from('clinic_memberships')
-        .select('clinic_id, role')
+        .select('clinic_id, role, permissions')
         .eq('user_id', userResult.data.user.id)
         .order('created_at', { ascending: true });
       if (membershipResult.error) {
@@ -72,7 +74,7 @@ export function usePatientDirectory(enabled) {
         }
         clinicNames = new Map((clinicResult.data || []).map(row => [row.id, row]));
       }
-      const nextMemberships = membershipRows.map(row => ({ clinicId: row.clinic_id, role: row.role, name: clinicNames.get(row.clinic_id)?.name || 'Clínica', timeZone: clinicNames.get(row.clinic_id)?.timezone || 'America/Tijuana' }));
+      const nextMemberships = membershipRows.map(row => ({ clinicId: row.clinic_id, role: row.role, permissions: row.permissions || {}, name: clinicNames.get(row.clinic_id)?.name || 'Clínica', timeZone: clinicNames.get(row.clinic_id)?.timezone || 'America/Tijuana' }));
       if (cancelled) return;
       setMemberships(nextMemberships);
 
@@ -88,33 +90,27 @@ export function usePatientDirectory(enabled) {
 
       if (!nextMemberships.length) {
         try { window.sessionStorage.removeItem(selectedClinicStorageKey); } catch { /* Ignore unavailable browser storage. */ }
-        setClinicId(''); setRole(''); setDirectory(emptyDirectory); setStatus('no_membership');
+        setClinicId(''); setRole(''); setPermissions({}); setDirectory(emptyDirectory); setStatus('no_membership');
         return;
       }
       if (rememberedClinicId && !rememberedMembership) {
         try { window.sessionStorage.removeItem(selectedClinicStorageKey); } catch { /* Ignore unavailable browser storage. */ }
       }
       if (clinicId && !inMemoryMembership && !rememberedMembership && nextMemberships.length > 1) {
-        setClinicId(''); setRole(''); setDirectory(emptyDirectory); setStatus('choose_clinic');
+        setClinicId(''); setRole(''); setPermissions({}); setDirectory(emptyDirectory); setStatus('choose_clinic');
         return;
       }
       if (!activeMembership && nextMemberships.length > 1) {
-        setRole(''); setDirectory(emptyDirectory); setStatus('choose_clinic');
+        setRole(''); setPermissions({}); setDirectory(emptyDirectory); setStatus('choose_clinic');
         return;
       }
       const selected = activeMembership || nextMemberships[0];
       if (clinicId !== selected.clinicId) setClinicId(selected.clinicId);
       try { window.sessionStorage.setItem(selectedClinicStorageKey, selected.clinicId); } catch { /* Session selection remains available in memory. */ }
       setRole(selected.role);
+      setPermissions(selected.permissions || {});
       setTimeZone(selected.timeZone);
-      if (selected.role === 'billing') {
-        // Finance users intentionally do not load the clinical patient directory.
-        // Their access is served by the finance workspace instead.
-        setDirectory(emptyDirectory);
-        setStatus('finance_only');
-        return;
-      }
-      if (!['admin', 'clinician', 'receptionist'].includes(selected.role)) {
+      if (!['admin', 'clinician', 'receptionist', 'billing'].includes(selected.role)) {
         setDirectory(emptyDirectory); setStatus('no_patient_access');
         return;
       }
@@ -132,5 +128,5 @@ export function usePatientDirectory(enabled) {
     return () => { cancelled = true; };
   }, [enabled, clinicId, reloadKey]);
 
-  return { ...directory, clinicId, memberships, role, timeZone, status, refresh, chooseClinic };
+  return { ...directory, clinicId, memberships, role, permissions, timeZone, status, refresh, chooseClinic };
 }

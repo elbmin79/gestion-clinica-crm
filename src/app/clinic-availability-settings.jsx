@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { CalendarOff, Check, CircleAlert, Plus, RotateCcw, Trash2 } from 'lucide-react';
 import { createClinicAvailabilityStore } from '../lib/supabase/clinic-availability';
+import { hasClinicPermission } from '../lib/clinic-permissions.js';
 
 function todayInZone(timeZone) {
   const parts = new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date());
@@ -17,7 +18,7 @@ function formatBlockRange(block, timeZone) {
   return `${date.format(start)} · ${time.format(start)}–${date.format(end) === date.format(start) ? time.format(end) : `${date.format(end)} · ${time.format(end)}`}`;
 }
 
-export default function ClinicAvailabilitySettings({ clinicId, role, branches = [], providers = [], timeZone = 'America/Tijuana', sharedMode = true }) {
+export default function ClinicAvailabilitySettings({ clinicId, role, permissions = {}, branches = [], providers = [], timeZone = 'America/Tijuana', sharedMode = true }) {
   const [data, setData] = useState({ allowProviderOverlaps: false, blocks: [] });
   const [status, setStatus] = useState('loading');
   const [error, setError] = useState('');
@@ -25,8 +26,8 @@ export default function ClinicAvailabilitySettings({ clinicId, role, branches = 
   const [scope, setScope] = useState('clinic');
   const [today, setToday] = useState(() => todayInZone(timeZone));
   const [form, setForm] = useState({ title: '', startDate: '', startTime: '09:00', endDate: '', endTime: '10:00', branchId: '', providerId: '' });
-  const canManageBlocks = ['admin', 'clinician', 'receptionist'].includes(role);
-  const canManageSettings = role === 'admin';
+  const canManageBlocks = !sharedMode || hasClinicPermission(role, permissions, 'agenda.edit');
+  const canManageSettings = !sharedMode || hasClinicPermission(role, permissions, 'settings.manage');
 
   const refresh = async () => {
     if (!sharedMode || !clinicId) { setStatus('unavailable'); return; }
