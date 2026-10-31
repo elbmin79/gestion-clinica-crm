@@ -9,6 +9,11 @@ export async function GET(request){
   if(!/^[\da-f-]{36}$/i.test(clinicId||''))return Response.json({error:'Clínica inválida.'},{status:400});
   const {data,error}=await client.from('clinic_memberships').select('user_id').eq('clinic_id',clinicId).eq('user_id',user.id).maybeSingle();
   if(error||!data)return Response.json({error:'Acceso no permitido.'},{status:403});
-  const captchaConfigured=Boolean(process.env.TURNSTILE_SITE_KEY&&process.env.TURNSTILE_SECRET_KEY);
-  return Response.json({configured:agendaSecret().length>=32&&Boolean(createServiceClient())&&(process.env.NODE_ENV!=='production'||captchaConfigured),captchaConfigured,requiresCaptcha:process.env.NODE_ENV==='production'},{headers:{'Cache-Control':'no-store'}});
+  const secretConfigured=agendaSecret().length>=32;
+  const databaseConfigured=Boolean(createServiceClient());
+  const captchaSiteConfigured=Boolean(process.env.TURNSTILE_SITE_KEY);
+  const captchaSecretConfigured=Boolean(process.env.TURNSTILE_SECRET_KEY);
+  const requiresCaptcha=process.env.NODE_ENV==='production';
+  const captchaConfigured=captchaSiteConfigured&&captchaSecretConfigured;
+  return Response.json({configured:secretConfigured&&databaseConfigured&&(!requiresCaptcha||captchaConfigured),secretConfigured,databaseConfigured,captchaConfigured,captchaSiteConfigured,captchaSecretConfigured,requiresCaptcha},{headers:{'Cache-Control':'no-store'}});
 }

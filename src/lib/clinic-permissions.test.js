@@ -32,14 +32,14 @@ test('configuration stays visible to all; write permissions are granular', () =>
 });
 
 test('availability scope grants only its selected level', () => {
-  for (const [role, scope] of [['clinician', 'self'], ['receptionist', 'branch'], ['admin', 'clinic'], ['billing', 'none']]) {
+  for (const [role, scope] of [['clinician', 'self'], ['receptionist', 'branch'], ['admin', 'clinic'], ['billing', 'self']]) {
     const permissions = permissionsForPreset(role);
     assert.equal(permissions['availability.scope'], scope);
     assert.equal(hasClinicPermission(role, permissions, 'availability.manage_clinic'), scope === 'clinic');
     assert.equal(hasClinicPermission(role, permissions, 'availability.manage_branch'), ['clinic', 'branch'].includes(scope));
     assert.equal(hasClinicPermission(role, permissions, 'availability.manage_self'), ['clinic', 'self'].includes(scope));
   }
-  assert.equal(sanitizeClinicPermissions({ 'availability.scope': 'unexpected' }, 'clinician')['availability.scope'], 'none');
+  assert.equal(sanitizeClinicPermissions({ 'availability.scope': 'none' }, 'clinician')['availability.scope'], 'self');
 });
 
 test('administrator permissions are always complete and cannot be narrowed by supplied values', () => {

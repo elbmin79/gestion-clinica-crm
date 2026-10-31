@@ -52,7 +52,7 @@ const presetActions = {
 export function permissionsForPreset(role) {
   const permissions = Object.fromEntries(universalReadPermissions.map(permission => [permission, true]));
   for (const permission of presetActions[role] || []) permissions[permission] = true;
-  permissions['availability.scope'] = ({ admin: 'clinic', receptionist: 'branch', clinician: 'self', billing: 'none' })[role] || 'none';
+  permissions['availability.scope'] = ({ admin: 'clinic', receptionist: 'branch', clinician: 'self', billing: 'self' })[role] || 'self';
   if (role === 'admin') {
     permissions['services.manage'] = true;
     permissions['public_agenda.manage'] = true;
@@ -62,7 +62,12 @@ export function permissionsForPreset(role) {
 
 export function normalizeClinicPermissions(value, role = '') {
   const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
-  return { ...permissionsForPreset(role), ...source };
+  const permissions = { ...permissionsForPreset(role), ...source };
+  const scope = permissions['availability.scope'];
+  permissions['availability.scope'] = role === 'admin'
+    ? 'clinic'
+    : ['self', 'branch', 'clinic'].includes(scope) ? scope : 'self';
+  return permissions;
 }
 
 export function hasClinicPermission(role, permissions, permission) {
@@ -86,8 +91,7 @@ export function sanitizeClinicPermissions(value, role) {
   const normalized = normalizeClinicPermissions(value, role);
   return Object.fromEntries(CLINIC_PERMISSION_KEYS.map(permission => {
     if (permission === 'availability.scope') {
-      const scope = role === 'admin' ? 'clinic' : normalized[permission];
-      return [permission, ['none', 'self', 'branch', 'clinic'].includes(scope) ? scope : 'none'];
+      return [permission, normalized[permission]];
     }
     return [permission, role === 'admin' ? true : normalized[permission] === true];
   }));

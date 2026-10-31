@@ -58,7 +58,7 @@ export default function PublicAgendaSettings({clinicId,clinicName,role,permissio
   async function save(event){
     event.preventDefault();if(busy)return;setBusy('save');setError('');setNotice('');
     try{
-      if(settings.published&&!readiness.configured)throw new Error('La publicación no está lista en este servidor. Configura la clave de formularios y la verificación antispam.');
+      if(settings.published&&!readiness.configured)throw new Error('El servidor todavía no está configurado para recibir solicitudes públicas. Revisa el aviso de configuración de esta página.');
       if(new Set(offers.map(o=>`${o.service_id}:${o.branch_id}:${o.provider_id}`)).size!==offers.length)throw new Error('No repitas la misma combinación de servicio, sucursal y profesional.');
       const {error}=await createClient().rpc('save_public_agenda',{p_clinic:clinicId,p_settings:settings,p_offers:offers.map(({saved,...offer})=>offer),p_hours:hours});
       if(error)throw new Error(error.message.includes('duplicate key')?'El enlace o una combinación de servicio, sucursal y profesional ya existe.':error.message);
@@ -83,12 +83,48 @@ export default function PublicAgendaSettings({clinicId,clinicName,role,permissio
   }
   if(!canRead)return <div className="settings-preview-content"><div className="settings-preview-banner"><CalendarDays size={17}/><div><strong>Agenda pública de la clínica</strong><span>{sharedMode?'Administración y recepción pueden revisar solicitudes. Solo administración configura la página.':'Conecta una clínica compartida para configurar horarios y recibir solicitudes reales.'}</span></div></div></div>;
   const dateText=value=>new Intl.DateTimeFormat('es-MX',{timeZone:timeZone||'America/Tijuana',dateStyle:'medium',timeStyle:'short'}).format(new Date(value));
+  if(!canManage){
+    const formatDate=value=>new Intl.DateTimeFormat('es-MX',{timeZone:timeZone||'America/Tijuana',dateStyle:'medium'}).format(new Date(`${value}T12:00:00`));
+    const selectedRequests=requests;
+    return <div className="public-agenda-settings public-agenda-read-only" aria-busy={status==='loading'}>
+      <div className="settings-preview-banner"><CalendarDays size={17}/><div><strong>Agenda pública · Solo lectura</strong><span>Puedes consultar la configuración y las solicitudes. No tienes acceso para hacer cambios.</span></div></div>
+      {error&&<p className="professional-error" role="alert"><CircleAlert size={15}/>{error}</p>}
+      {status==='loading'&&<p className="public-agenda-hint" role="status">Cargando agenda pública…</p>}
+      {status==='error'&&<p className="professional-error" role="status"><CircleAlert size={15}/>No se pudo cargar la agenda pública.</p>}
+      {status==='ready'&&<>
+        {settings.published&&!readiness.configured&&<p className="professional-error" role="status"><CircleAlert size={15}/>La agenda figura como publicada, pero el servidor no puede recibir solicitudes ahora. El equipo administrador debe revisar la configuración del servidor.</p>}
+        <section className="public-agenda-section">
+          <div className="google-calendar-section-heading"><div><strong>Página de reservas</strong><span>Configuración vigente</span></div><span className={`public-agenda-read-status${settings.published&&readiness.configured?' is-available':''}`}>{settings.published?(readiness.configured?'Disponible':'No disponible'):'No publicada'}</span></div>
+          <dl className="public-agenda-read-grid">
+            <div><dt>Enlace público</dt><dd>/reservar/{settings.slug||'—'}</dd></div>
+            <div><dt>Anticipación mínima</dt><dd>{settings.min_notice_minutes} min</dd></div>
+            <div><dt>Días por adelantado</dt><dd>{settings.max_days}</dd></div>
+            <div><dt>Separación entre citas</dt><dd>{settings.buffer_minutes} min</dd></div>
+            <div><dt>Correo obligatorio</dt><dd>{settings.require_email?'Sí':'No'}</dd></div>
+            <div><dt>Zona horaria</dt><dd>{timeZone||'America/Tijuana'}</dd></div>
+          </dl>
+        </section>
+        <section className="public-agenda-section">
+          <div className="google-calendar-section-heading"><div><strong>Servicios, profesionales y sucursales visibles</strong><span>{offers.length} {offers.length===1?'opción':'opciones'}</span></div></div>
+          {offers.length?offers.map((offer,index)=><div className="public-agenda-read-row" key={offer.id}><strong>{services.find(service=>service.id===offer.service_id)?.name||`Servicio ${index+1}`}</strong><span>{branchName(offer.branch_id)} · {providerName(offer.provider_id)}</span><span>{offer.duration_minutes} min · Anticipo {Number(offer.deposit_amount).toFixed(2)} MXN</span></div>):<p className="public-agenda-hint">No hay servicios configurados para la página pública.</p>}
+        </section>
+        <section className="public-agenda-section">
+          <div className="google-calendar-section-heading"><div><strong>Horarios para pacientes</strong><span>Los bloqueos de disponibilidad y las citas existentes se respetan.</span></div></div>
+          {hours.length?hours.map(hour=><div className="public-agenda-read-row" key={hour.id}><strong>{hour.on_date?formatDate(hour.on_date):days[hour.day_of_week]||'Horario'}</strong><span>{branchName(hour.branch_id)} · {providerName(hour.provider_id)}</span><span>{hour.closed?'Cerrado':`${minuteText(hour.opens_minute)}–${minuteText(hour.closes_minute)}`}</span></div>):<p className="public-agenda-hint">No hay horarios configurados.</p>}
+        </section>
+        <section className="public-agenda-requests" aria-labelledby="public-requests-title"><div className="google-calendar-section-heading"><div><strong id="public-requests-title">Solicitudes de pacientes</strong><span>Últimas {selectedRequests.length} solicitudes</span></div></div>
+          {selectedRequests.map(request=><article className="public-agenda-request" key={request.id}><div><strong>{request.full_name}</strong><span>{request.service_name} · {dateText(request.starts_at)}</span><span>{request.phone}{request.email?` · ${request.email}`:''}</span><span>Anticipo requerido: {Number(request.deposit_amount).toFixed(2)} MXN · Folio {request.id.slice(0,8)}</span></div><span className="settings-option-status">{request.status==='pending'?'Por revisar':request.status==='approved'?'Aprobada':'Rechazada'}</span>{request.appointment_id&&<a className="text-link" href={`/agenda?clinic=${clinicId}&appointment=${request.appointment_id}`}>Ver cita en agenda</a>}</article>)}
+          {!selectedRequests.length&&<p className="public-agenda-hint">No hay solicitudes de pacientes.</p>}
+        </section>
+      </>}
+    </div>;
+  }
   return <div className="public-agenda-settings" aria-busy={Boolean(busy)||status==='loading'}>
     <div className="settings-preview-banner"><CalendarDays size={17}/><div><strong>Solicitudes con revisión del equipo</strong><span>La página muestra horarios disponibles. Enviar una solicitud no reserva el espacio ni confirma una cita. La aprobación vuelve a comprobar el horario.</span></div></div>
     {error&&<p className="professional-error" role="alert"><CircleAlert size={15}/>{error}</p>}
     {notice&&<p className="form-note" role="status"><CheckCircle2 size={15}/>{notice}</p>}
     {status==='loading'&&<p className="public-agenda-hint" role="status">Cargando agenda pública…</p>}
-    {status==='ready'&&!readiness.configured&&<p className="professional-error" role="status"><CircleAlert size={15}/> La publicación no está disponible en este servidor. Puedes guardar un borrador; falta configurar la clave de formularios o la verificación antispam.</p>}
+    {status==='ready'&&!readiness.configured&&<p className="professional-error" role="status"><CircleAlert size={15}/>La agenda no puede recibir solicitudes en este despliegue. Configuración faltante: {[!readiness.secretConfigured&&'PUBLIC_BOOKING_SECRET (mínimo 32 caracteres)',!readiness.databaseConfigured&&'SUPABASE_SERVICE_ROLE_KEY',readiness.requiresCaptcha&&!readiness.captchaSiteConfigured&&'TURNSTILE_SITE_KEY',readiness.requiresCaptcha&&!readiness.captchaSecretConfigured&&'TURNSTILE_SECRET_KEY'].filter(Boolean).join(', ')}.</p>}
     {status==='error'&&<button className="button secondary compact" type="button" onClick={load}><RefreshCw size={14}/> Reintentar</button>}
     <form onSubmit={save}>
       <fieldset className="public-agenda-fields" disabled={!canManage||status!=='ready'||Boolean(busy)}>

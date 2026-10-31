@@ -13,7 +13,7 @@ function validPermissionPayload(value) {
   return value && typeof value === 'object' && !Array.isArray(value)
     && Object.keys(value).every(key => CLINIC_PERMISSION_KEYS.includes(key))
     && Object.entries(value).every(([key, item]) => key === 'availability.scope'
-      ? ['none', 'self', 'branch', 'clinic'].includes(item)
+      ? ['self', 'branch', 'clinic'].includes(item)
       : typeof item === 'boolean');
 }
 

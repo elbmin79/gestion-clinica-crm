@@ -6,6 +6,7 @@ import { PGlite } from '@electric-sql/pglite';
 const migrationUrl = new URL('../../../supabase/migrations/20261031074344_custom_clinic_permissions.sql', import.meta.url);
 const scopeMigrationUrl = new URL('../../../supabase/migrations/20261031082243_permissions_and_settings_scopes.sql', import.meta.url);
 const availabilityGuardMigrationUrl = new URL('../../../supabase/migrations/20261031082429_availability_scope_update_guard.sql', import.meta.url);
+const minimumAvailabilityScopeMigrationUrl = new URL('../../../supabase/migrations/20261031084717_availability_scope_minimum_self.sql', import.meta.url);
 const clinicTables = [
   'appointment_confirmation_requests','appointment_reminders','appointments','botox_treatment_records',
   'branches','businesses','clinic_availability_blocks','clinic_availability_settings','clinic_providers','provider_branches',
@@ -21,6 +22,7 @@ async function setupDatabase() {
   const migration = await readFile(migrationUrl, 'utf8');
   const scopeMigration = await readFile(scopeMigrationUrl, 'utf8');
   const availabilityGuardMigration = await readFile(availabilityGuardMigrationUrl, 'utf8');
+  const minimumAvailabilityScopeMigration = await readFile(minimumAvailabilityScopeMigrationUrl, 'utf8');
   const tableSql = clinicTables.map(table => {
     const whatsapp = table.startsWith('clinic_whatsapp_');
     const roleScoped = ['patients', 'appointments'].includes(table)
@@ -52,6 +54,7 @@ async function setupDatabase() {
     ${migration}
     ${scopeMigration}
     ${availabilityGuardMigration}
+    ${minimumAvailabilityScopeMigration}
   `);
   return db;
 }
