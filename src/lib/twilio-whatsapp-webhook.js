@@ -1,6 +1,7 @@
 import twilio from 'twilio';
 import { actionFromWhatsAppMessage } from './whatsapp-confirmation.js';
 import { resolveInboundTwilioWhatsAppSender } from './whatsapp/clinic-routing.js';
+import { downloadTwilioWhatsAppMedia, getWhatsAppMediaType, WHATSAPP_MEDIA_BUCKET } from './whatsapp/media.server.js';
 
 const webhookPath = '/api/webhooks/twilio/whatsapp';
 
@@ -66,7 +67,8 @@ export function createTwilioWhatsAppWebhookHandler({
       if (clinicId) route = { clinicId, branchId: null };
     }
     if (!route?.clinicId) return emptyTwiML();
-    const messageBody = String(params.Body || '').trim() || `[${Number(params.NumMedia || 0) || 1} archivo multimedia]`;
+    const mediaCount = Number(params.NumMedia || 0) || 0;
+    const inboundBody = String(params.Body || '').trim();
     const contactName = String(params.ProfileName || '').trim().slice(0, 120);
     const { data: conversation, error: conversationError } = await client
       .from('clinic_whatsapp_conversations')
@@ -74,7 +76,31 @@ export function createTwilioWhatsAppWebhookHandler({
       .select('id')
       .single();
     if (conversationError || !conversation) return Response.json({ error: 'Could not save inbound WhatsApp conversation.' }, { status: 503 });
-    const { error: messageError } = await client.from('clinic_whatsapp_messages').upsert({ clinic_id: route.clinicId, conversation_id: conversation.id, direction: 'inbound', body: messageBody, twilio_message_sid: messageSid, delivery_status: 'received' }, { onConflict: 'twilio_message_sid', ignoreDuplicates: true });
+    const contentType = String(params.MediaContentType0 || '').split(';')[0].trim().toLowerCase();
+    const mediaType = mediaCount > 0 ? getWhatsAppMediaType(contentType) : null;
+    let media = null;
+    let mediaPath = null;
+    if (mediaType && params.MediaUrl0) {
+      try {
+        media = await downloadTwilioWhatsAppMedia({ mediaUrl: params.MediaUrl0, contentType, accountSid, authToken, messageSid });
+        mediaPath = `${route.clinicId}/${conversation.id}/${messageSid}.${media.extension}`;
+        const { error: uploadError } = await client.storage.from(WHATSAPP_MEDIA_BUCKET).upload(mediaPath, media.bytes, { contentType: media.contentType, cacheControl: '0', upsert: true });
+        if (uploadError) return Response.json({ error: 'Could not store inbound WhatsApp media.' }, { status: 503 });
+      } catch {
+        return Response.json({ error: 'Could not retrieve inbound WhatsApp media.' }, { status: 503 });
+      }
+    }
+    const hasLocation = Boolean(params.Latitude && params.Longitude);
+    const messageBody = inboundBody || (mediaPath ? '' : hasLocation ? 'Ubicación compartida (vista previa aún no disponible).' : mediaCount ? 'Archivo multimedia no compatible con esta bandeja.' : 'Mensaje sin texto.');
+    const { error: messageError } = await client.from('clinic_whatsapp_messages').upsert({
+      clinic_id: route.clinicId,
+      conversation_id: conversation.id,
+      direction: 'inbound',
+      body: messageBody,
+      twilio_message_sid: messageSid,
+      delivery_status: 'received',
+      ...(mediaPath ? { media_object_path: mediaPath, media_content_type: media.contentType, media_filename: `${media.kind}-${messageSid.slice(-6)}.${media.extension}`, media_size_bytes: media.size } : {}),
+    }, { onConflict: 'twilio_message_sid', ignoreDuplicates: true });
     if (messageError) return Response.json({ error: 'Could not save inbound WhatsApp message.' }, { status: 503 });
     if (action) {
       const result = await client.rpc('apply_appointment_confirmation_reply_v2', {
