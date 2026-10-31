@@ -82,11 +82,12 @@ export default function ClinicServicesSettings({ clinicId, role, permissions = {
     <div className="clinic-services-table-wrap"><table className="clinic-services-table"><thead><tr><th>Servicio</th><th>Duración</th><th>Precios y paquetes</th><th>Disponibilidad</th><th>Estado de configuración</th><th><span className="sr-only">Acciones</span></th></tr></thead><tbody>
       {filtered.map(item=>{
         const ready=readyForAgenda(item);
+        const serviceStateClass=item.active===false?'is-inactive':ready?'is-ready':'is-pending';
         return <tr key={item.id||item.code}><td><strong>{item.name}</strong><span>{item.category}{item.source?` · ${item.source}`:''}</span>{item.notes&&<small>{item.notes}</small>}</td>
           <td>{item.durationMin?`${item.durationMin}${item.durationMax&&item.durationMax!==item.durationMin?`–${item.durationMax}`:''} min`:'Por definir'}</td>
           <td>{item.offers?.length?item.offers.map((entry,index)=><span className="clinic-service-offer" key={`${entry.kind}-${index}`}>{displayOffer(entry)}</span>):<span>Por cotizar</span>}</td>
           <td>{item.branchIds?.length?item.branchIds.map(id=>branches.find(branch=>branch.id===id)?.name).filter(Boolean).join(', '):'Todas las sucursales'}<small>{item.providerIds?.length?`${item.providerIds.length} profesionales elegibles`:'Todos los profesionales de cada sucursal'}</small></td>
-          <td><span className={`clinic-service-state${ready?' is-ready':''}`}>{item.active===false?'Inactivo':ready?'Listo para agendar':'Datos pendientes'}</span></td>
+          <td><span className={`clinic-service-state ${serviceStateClass}`}>{item.active===false?'Inactivo':ready?'Listo para agendar':'Datos pendientes'}</span></td>
           <td><div className="clinic-service-actions">{canManage&&<><button className="button outline compact" onClick={()=>setEditing(item)}>Editar</button><button className="icon-button" title={item.active===false?'Reactivar servicio':'Archivar servicio'} aria-label={item.active===false?'Reactivar servicio':'Archivar servicio'} onClick={()=>persist({ ...item, active:item.active===false })}>{item.active===false?<RotateCcw size={15}/>:<Archive size={15}/>}</button></>}</div></td>
         </tr>;
       })}

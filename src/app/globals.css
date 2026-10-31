@@ -934,13 +934,18 @@ html[data-theme="dark"] .settings-tabs-viewport{--settings-scroll-track:#302430;
 .clinic-services-table-wrap{max-width:100%;overflow:auto}
 .clinic-services-scroll-hint{display:none;margin:9px 0;color:var(--muted);font-size:11px}
 .clinic-services-table{width:100%;border-collapse:collapse;text-align:left;font-size:12px}
-.clinic-services-table th{padding:11px 9px;border-bottom:1px solid var(--line);color:var(--muted);font-size:10px;font-weight:800;white-space:nowrap}
+.clinic-services-table thead th{padding:11px 9px;border-bottom:1px solid #e6cbd8;background:#f2e4eb;color:#624453;font-size:10px;font-weight:800;white-space:nowrap}
 .clinic-services-table td{min-width:100px;padding:12px 9px;border-bottom:1px solid var(--line);color:var(--ink);vertical-align:top}
 .clinic-services-table td:first-child{min-width:195px}.clinic-services-table td:nth-child(3){min-width:190px}.clinic-services-table td:nth-child(4){min-width:145px}
 .clinic-services-table td strong,.clinic-services-table td>span,.clinic-services-table td small{display:block}
 .clinic-services-table td strong{font-size:12px;font-weight:750;line-height:1.4}.clinic-services-table td>span,.clinic-services-table td small{margin-top:3px;color:var(--muted);font-size:11px;line-height:1.45}
-.clinic-services-table .clinic-service-offer{margin-top:3px}.clinic-service-state{max-width:175px;padding:5px 8px;border:1px solid #d8c4a1;border-radius:5px;background:#fbf3e5;color:#765118!important;font-size:10px!important;font-weight:750}
-.clinic-service-state.is-ready{border-color:#bdd5c5;background:#eaf3ed;color:#315d40!important}
+.clinic-services-table .clinic-service-offer{margin-top:3px}.clinic-service-state{display:inline-flex!important;align-items:center;max-width:175px;padding:5px 8px;border:1px solid #b98244;border-radius:5px;background:#fbefd9;color:#68400e!important;font-size:10px!important;font-weight:800;line-height:1.3}
+.clinic-service-state.is-ready{border-color:#5f9472;background:#e1f0e5;color:#245336!important}
+.clinic-service-state.is-inactive{border-color:#9b8396;background:#eee6ed;color:#594452!important}
+html[data-theme="dark"] .clinic-services-table thead th{border-color:#59404f;background:#352631;color:#e4b6ca}
+html[data-theme="dark"] .clinic-service-state.is-pending{border-color:#967044;background:#463522;color:#f2cb88!important}
+html[data-theme="dark"] .clinic-service-state.is-ready{border-color:#52795f;background:#283b30;color:#bfe3c9!important}
+html[data-theme="dark"] .clinic-service-state.is-inactive{border-color:#695365;background:#352a37;color:#d5c3d2!important}
 .clinic-service-actions{display:flex;align-items:center;gap:5px}.clinic-service-actions .icon-button{width:31px;height:31px}
 .clinic-service-editor{display:flex;flex-direction:column;gap:12px;margin:15px 0;padding:16px;border:1px solid var(--line);border-radius:8px;background:var(--paper)}
 .clinic-service-editor-heading,.clinic-service-editor-actions{display:flex;align-items:center;justify-content:space-between;gap:12px}.clinic-service-editor-heading h3{margin:0;color:var(--ink);font-size:15px}.clinic-service-editor-heading p,.clinic-service-editor-actions>span{margin:4px 0 0;color:var(--muted);font-size:11px;line-height:1.45}
