@@ -24,8 +24,9 @@ export async function POST(request) {
   if (!membership || !['admin', 'receptionist'].includes(membership.role)) return Response.json({ error: 'No tienes permiso para adjuntar archivos en esta clínica.' }, { status: 403 });
   const service = createServiceClient();
   if (!service) return Response.json({ error: 'El servicio de archivos no está disponible.' }, { status: 503 });
-  const { data: conversation } = await service.from('clinic_whatsapp_conversations').select('id,last_inbound_at').eq('clinic_id', clinicId).eq('id', conversationId).maybeSingle();
+  const { data: conversation } = await service.from('clinic_whatsapp_conversations').select('id,last_inbound_at,blocked_at').eq('clinic_id', clinicId).eq('id', conversationId).maybeSingle();
   if (!conversation) return Response.json({ error: 'No se encontró la conversación.' }, { status: 404 });
+  if (conversation.blocked_at) return Response.json({ error: 'Este contacto está bloqueado en el CRM. Desbloquéalo antes de responder.' }, { status: 409 });
   const inboundAt = Date.parse(conversation.last_inbound_at || '');
   if (!Number.isFinite(inboundAt) || Date.now() - inboundAt > 24 * 60 * 60 * 1000) {
     return Response.json({ error: 'La ventana para responder terminó. Espera un nuevo mensaje del contacto.' }, { status: 409 });

@@ -528,6 +528,7 @@ create trigger audit_activities after insert on public.patient_activities
   for each row execute function private.capture_audit_event();
 -- <<< END 20261028221430_202610260001_clinic_crm
 
+
 -- >>> BEGIN 20261028221433_202610260002_finance_workspace
 -- Minimal finance workspace access for admin, receptionist, and billing roles.
 -- Patient identity is limited to the fields required to reconcile payments.
@@ -627,6 +628,7 @@ create trigger payments_validate_refund
   for each row execute function private.validate_payment_refund();
 -- <<< END 20261028221433_202610260002_finance_workspace
 
+
 -- >>> BEGIN 20261028221436_202610260003_appointment_deposits
 -- Clinic-configured booking deposits must be received before confirmation.
 alter table public.appointments
@@ -681,6 +683,7 @@ create trigger appointments_require_deposit_before_confirmation
   before insert or update of status, deposit_required, deposit_amount on public.appointments
   for each row execute function private.enforce_appointment_deposit();
 -- <<< END 20261028221436_202610260003_appointment_deposits
+
 
 -- >>> BEGIN 20261028221438_202610260004_appointment_reminders
 -- Durable schedule for the clinic's three appointment messages. Delivery is
@@ -841,6 +844,7 @@ $$;
 revoke all on function public.get_appointment_reminders(uuid, timestamptz, timestamptz) from public, anon;
 grant execute on function public.get_appointment_reminders(uuid, timestamptz, timestamptz) to authenticated;
 -- <<< END 20261028221438_202610260004_appointment_reminders
+
 
 -- >>> BEGIN 20261028221441_202610260005_reschedule_appointment_reminders
 -- Keep a new reminder set when a confirmed appointment is rescheduled or
@@ -1011,6 +1015,7 @@ revoke all on function public.get_appointment_reminders(uuid, timestamptz, times
 grant execute on function public.get_appointment_reminders(uuid, timestamptz, timestamptz) to authenticated;
 -- <<< END 20261028221441_202610260005_reschedule_appointment_reminders
 
+
 -- >>> BEGIN 20261028221447_202610260006_document_template_versioning
 -- Keep one active version per clinic, document type, and normalized title.
 with ranked_active_templates as (
@@ -1114,6 +1119,7 @@ revoke all on function public.save_clinic_document_template(uuid, text, text, te
 grant execute on function public.save_clinic_document_template(uuid, text, text, text, text) to authenticated;
 -- <<< END 20261028221447_202610260006_document_template_versioning
 
+
 -- >>> BEGIN 20261028221449_202610260007_diagnosis_contract_consistency
 -- A patient can have only one currently accepted diagnosis. Keep earlier
 -- accepted records as superseded history rather than deleting them.
@@ -1214,6 +1220,7 @@ $$;
 revoke all on function public.accept_patient_diagnosis(uuid, uuid, text) from public, anon;
 grant execute on function public.accept_patient_diagnosis(uuid, uuid, text) to authenticated;
 -- <<< END 20261028221449_202610260007_diagnosis_contract_consistency
+
 
 -- >>> BEGIN 20261028221452_202610260008_payment_deposit_consistency
 -- Serialize appointment confirmation and refund checks for the same patient.
@@ -1318,6 +1325,7 @@ $$;
 revoke all on function private.validate_payment_refund() from public, anon, authenticated;
 -- <<< END 20261028221452_202610260008_payment_deposit_consistency
 
+
 -- >>> BEGIN 20261028221455_202610260009_appointment_schedule_bounds
 -- Keep shared bookings inside the day view's 06:00–00:00 schedule and on
 -- quarter-hour starts, using the clinic's timezone rather than the server's.
@@ -1374,6 +1382,7 @@ create trigger appointments_enforce_schedule_bounds
   before insert or update of clinic_id, starts_at, ends_at, status on public.appointments
   for each row execute function private.enforce_appointment_schedule_bounds();
 -- <<< END 20261028221455_202610260009_appointment_schedule_bounds
+
 
 -- >>> BEGIN 20261028221458_202610260010_patient_whatsapp_consent
 -- Reminder delivery must never infer WhatsApp consent from clinical consent.
@@ -1520,6 +1529,7 @@ revoke all on function public.update_patient_directory_record(uuid, uuid, text, 
 grant execute on function public.update_patient_directory_record(uuid, uuid, text, text, text, text, uuid, uuid, text, boolean, text) to authenticated;
 -- <<< END 20261028221458_202610260010_patient_whatsapp_consent
 
+
 -- >>> BEGIN 20261028221505_202610260011_reminder_delivery_eligibility
 -- Expose delivery eligibility without returning contact details to the queue UI.
 drop function public.get_appointment_reminders(uuid, timestamptz, timestamptz);
@@ -1595,6 +1605,7 @@ $$;
 revoke all on function public.get_appointment_reminders(uuid, timestamptz, timestamptz) from public, anon;
 grant execute on function public.get_appointment_reminders(uuid, timestamptz, timestamptz) to authenticated;
 -- <<< END 20261028221505_202610260011_reminder_delivery_eligibility
+
 
 -- >>> BEGIN 20261028221508_202610260012_patient_document_preparation
 -- Clients may only create documents through the atomic preparation RPC.
@@ -1712,6 +1723,7 @@ $$;
 revoke all on function public.prepare_patient_document(uuid, uuid, uuid, text, text) from public, anon;
 grant execute on function public.prepare_patient_document(uuid, uuid, uuid, text, text) to authenticated;
 -- <<< END 20261028221508_202610260012_patient_document_preparation
+
 
 -- >>> BEGIN 20261028221512_202610260013_whatsapp_reminder_dispatch
 -- Server-side WhatsApp delivery. This migration creates no credentials and
@@ -2086,11 +2098,13 @@ end;
 $$;
 -- <<< END 20261028221512_202610260013_whatsapp_reminder_dispatch
 
+
 -- >>> BEGIN 20261028221515_202610260014_preserve_patient_appointment_history
 -- Staff workflows deactivate patients and cancel appointments; they do not
 -- hard-delete clinical or scheduling records from a browser session.
 revoke delete on public.patients, public.appointments from public, anon, authenticated;
 -- <<< END 20261028221515_202610260014_preserve_patient_appointment_history
+
 
 -- >>> BEGIN 20261028221517_202610260015_protect_confirmed_deposits_from_patient_refunds
 -- A patient-level refund has no appointment association, so it must not be
@@ -2169,12 +2183,14 @@ $$;
 revoke all on function private.validate_payment_refund() from public, anon, authenticated;
 -- <<< END 20261028221517_202610260015_protect_confirmed_deposits_from_patient_refunds
 
+
 -- >>> BEGIN 20261028221523_202610260016_align_clinic_timezone_default
 -- Keep new clinic records aligned with the clinic's Tijuana UI and reminder
 -- defaults. Existing clinics retain their explicitly stored timezone.
 alter table public.clinics
   alter column timezone set default 'America/Tijuana';
 -- <<< END 20261028221523_202610260016_align_clinic_timezone_default
+
 
 -- >>> BEGIN 20261028221526_202610260017_include_deposit_reserves_in_finance_appointments
 -- Finance-only appointment lookups must include deposit fields so refund
@@ -2220,6 +2236,7 @@ $$;
 revoke all on function public.get_finance_appointments(uuid, timestamptz, timestamptz, uuid[]) from public, anon;
 grant execute on function public.get_finance_appointments(uuid, timestamptz, timestamptz, uuid[]) to authenticated;
 -- <<< END 20261028221526_202610260017_include_deposit_reserves_in_finance_appointments
+
 
 -- >>> BEGIN 20261028221529_202610270001_patient_encounters_and_files
 -- Structured clinical encounters and patient-linked copies of signed documents.
@@ -2294,6 +2311,7 @@ create policy patient_record_files_insert on storage.objects for insert to authe
     and (storage.foldername(name))[2] is not null
   );
 -- <<< END 20261028221529_202610270001_patient_encounters_and_files
+
 
 -- >>> BEGIN 20261028221533_202610270002_appointment_confirmation_responses
 -- Two-way appointment confirmation requests. No outbound message is sent by
@@ -2526,6 +2544,7 @@ select a.clinic_id,a.id,a.reminder_schedule_version,greatest(a.starts_at-interva
 on conflict(appointment_id,schedule_version) do nothing;
 -- <<< END 20261028221533_202610270002_appointment_confirmation_responses
 
+
 -- >>> BEGIN 20261028221536_202610270003_botox_treatment_records
 -- Separate, clinician-only audit trail for Botox treatment sessions.
 create table public.botox_treatment_records (
@@ -2567,6 +2586,7 @@ create policy botox_records_clinician_insert on public.botox_treatment_records
   );
 -- <<< END 20261028221536_202610270003_botox_treatment_records
 
+
 -- >>> BEGIN 20261028221549_202610270004_botox_consent_links
 -- Tie a Botox treatment record to the signed consent record or uploaded copy.
 alter table public.patient_documents
@@ -2587,11 +2607,13 @@ alter table public.botox_treatment_records
     references public.patient_document_files(id, patient_id, clinic_id) on delete restrict;
 -- <<< END 20261028221549_202610270004_botox_consent_links
 
+
 -- >>> BEGIN 20261028234726_enable_rls_appointment_confirmation_replies
 -- Defense in depth for the service-role-only inbound confirmation table.
 -- Client roles have no table grants; service_role bypasses RLS.
 alter table public.appointment_confirmation_replies enable row level security;
 -- <<< END 20261028234726_enable_rls_appointment_confirmation_replies
+
 
 -- >>> BEGIN 20261029000507_branch_contact_and_hours
 alter table public.branches
@@ -2633,6 +2655,7 @@ set address = 'Avenida General Ignacio Zaragoza 1747 Col. Nueva 21100, Mexicali,
     hours = 'Lunes a sábados de 9:00 am a 7:00 pm'
 where name = 'Zaragoza - Florezen';
 -- <<< END 20261029000507_branch_contact_and_hours
+
 
 -- >>> BEGIN 20261029040726_clinic_business_areas
 -- Split the two clinic brands out of their encoded branch names so the CRM
@@ -2705,6 +2728,7 @@ alter table public.appointments
 commit;
 -- <<< END 20261029040726_clinic_business_areas
 
+
 -- >>> BEGIN 20261029050010_profile_avatars
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 values (
@@ -2741,6 +2765,7 @@ using (
   and (storage.foldername(name))[1] = (select auth.uid()::text)
 );
 -- <<< END 20261029050010_profile_avatars
+
 
 -- >>> BEGIN 20261029050539_profile_signatures
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
@@ -2779,6 +2804,7 @@ using (
 );
 -- <<< END 20261029050539_profile_signatures
 
+
 -- >>> BEGIN 20261029064027_admin_clinic_membership_insert
 -- Let clinic admins grant an existing account access to their clinic.
 -- Membership changes keep RLS and the membership audit trigger in effect.
@@ -2788,6 +2814,7 @@ create policy memberships_admin_insert on public.clinic_memberships
   for insert to authenticated
   with check ((select private.has_clinic_access(clinic_id, array['admin'])));
 -- <<< END 20261029064027_admin_clinic_membership_insert
+
 
 -- >>> BEGIN 20261029080207_admin_manage_clinic_memberships
 -- Allow clinic admins to update roles and revoke access while keeping the audit trigger active.
@@ -2848,6 +2875,7 @@ create trigger prevent_last_clinic_admin_removal
   before update of role or delete on public.clinic_memberships
   for each row execute function private.prevent_last_clinic_admin_removal();
 -- <<< END 20261029080207_admin_manage_clinic_memberships
+
 
 -- >>> BEGIN 20261029180738_professional_account_links
 -- Identity comes from the account; clinical title and branch assignments stay clinic-owned.
@@ -2929,6 +2957,7 @@ revoke all on function public.save_clinic_professional(uuid,uuid,uuid,text,text,
 grant execute on function public.save_clinic_professional(uuid,uuid,uuid,text,text,uuid[]) to authenticated;
 -- <<< END 20261029180738_professional_account_links
 
+
 -- >>> BEGIN 20261029182052_agenda_professional_colors
 -- Agenda identity belongs to a professional at a branch, independently of patient avatars and appointment status.
 create or replace function private.valid_agenda_color_config(color text, service_colors jsonb)
@@ -3001,6 +3030,7 @@ create or replace function public.save_clinic_professional(
 $$;
 notify pgrst, 'reload schema';
 -- <<< END 20261029182052_agenda_professional_colors
+
 
 -- >>> BEGIN 20261029191404_clinic_services_catalog
 create table public.clinic_services (
@@ -3177,6 +3207,7 @@ create trigger appointments_catalog_service_guard before insert or update of ser
   on public.appointments for each row execute function private.validate_appointment_catalog_service();
 -- <<< END 20261029191404_clinic_services_catalog
 
+
 -- >>> BEGIN 20261029192115_preserve_service_snapshots
 create or replace function private.validate_appointment_catalog_service()
 returns trigger language plpgsql security definer set search_path = '' as $$
@@ -3217,6 +3248,7 @@ drop trigger if exists appointments_catalog_service_guard on public.appointments
 create trigger appointments_catalog_service_guard before insert or update of service_id, service_snapshot, service, branch_id, provider_id
   on public.appointments for each row execute function private.validate_appointment_catalog_service();
 -- <<< END 20261029192115_preserve_service_snapshots
+
 
 -- >>> BEGIN 20261029192455_multi_service_appointments
 alter table public.appointments add column service_ids uuid[] not null default array[]::uuid[];
@@ -3305,6 +3337,7 @@ create trigger appointments_catalog_service_guard before insert or update of ser
   on public.appointments for each row execute function private.validate_appointment_catalog_service();
 -- <<< END 20261029192455_multi_service_appointments
 
+
 -- >>> BEGIN 20261029193937_clarify_lipolaser_assessment_currency
 update public.clinic_services
 set offers = jsonb_set(offers, '{0,currency}', '"MXN"'::jsonb, false),
@@ -3315,6 +3348,7 @@ where code = 'lipo-assessment'
   and (offers #>> '{0,amount}')::numeric = 500
   and offers #>> '{0,currency}' = 'UNRESOLVED';
 -- <<< END 20261029193937_clarify_lipolaser_assessment_currency
+
 
 -- >>> BEGIN 20261029194320_empty_service_scope_is_clinic_wide
 create or replace function private.validate_appointment_catalog_service()
@@ -3396,6 +3430,7 @@ begin
 end;
 $$;
 -- <<< END 20261029194320_empty_service_scope_is_clinic_wide
+
 
 -- >>> BEGIN 20261029225620_clinic_whatsapp_mock_setup
 -- Clinic-scoped WhatsApp setup metadata for a simulated provider only.
@@ -3802,6 +3837,7 @@ revoke all on function public.get_appointment_reminders_v2(uuid, timestamptz, ti
 grant execute on function public.get_appointment_reminders_v2(uuid, timestamptz, timestamptz) to authenticated;
 -- <<< END 20261029225620_clinic_whatsapp_mock_setup
 
+
 -- >>> BEGIN 20261030034458_google_calendar_oauth
 -- Server-only OAuth credentials for a clinic's Google Calendar connection.
 -- The refresh token is encrypted by the application before it is stored.
@@ -3948,6 +3984,7 @@ revoke all on function public.claim_google_calendar_sync_jobs(uuid, integer) fro
 grant execute on function public.queue_google_calendar_initial_sync(uuid) to service_role;
 grant execute on function public.claim_google_calendar_sync_jobs(uuid, integer) to service_role;
 -- <<< END 20261030034458_google_calendar_oauth
+
 
 -- >>> BEGIN 20261030052342_google_calendar_provider_connections
 begin;
@@ -4190,6 +4227,7 @@ grant execute on function public.claim_google_calendar_sync_jobs(uuid, integer, 
 commit;
 -- <<< END 20261030052342_google_calendar_provider_connections
 
+
 -- >>> BEGIN 20261030062740_google_calendar_disable_clinic_fallback
 begin;
 
@@ -4350,6 +4388,7 @@ $$;
 
 commit;
 -- <<< END 20261030062740_google_calendar_disable_clinic_fallback
+
 
 -- >>> BEGIN 20261030064854_google_calendar_per_crm_account
 -- Google Calendar OAuth connections belong to the CRM account that authorized them.
@@ -4547,6 +4586,7 @@ revoke all on function public.claim_google_calendar_sync_jobs(uuid, integer, uui
 grant execute on function public.claim_google_calendar_sync_jobs(uuid, integer, uuid, uuid) to service_role;
 -- <<< END 20261030064854_google_calendar_per_crm_account
 
+
 -- >>> BEGIN 20261030072515_clinic_availability
 -- Clinic availability rules: scoped blocks and configurable provider overlaps.
 
@@ -4717,6 +4757,7 @@ create trigger clinic_availability_blocks_protect
   for each row execute function private.protect_clinic_availability_block();
 -- <<< END 20261030072515_clinic_availability
 
+
 -- >>> BEGIN 20261030072602_clinic_availability_policy_tuneup
 -- Keep read policies single-purpose and index all availability block foreign keys.
 
@@ -4743,6 +4784,7 @@ create index clinic_availability_blocks_provider_fk_idx
 create index clinic_availability_blocks_created_by_fk_idx
   on public.clinic_availability_blocks (created_by) where created_by is not null;
 -- <<< END 20261030072602_clinic_availability_policy_tuneup
+
 
 -- >>> BEGIN 20261030194825_team_push_notifications
 -- Staff alerts contain no patient names, services, contact details or clinical text.
@@ -4915,6 +4957,7 @@ end $$;
 revoke all on function public.queue_staff_push_test(uuid,uuid,uuid) from public,anon,authenticated;
 grant execute on function public.queue_staff_push_test(uuid,uuid,uuid) to service_role;
 -- <<< END 20261030194825_team_push_notifications
+
 
 -- >>> BEGIN 20261030202528_public_agenda_requests
 -- Public reads/writes go through server-only, narrowly scoped functions.
@@ -5162,6 +5205,7 @@ revoke all on function private.notify_public_booking_request() from public,anon,
 create trigger public_booking_request_notice after insert on public.public_booking_requests for each row execute function private.notify_public_booking_request();
 -- <<< END 20261030202528_public_agenda_requests
 
+
 -- >>> BEGIN 20261030204811_allow_clinic_delete_admin_cascade
 -- Preserve last-admin protection while allowing an authorized whole-clinic deletion.
 create or replace function private.prevent_last_clinic_admin_removal()
@@ -5213,6 +5257,7 @@ $$;
 revoke all on function private.prevent_last_clinic_admin_removal() from public;
 -- <<< END 20261030204811_allow_clinic_delete_admin_cascade
 
+
 -- >>> BEGIN 20261030204929_skip_audit_for_deleted_clinic_cascades
 create or replace function private.capture_audit_event()
 returns trigger
@@ -5254,6 +5299,7 @@ end;
 $$;
 revoke all on function private.capture_audit_event() from public, anon, authenticated;
 -- <<< END 20261030204929_skip_audit_for_deleted_clinic_cascades
+
 
 -- >>> BEGIN 20261030224417_clinic_whatsapp_twilio_provider
 -- Enable Twilio as a clinic-scoped WhatsApp provider while keeping mock mode
@@ -5433,6 +5479,7 @@ revoke all on function public.get_appointment_reminders_v2(uuid, timestamptz, ti
 grant execute on function public.get_appointment_reminders_v2(uuid, timestamptz, timestamptz) to authenticated;
 -- <<< END 20261030224417_clinic_whatsapp_twilio_provider
 
+
 -- >>> BEGIN 20261030234622_clinic_whatsapp_conversations
 create table public.clinic_whatsapp_conversations (
   id uuid primary key default gen_random_uuid(),
@@ -5491,6 +5538,7 @@ revoke all on function public.route_twilio_sandbox_whatsapp(text) from public, a
 grant execute on function public.route_twilio_sandbox_whatsapp(text) to service_role;
 -- <<< END 20261030234622_clinic_whatsapp_conversations
 
+
 -- >>> BEGIN 20261031000926_fix_whatsapp_conversation_phone_checks
 alter table public.clinic_whatsapp_conversations
   drop constraint clinic_whatsapp_conversations_contact_phone_check,
@@ -5500,6 +5548,7 @@ alter table public.clinic_whatsapp_conversations
   add constraint clinic_whatsapp_conversations_sender_phone_check
     check (sender_phone ~ '^\+[1-9][0-9]{7,14}$');
 -- <<< END 20261031000926_fix_whatsapp_conversation_phone_checks
+
 
 -- >>> BEGIN 20261031003604_whatsapp_media_support
 alter table public.clinic_whatsapp_messages
@@ -5534,12 +5583,14 @@ set public = false,
     allowed_mime_types = excluded.allowed_mime_types;
 -- <<< END 20261031003604_whatsapp_media_support
 
+
 -- >>> BEGIN 20261031004449_allow_media_message_sid_prefix
 alter table public.clinic_whatsapp_messages
   drop constraint clinic_whatsapp_messages_twilio_message_sid_check,
   add constraint clinic_whatsapp_messages_twilio_message_sid_check
     check (twilio_message_sid ~ '^(SM|MM)[0-9a-fA-F]{32}$');
 -- <<< END 20261031004449_allow_media_message_sid_prefix
+
 
 -- >>> BEGIN 20261031011253_add_whatsapp_audio_support
 alter table public.clinic_whatsapp_messages
@@ -5560,6 +5611,7 @@ set allowed_mime_types = array[
 ]
 where id = 'clinic-whatsapp-media';
 -- <<< END 20261031011253_add_whatsapp_audio_support
+
 
 -- >>> BEGIN 20261031044446_whatsapp_sender_multiple_branches
 -- Allow a single WhatsApp sender to serve multiple clinic branches.
@@ -5743,6 +5795,7 @@ $$;
 revoke all on function public.save_clinic_whatsapp_settings_v2(uuid, text, boolean, jsonb, jsonb) from public, anon;
 grant execute on function public.save_clinic_whatsapp_settings_v2(uuid, text, boolean, jsonb, jsonb) to authenticated;
 -- <<< END 20261031044446_whatsapp_sender_multiple_branches
+
 
 -- >>> BEGIN 20261031050133_whatsapp_template_selection
 -- Keep appointment template identifiers in clinic configuration. Twilio
@@ -5950,6 +6003,7 @@ revoke all on function public.claim_due_appointment_confirmations(integer) from 
 grant execute on function public.claim_due_appointment_confirmations(integer) to service_role;
 -- <<< END 20261031050133_whatsapp_template_selection
 
+
 -- >>> BEGIN 20261031060000_whatsapp_crm_notifications
 -- Keep the WhatsApp settings focused on sender routing and internal CRM alerts.
 alter table public.clinic_whatsapp_configurations
@@ -6021,3 +6075,13 @@ $$;
 revoke all on function public.save_clinic_whatsapp_settings_v4(uuid, text, boolean, jsonb, boolean, boolean) from public, anon;
 grant execute on function public.save_clinic_whatsapp_settings_v4(uuid, text, boolean, jsonb, boolean, boolean) to authenticated;
 -- <<< END 20261031060000_whatsapp_crm_notifications
+
+
+-- >>> BEGIN 20261031062208_whatsapp_conversation_controls
+alter table public.clinic_whatsapp_conversations
+  add column blocked_at timestamptz;
+
+create index clinic_whatsapp_conversations_blocked_idx
+  on public.clinic_whatsapp_conversations (clinic_id, blocked_at)
+  where blocked_at is not null;
+-- <<< END 20261031062208_whatsapp_conversation_controls

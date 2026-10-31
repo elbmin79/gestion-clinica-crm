@@ -95,7 +95,7 @@ export function createTwilioWhatsAppWebhookHandler({
     const { data: conversation, error: conversationError } = await client
       .from('clinic_whatsapp_conversations')
       .upsert({ clinic_id: route.clinicId, contact_phone: from, ...(contactName ? { contact_name: contactName } : {}), sender_phone: to, last_inbound_at: new Date().toISOString(), last_message_at: new Date().toISOString(), updated_at: new Date().toISOString() }, { onConflict: 'clinic_id,contact_phone' })
-      .select('id')
+      .select('id,blocked_at')
       .single();
     if (conversationError || !conversation) return Response.json({ error: 'Could not save inbound WhatsApp conversation.' }, { status: 503 });
     const contentType = String(params.MediaContentType0 || '').split(';')[0].trim().toLowerCase();
@@ -124,8 +124,10 @@ export function createTwilioWhatsAppWebhookHandler({
       ...(mediaPath ? { media_object_path: mediaPath, media_content_type: media.contentType, media_filename: `${media.kind}-${messageSid.slice(-6)}.${media.extension}`, media_size_bytes: media.size } : {}),
     }, { onConflict: 'twilio_message_sid', ignoreDuplicates: true });
     if (messageError) return Response.json({ error: 'Could not save inbound WhatsApp message.' }, { status: 503 });
-    try { await createStaffWhatsAppAlert(client, { clinicId: route.clinicId, messageSid, event: 'message' }); } catch { /* Inbox persistence must not depend on the optional staff alert. */ }
-    if (action) {
+    if (!conversation.blocked_at) {
+      try { await createStaffWhatsAppAlert(client, { clinicId: route.clinicId, messageSid, event: 'message' }); } catch { /* Inbox persistence must not depend on the optional staff alert. */ }
+    }
+    if (action && !conversation.blocked_at) {
       const result = await client.rpc('apply_appointment_confirmation_reply_v2', {
         target_clinic_id: route.clinicId,
         target_branch_id: route.branchId || null,
