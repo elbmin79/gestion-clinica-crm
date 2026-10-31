@@ -25,18 +25,18 @@ function highlightSearchText(text, query) {
     ? <mark className="whatsapp-search-highlight" key={`${part}-${index}`}>{part}</mark>
     : part);
 }
-function WhatsAppMessageImage({ src, filename, onExpand }) {
+function WhatsAppMessageImage({ src, filename, onExpand, onMediaLoad }) {
   const imageRef = useRef(null);
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
     const image = imageRef.current;
-    if (image?.complete && image.naturalWidth > 0) setLoaded(true);
-  }, [src]);
+    if (image?.complete && image.naturalWidth > 0) { setLoaded(true); onMediaLoad?.(); }
+  }, [src, onMediaLoad]);
 
   return <div className="whatsapp-message-image-wrap">
     <button type="button" className="whatsapp-message-image-open" onClick={onExpand} aria-label="Ampliar imagen" disabled={!loaded}>
-      <img ref={imageRef} className="whatsapp-message-media" src={src} alt={filename} loading="lazy" onLoad={() => setLoaded(true)} onError={() => setLoaded(false)}/>
+      <img ref={imageRef} className="whatsapp-message-media" src={src} alt={filename} loading="lazy" onLoad={() => { setLoaded(true); onMediaLoad?.(); }} onError={() => setLoaded(false)}/>
     </button>
     {loaded && <div className="whatsapp-message-image-actions">
       <button type="button" onClick={onExpand} aria-label="Ampliar imagen" title="Ampliar"><Expand size={15}/></button>
@@ -74,6 +74,9 @@ function WhatsAppAudioPlayer({ src, filename = 'audio' }) {
 export default function WhatsAppInbox({ clinicId = '', sharedMode = false, role = '' }) {
   const [conversations, setConversations] = useState([]);
   const [messages, setMessages] = useState([]);
+  const [messageHistoryConversationId, setMessageHistoryConversationId] = useState('');
+  const [isAtLatestMessage, setIsAtLatestMessage] = useState(true);
+  const [newMessageCount, setNewMessageCount] = useState(0);
   const [query, setQuery] = useState('');
   const [selectedId, setSelectedId] = useState('');
   const [collapsedSenders, setCollapsedSenders] = useState(() => new Set());
@@ -97,8 +100,29 @@ export default function WhatsAppInbox({ clinicId = '', sharedMode = false, role 
   const actionDialogRef = useRef(null);
   const messageSearchRef = useRef(null);
   const messageHistoryRef = useRef(null);
+  const shouldFollowLatestRef = useRef(true);
+  const observedMessagesRef = useRef({ conversationId: '', ids: new Set() });
   const selectedIdRef = useRef('');
   const canReply = ['admin', 'receptionist'].includes(role);
+  const scrollToLatest = useCallback((behavior = 'smooth') => {
+    const history = messageHistoryRef.current;
+    if (!history) return;
+    const motionSafeBehavior = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : behavior;
+    history.scrollTo({ top: history.scrollHeight, behavior: motionSafeBehavior });
+    shouldFollowLatestRef.current = true;
+    setIsAtLatestMessage(true);
+    setNewMessageCount(0);
+  }, []);
+  const handleMessageHistoryScroll = useCallback(event => {
+    const history = event.currentTarget;
+    const atLatest = history.scrollHeight - history.scrollTop - history.clientHeight < 72;
+    shouldFollowLatestRef.current = atLatest;
+    setIsAtLatestMessage(atLatest);
+    if (atLatest) setNewMessageCount(0);
+  }, []);
+  const keepLatestVisible = useCallback(() => {
+    if (shouldFollowLatestRef.current) scrollToLatest('auto');
+  }, [scrollToLatest]);
 
   const refresh = useCallback(async () => {
     if (!sharedMode || !clinicId) { setStatus('idle'); return; }
@@ -168,6 +192,12 @@ export default function WhatsAppInbox({ clinicId = '', sharedMode = false, role 
 
   useEffect(() => {
     selectedIdRef.current = selected?.id || '';
+    shouldFollowLatestRef.current = true;
+    observedMessagesRef.current = { conversationId: '', ids: new Set() };
+    setMessageHistoryConversationId('');
+    setIsAtLatestMessage(true);
+    setNewMessageCount(0);
+    setMessages([]);
     setSearchOpen(false);
     setMessageQuery('');
     setActiveMatchIndex(0);
@@ -185,7 +215,7 @@ export default function WhatsAppInbox({ clinicId = '', sharedMode = false, role 
   }, [expandedImage]);
 
   useEffect(() => {
-    if (!selected) { setMessages([]); return; }
+    if (!selected) { setMessages([]); setMessageHistoryConversationId(''); return; }
     let active = true;
     const load = async () => {
       const result = await createClient().from('clinic_whatsapp_messages').select('id,direction,body,delivery_status,created_at,media_object_path,media_content_type,media_filename,media_size_bytes')
@@ -193,11 +223,33 @@ export default function WhatsAppInbox({ clinicId = '', sharedMode = false, role 
       if (!active) return;
       if (result.error) { setError('No se pudieron cargar los mensajes.'); return; }
       setMessages(result.data || []);
+      setMessageHistoryConversationId(selected.id);
     };
     void load();
     const timer = window.setInterval(() => void load(), 5000);
     return () => { active = false; window.clearInterval(timer); };
   }, [clinicId, selected?.id]);
+
+  useEffect(() => {
+    if (!selected?.id || messageHistoryConversationId !== selected.id) return;
+    const currentIds = new Set(messages.map(message => message.id));
+    const observed = observedMessagesRef.current;
+    if (observed.conversationId !== selected.id) {
+      observedMessagesRef.current = { conversationId: selected.id, ids: currentIds };
+      requestAnimationFrame(() => scrollToLatest('auto'));
+      return;
+    }
+    const newlyLoaded = messages.filter(message => !observed.ids.has(message.id));
+    observedMessagesRef.current = { conversationId: selected.id, ids: currentIds };
+    if (!newlyLoaded.length) return;
+    const newestMessage = messages[messages.length - 1];
+    if (shouldFollowLatestRef.current || newlyLoaded.some(message => message.direction === 'outbound' && message.id === newestMessage?.id)) {
+      requestAnimationFrame(() => scrollToLatest('smooth'));
+      return;
+    }
+    const inboundCount = newlyLoaded.filter(message => message.direction === 'inbound').length;
+    if (inboundCount) setNewMessageCount(current => current + inboundCount);
+  }, [messages, messageHistoryConversationId, scrollToLatest, selected?.id]);
 
   const windowOpen = selected?.last_inbound_at && Date.now() - Date.parse(selected.last_inbound_at) < 24 * 60 * 60 * 1000;
   const showNextMatch = direction => {
@@ -286,7 +338,7 @@ export default function WhatsAppInbox({ clinicId = '', sharedMode = false, role 
       setSendOutcomeUncertain(false);
       await Promise.all([refresh(), (async () => {
         const data = await createClient().from('clinic_whatsapp_messages').select('id,direction,body,delivery_status,created_at,media_object_path,media_content_type,media_filename,media_size_bytes').eq('clinic_id', clinicId).eq('conversation_id', conversationId).order('created_at', { ascending: true }).limit(300);
-        if (!data.error) setMessages(data.data || []);
+        if (!data.error) { setMessages(data.data || []); setMessageHistoryConversationId(conversationId); }
       })()]);
     } catch (sendError) { setError(sendError.message); }
     finally { setSending(false); }
@@ -336,17 +388,20 @@ export default function WhatsAppInbox({ clinicId = '', sharedMode = false, role 
             {renderConversationMenu(selected, 'header')}
           </div></header>
           {searchOpen && <div className="whatsapp-message-search"><Search size={16}/><input ref={messageSearchRef} type="search" placeholder="Buscar en esta conversación" value={messageQuery} onChange={event => { setMessageQuery(event.target.value); setActiveMatchIndex(0); }} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); showNextMatch(event.shiftKey ? -1 : 1); } if (event.key === 'Escape') setSearchOpen(false); }} aria-label="Buscar mensajes en esta conversación"/><span className="whatsapp-message-search-count">{messageQuery.trim() ? `${messageMatches.length ? activeMatchIndex + 1 : 0} de ${messageMatches.length}` : '300 mensajes recientes'}</span><button type="button" className="whatsapp-icon-action" aria-label="Coincidencia anterior" disabled={!messageMatches.length} onClick={() => showNextMatch(-1)}><ChevronUp size={17}/></button><button type="button" className="whatsapp-icon-action" aria-label="Coincidencia siguiente" disabled={!messageMatches.length} onClick={() => showNextMatch(1)}><ChevronDown size={17}/></button><button type="button" className="whatsapp-icon-action" aria-label="Cerrar búsqueda" onClick={() => setSearchOpen(false)}><X size={17}/></button></div>}
-          <div ref={messageHistoryRef} className="whatsapp-message-history" aria-live="polite">
+          <div ref={messageHistoryRef} className="whatsapp-message-history" aria-live="polite" onScroll={handleMessageHistoryScroll}>
             {messages.length ? buildWhatsAppTimeline(messages).map(item => item.type === 'day'
               ? <div className="whatsapp-day-divider" role="separator" key={item.key}><span>{item.label}</span></div>
               : <article className={`whatsapp-message-row is-${item.message.direction}${activeMessageMatch?.id === item.message.id ? ' is-search-match' : ''}`} key={item.key} data-message-id={item.message.id}>
                 <div className="whatsapp-message-bubble">{item.message.media_content_type?.startsWith('image/') && (() => {
                   const mediaUrl = `/api/whatsapp/media?clinicId=${encodeURIComponent(clinicId)}&messageId=${encodeURIComponent(item.message.id)}`;
                   const filename = readableMediaName(item.message.media_filename);
-                  return <WhatsAppMessageImage src={mediaUrl} filename={filename} onExpand={() => setExpandedImage({ src: mediaUrl, filename })}/>;
-                })()}{item.message.media_content_type?.startsWith('video/') && <video className="whatsapp-message-media" src={`/api/whatsapp/media?clinicId=${encodeURIComponent(clinicId)}&messageId=${encodeURIComponent(item.message.id)}`} aria-label={item.message.media_filename || 'Video compartido'} controls playsInline preload="metadata"/>}{item.message.media_content_type?.startsWith('audio/') && <WhatsAppAudioPlayer src={`/api/whatsapp/media?clinicId=${encodeURIComponent(clinicId)}&messageId=${encodeURIComponent(item.message.id)}`} filename={item.message.media_filename || 'audio'}/>}{item.message.body && <p>{highlightSearchText(item.message.body, messageQuery)}</p>}<div className="whatsapp-message-details"><time dateTime={item.message.created_at}>{formatWhatsAppMessageTime(item.message.created_at)}</time>{item.message.direction === 'outbound' && <span>{item.message.delivery_status === 'failed' ? 'No enviado' : 'Enviado'}</span>}</div></div>
+                  return <WhatsAppMessageImage src={mediaUrl} filename={filename} onExpand={() => setExpandedImage({ src: mediaUrl, filename })} onMediaLoad={keepLatestVisible}/>;
+                })()}{item.message.media_content_type?.startsWith('video/') && <video className="whatsapp-message-media" src={`/api/whatsapp/media?clinicId=${encodeURIComponent(clinicId)}&messageId=${encodeURIComponent(item.message.id)}`} aria-label={item.message.media_filename || 'Video compartido'} controls playsInline preload="metadata" onLoadedMetadata={keepLatestVisible}/ >}{item.message.media_content_type?.startsWith('audio/') && <WhatsAppAudioPlayer src={`/api/whatsapp/media?clinicId=${encodeURIComponent(clinicId)}&messageId=${encodeURIComponent(item.message.id)}`} filename={item.message.media_filename || 'audio'}/>}{item.message.body && <p>{highlightSearchText(item.message.body, messageQuery)}</p>}<div className="whatsapp-message-details"><time dateTime={item.message.created_at}>{formatWhatsAppMessageTime(item.message.created_at)}</time>{item.message.direction === 'outbound' && <span>{item.message.delivery_status === 'failed' ? 'No enviado' : 'Enviado'}</span>}</div></div>
               </article>) : <div className="whatsapp-conversation-empty"><MessageCircle size={28}/><strong>Conversación nueva</strong><span>Los mensajes que se reciban aparecerán aquí.</span></div>}
           </div>
+          {(!isAtLatestMessage || newMessageCount > 0) && <button type="button" className="whatsapp-jump-to-latest" onClick={() => scrollToLatest('smooth')} aria-label={newMessageCount ? `Ver ${newMessageCount} mensajes nuevos` : 'Ir al último mensaje'}>
+            <ChevronDown size={17}/><span>{newMessageCount ? `${newMessageCount} mensaje${newMessageCount === 1 ? '' : 's'} nuevo${newMessageCount === 1 ? '' : 's'}` : 'Ir al último mensaje'}</span>{newMessageCount > 0 && <small>{newMessageCount}</small>}
+          </button>}
           {selected.blocked_at ? <footer className="whatsapp-composer-disabled is-blocked"><Ban size={16}/><span>Conversación bloqueada en el CRM. No se pueden enviar mensajes ni generar avisos para este contacto.</span></footer>
             : canReply ? windowOpen ? <form className="whatsapp-composer" onSubmit={sendMessage}>
             <input ref={fileInputRef} className="whatsapp-file-input" type="file" accept="image/jpeg,image/png,video/mp4" onChange={chooseAttachment} aria-label="Adjuntar imagen o video"/>

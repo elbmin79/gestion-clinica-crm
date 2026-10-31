@@ -3,7 +3,7 @@
 .whatsapp-inbox-page{height:calc(100dvh - 134px);min-height:0;grid-template-rows:auto minmax(0,1fr)}
 .whatsapp-inbox-shell{grid-template-columns:minmax(250px,300px) minmax(0,1fr);min-height:0;border-radius:12px}
 .whatsapp-inbox-shell{min-height:0}
-.whatsapp-conversation{min-height:0;height:100%}
+.whatsapp-conversation{position:relative;min-height:0;height:100%}
 .whatsapp-message-history{min-height:0;overscroll-behavior:contain}
 .whatsapp-thread-list{background:var(--paper)}
 .whatsapp-thread-search{margin:12px;padding:9px 11px;border:1px solid var(--line);border-radius:9px}
@@ -194,3 +194,12 @@ html[data-theme="light"] .whatsapp-message-search input{border-color:#ab95a2;bac
 html[data-theme="light"] .whatsapp-action-dialog{border-color:#b9a4b1;background:#fff9fc;color:#342832}
 html[data-theme="light"] .whatsapp-action-dialog p{color:#62525d}
 @media(max-width:760px){.whatsapp-message-search{gap:4px;padding:6px 8px}.whatsapp-message-search-count{min-width:52px;font-size:9px}.whatsapp-message-search .whatsapp-icon-action{width:29px;height:32px}.whatsapp-action-dialog form{padding:20px}.whatsapp-thread-entry .whatsapp-thread-item{padding-right:46px}}
+.whatsapp-jump-to-latest{position:absolute;bottom:83px;left:50%;z-index:3;display:flex;align-items:center;gap:8px;min-height:39px;max-width:calc(100% - 28px);padding:0 12px;border:1px solid color-mix(in srgb,var(--line) 75%,transparent);border-radius:999px;background:color-mix(in srgb,var(--paper) 94%,transparent);color:var(--ink);box-shadow:0 8px 22px rgb(0 0 0 / 20%);font:inherit;font-size:11px;font-weight:700;white-space:nowrap;cursor:pointer;transform:translateX(-50%);backdrop-filter:blur(12px);animation:whatsapp-jump-enter 180ms cubic-bezier(.2,.8,.2,1) both;transition:background 150ms ease,box-shadow 150ms ease,border-color 150ms ease}
+.whatsapp-jump-to-latest:hover{border-color:var(--green);background:var(--green-soft);box-shadow:0 10px 24px rgb(0 0 0 / 24%)}
+.whatsapp-jump-to-latest svg{flex:none;color:var(--green)}
+.whatsapp-jump-to-latest small{display:grid;place-items:center;min-width:19px;height:19px;margin-left:1px;padding:0 5px;border-radius:999px;background:var(--green);color:#fff;font-size:10px;line-height:1}
+html[data-theme="light"] .whatsapp-jump-to-latest{border-color:#b49dab;background:rgb(255 249 252 / 94%);color:#342832;box-shadow:0 8px 22px rgb(57 35 49 / 18%)}
+html[data-theme="light"] .whatsapp-jump-to-latest:hover{border-color:#8e526e;background:#eddae3}
+@keyframes whatsapp-jump-enter{from{opacity:0;transform:translate(-50%,8px) scale(.97)}to{opacity:1;transform:translate(-50%,0) scale(1)}}
+@media(max-width:760px){.whatsapp-jump-to-latest{bottom:75px;min-height:36px;font-size:10px}}
+@media(prefers-reduced-motion:reduce){.whatsapp-jump-to-latest{animation:none;transition:none}}
