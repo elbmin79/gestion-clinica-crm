@@ -939,6 +939,7 @@ html[data-theme="dark"] .settings-tabs-viewport{--settings-scroll-track:#302430;
 .clinic-services-table td:first-child{min-width:195px}.clinic-services-table td:nth-child(3){min-width:190px}.clinic-services-table td:nth-child(4){min-width:145px}
 .clinic-services-table td strong,.clinic-services-table td>span,.clinic-services-table td small{display:block}
 .clinic-services-table td strong{font-size:12px;font-weight:750;line-height:1.4}.clinic-services-table td>span,.clinic-services-table td small{margin-top:3px;color:var(--muted);font-size:11px;line-height:1.45}
+.clinic-services-footnote{margin:12px 0 0;color:var(--muted);font-size:11px;line-height:1.5}
 .clinic-services-table .clinic-service-offer{margin-top:3px}.clinic-service-state{display:inline-flex!important;align-items:center;max-width:175px;padding:5px 8px;border:1px solid #b98244;border-radius:5px;background:#fbefd9;color:#68400e!important;font-size:10px!important;font-weight:800;line-height:1.3}
 .clinic-service-state.is-ready{border-color:#5f9472;background:#e1f0e5;color:#245336!important}
 .clinic-service-state.is-inactive{border-color:#9b8396;background:#eee6ed;color:#594452!important}
