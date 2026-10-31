@@ -158,7 +158,7 @@ export default function WhatsAppSettings({ clinicId, role, branches = [], shared
               {!availableSenders.some(item => item.phoneNumber === sender.whatsappNumber) && <button className="icon-button outline" type="button" aria-label={`Quitar el número no disponible ${sender.whatsappNumber}`} onClick={() => setSenders(current => current.filter(item => item.senderKey !== sender.senderKey))}><Trash2 size={15}/></button>}
             </div>
             <div className="whatsapp-branch-assignments">
-              <div className="whatsapp-branch-assignments-heading"><strong>Sucursales</strong>{!isEditing && <span>{assignedBranches.length ? `${assignedBranches.length} asignada${assignedBranches.length === 1 ? '' : 's'}` : 'Sin sucursales asignadas'}</span>}</div>
+              <div className="whatsapp-branch-assignments-heading"><strong>Sucursales</strong></div>
               {isEditing ? <fieldset className="whatsapp-branch-checklist" aria-label={`Sucursales asignadas a ${sender.whatsappNumber || sender.displayLabel}`}>
                 {branches.map(branch => {
                   const checked = sender.branchIds?.includes(branch.id) || false;
