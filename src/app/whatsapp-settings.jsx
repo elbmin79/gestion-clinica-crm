@@ -1,19 +1,13 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Check, ChevronDown, CircleAlert, CircleCheck, LoaderCircle, MessageCircle, Pencil, Save, ShieldCheck, Trash2, Send, Plus } from 'lucide-react';
-import { createClinicWhatsAppTemplateDraft, loadAvailableWhatsAppSenders, loadClinicWhatsAppSettings, saveClinicWhatsAppSettings, submitClinicWhatsAppTemplateApproval } from './whatsapp-settings-actions.js';
-
-const templateKinds = [
-  ['confirmation_2d', 'Confirmación · 2 días antes'],
-  ['reminder_1d', 'Recordatorio · 1 día antes'],
-  ['reminder_5h', 'Recordatorio · 5 horas antes'],
-];
+import { Check, CircleAlert, CircleCheck, LoaderCircle, MessageCircle, Pencil, Save, ShieldCheck, Trash2, MessageSquareText, CalendarCheck2 } from 'lucide-react';
+import { loadAvailableWhatsAppSenders, loadClinicWhatsAppSettings, saveClinicWhatsAppSettings } from './whatsapp-settings-actions.js';
 
 const initialSettings = {
   providerMode: 'twilio',
-  templateReadiness: { confirmation_2d: false, reminder_1d: false, reminder_5h: false },
-  templateContentSids: {},
+  notifyWhatsAppMessages: true,
+  notifyWhatsAppConfirmations: true,
 };
 
 export default function WhatsAppSettings({ clinicId, role, branches = [], sharedMode }) {
@@ -22,18 +16,12 @@ export default function WhatsAppSettings({ clinicId, role, branches = [], shared
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [senderLookupError, setSenderLookupError] = useState('');
-  const [templateLookupError, setTemplateLookupError] = useState('');
   const [notice, setNotice] = useState('');
   const [settings, setSettings] = useState(initialSettings);
   const [senders, setSenders] = useState([]);
   const [editingAssignments, setEditingAssignments] = useState(() => new Set());
   const [availableSenders, setAvailableSenders] = useState([]);
   const [inboxSender, setInboxSender] = useState(null);
-  const [templates, setTemplates] = useState([]);
-  const [deliveryEnabled, setDeliveryEnabled] = useState(false);
-  const [templateName, setTemplateName] = useState('Recordatorio de cita');
-  const [templateBody, setTemplateBody] = useState('Hola, te recordamos que tu cita es el {fecha} a las {hora}. Si necesitas cambiarla, responde a este mensaje.');
-  const [templateBusy, setTemplateBusy] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -60,12 +48,9 @@ export default function WhatsAppSettings({ clinicId, role, branches = [], shared
       setInboxSender(result.inboxSender || null);
       if (result.ok) setAvailableSenders(result.senders);
       setSenderLookupError(result.senderLookupError || (result.ok ? '' : result.message));
-      setTemplateLookupError(result.templateLookupError || '');
-      setTemplates(result.templates || []);
-      setDeliveryEnabled(result.deliveryEnabled === true);
       setLoadingAvailableSenders(false);
     }).catch(() => {
-      if (active) { setInboxSender(null); setSenderLookupError('No se pudieron consultar los números registrados.'); setTemplateLookupError('No se pudieron consultar las plantillas de Twilio.'); setAvailableSenders([]); setTemplates([]); setDeliveryEnabled(false); setLoadingAvailableSenders(false); }
+      if (active) { setInboxSender(null); setSenderLookupError('No se pudieron consultar los números registrados.'); setAvailableSenders([]); setLoadingAvailableSenders(false); }
     });
     return () => { active = false; };
   }, [clinicId, role, sharedMode]);
@@ -99,10 +84,7 @@ export default function WhatsAppSettings({ clinicId, role, branches = [], shared
   const save = async event => {
     event.preventDefault();
     setSaving(true); setError(''); setNotice('');
-    const templateReadiness = Object.fromEntries(templateKinds.map(([kind]) => [kind,
-      settings.templateReadiness[kind] === true && templates.some(template => template.status === 'approved' && template.sid === settings.templateContentSids?.[kind]),
-    ]));
-    const result = await saveClinicWhatsAppSettings({ clinicId, ...settings, providerMode: 'twilio', templateReadiness, senders });
+    const result = await saveClinicWhatsAppSettings({ clinicId, ...settings, providerMode: 'twilio', senders });
     if (!result.ok) setError(result.message);
     else {
       setSettings({ ...result.settings, providerMode: 'twilio' });
@@ -113,32 +95,11 @@ export default function WhatsAppSettings({ clinicId, role, branches = [], shared
     setSaving(false);
   };
 
-  const createTemplate = async () => {
-    setTemplateBusy(true); setError(''); setNotice('');
-    const result = await createClinicWhatsAppTemplateDraft({ clinicId, name: templateName, body: templateBody });
-    if (result.ok) {
-      setTemplates(current => [...current.filter(template => template.sid !== result.template.sid), result.template]);
-      setNotice(result.message);
-      setTemplateName('');
-    } else setError(result.message);
-    setTemplateBusy(false);
-  };
-
-  const submitTemplate = async sid => {
-    setTemplateBusy(true); setError(''); setNotice('');
-    const result = await submitClinicWhatsAppTemplateApproval({ clinicId, sid });
-    if (result.ok) {
-      setTemplates(current => current.map(template => template.sid === sid ? { ...template, ...result.template } : template));
-      setNotice(result.message);
-    } else setError(result.message);
-    setTemplateBusy(false);
-  };
-
   if (!sharedMode || !clinicId) {
-    return <div className="whatsapp-settings-content"><header className="whatsapp-page-heading"><h1>WhatsApp</h1><p>Configura confirmaciones y recordatorios de citas.</p></header><div className="whatsapp-settings-pending-notice"><ShieldCheck size={18}/><div><strong>Configuración no disponible</strong><span>Conecta una clínica compartida para guardar los números y plantillas de WhatsApp.</span></div></div></div>;
+    return <div className="whatsapp-settings-content"><header className="whatsapp-page-heading"><h1>WhatsApp</h1><p>Asigna números y elige qué avisos internos recibir en el CRM.</p></header><div className="whatsapp-settings-pending-notice"><ShieldCheck size={18}/><div><strong>Configuración no disponible</strong><span>Conecta una clínica compartida para administrar los números y avisos.</span></div></div></div>;
   }
   if (role !== 'admin') {
-    return <div className="whatsapp-settings-content"><header className="whatsapp-page-heading"><h1>WhatsApp</h1><p>Configura confirmaciones y recordatorios de citas.</p></header><div className="whatsapp-settings-pending-notice"><ShieldCheck size={18}/><div><strong>Configuración solo para administración</strong><span>Una persona administradora de la clínica puede configurar los números y plantillas.</span></div></div></div>;
+    return <div className="whatsapp-settings-content"><header className="whatsapp-page-heading"><h1>WhatsApp</h1><p>Asigna números y elige qué avisos internos recibir en el CRM.</p></header><div className="whatsapp-settings-pending-notice"><ShieldCheck size={18}/><div><strong>Configuración solo para administración</strong><span>Una persona administradora de la clínica puede configurar los números y avisos.</span></div></div></div>;
   }
 
   const validSender = sender => sender.active
@@ -150,20 +111,13 @@ export default function WhatsAppSettings({ clinicId, role, branches = [], shared
     ...availableSenders.map(sender => sender.phoneNumber),
   ].filter(Boolean));
   const inboxConnected = connectedNumbers.size > 0;
-  const approvedTemplates = templates.filter(template => template.status === 'approved');
-  const whatsappReady = deliveryEnabled && readySenderCount > 0
-    && templateKinds.some(([kind]) => settings.templateReadiness[kind] && approvedTemplates.some(template => template.sid === settings.templateContentSids?.[kind]));
-  const activeReminderCount = templateKinds.filter(([kind]) => settings.templateReadiness[kind] === true
-    && approvedTemplates.some(template => template.sid === settings.templateContentSids?.[kind])).length;
-  const appointmentNoticeStatus = loading ? 'Cargando…'
-    : activeReminderCount ? `${activeReminderCount} ${activeReminderCount === 1 ? 'aviso activo' : 'avisos activos'}`
-      : 'Sin avisos activos';
+  const crmNotificationsEnabled = settings.notifyWhatsAppMessages || settings.notifyWhatsAppConfirmations;
 
   return <div className="whatsapp-settings-content" aria-busy={loading || saving || loadingAvailableSenders}>
-    <header className="whatsapp-page-heading"><h1>WhatsApp</h1><p>Configura confirmaciones y recordatorios de citas.</p></header>
-    {inboxConnected ? <div className="whatsapp-settings-connection-notice"><MessageCircle size={18}/><div><strong>La bandeja de conversaciones está conectada</strong><span>Administra aquí los números que reciben y responden mensajes desde la bandeja.{whatsappReady ? ' Los avisos automáticos de citas también están configurados.' : ' Para activar avisos automáticos, asigna el número a las sucursales que lo usarán y selecciona una plantilla aprobada para cada aviso.'}</span></div></div>
-      : <div className={whatsappReady ? 'whatsapp-settings-live-notice' : 'whatsapp-settings-pending-notice'}><ShieldCheck size={18}/><div><strong>{whatsappReady ? 'Notificaciones configuradas' : 'Configura tus notificaciones'}</strong><span>Vincula remitentes ya registrados y activa las plantillas aprobadas que usarás para citas.</span></div></div>}
-    <div className="whatsapp-settings-summary"><div><span>Bandeja de conversaciones</span><strong>{loading || loadingAvailableSenders ? 'Cargando…' : inboxConnected ? 'Conectada' : 'No conectada'}</strong></div><div><span>Números conectados</span><strong>{loadingAvailableSenders ? 'Cargando…' : connectedNumbers.size}</strong></div><div><span>Números asignables</span><strong>{loading || loadingAvailableSenders ? 'Cargando…' : availableSenders.length ? `${readySenderCount} de ${availableSenders.length} asignados` : 'Sin números disponibles para asignar'}</strong></div><div><span>Avisos automáticos de citas</span><strong>{appointmentNoticeStatus}</strong></div></div>
+    <header className="whatsapp-page-heading"><h1>WhatsApp</h1><p>Asigna números y elige qué avisos internos recibir en el CRM.</p></header>
+    {inboxConnected ? <div className="whatsapp-settings-connection-notice"><MessageCircle size={18}/><div><strong>La bandeja de conversaciones está conectada</strong><span>Administra aquí los números y las sucursales que los usan. Los avisos seleccionados aparecerán en el centro de notificaciones del CRM.</span></div></div>
+      : <div className="whatsapp-settings-pending-notice"><ShieldCheck size={18}/><div><strong>Configura WhatsApp</strong><span>Vincula los números a sus sucursales y configura los avisos internos del CRM.</span></div></div>}
+    <div className="whatsapp-settings-summary"><div><span>Bandeja de conversaciones</span><strong>{loading || loadingAvailableSenders ? 'Cargando…' : inboxConnected ? 'Conectada' : 'No conectada'}</strong></div><div><span>Números conectados</span><strong>{loadingAvailableSenders ? 'Cargando…' : connectedNumbers.size}</strong></div><div><span>Números asignables</span><strong>{loading || loadingAvailableSenders ? 'Cargando…' : availableSenders.length ? `${readySenderCount} de ${availableSenders.length} asignados` : 'Sin números disponibles para asignar'}</strong></div><div><span>Avisos en el CRM</span><strong>{loading ? 'Cargando…' : crmNotificationsEnabled ? 'Activados' : 'Desactivados'}</strong></div></div>
     {loading ? <p className="whatsapp-settings-loading"><LoaderCircle size={16}/> Cargando configuración…</p> : <form className="whatsapp-settings-form" onSubmit={save}>
       <section className="whatsapp-settings-section"><div className="whatsapp-settings-heading"><div><h3>Números de WhatsApp</h3><p>Asigna un número a una o varias sucursales.</p></div></div>
         <p className="whatsapp-settings-helper">Pulsa «Editar sucursales» para cambiar dónde se usa cada número.</p>
@@ -190,9 +144,10 @@ export default function WhatsAppSettings({ clinicId, role, branches = [], shared
             </div>
           </article>})}</div> : null}
       </section>
-      <section className="whatsapp-settings-section"><div className="whatsapp-settings-heading"><div><h3>Avisos automáticos de citas</h3><p>Elige una plantilla aprobada para cada aviso.</p></div></div>{!deliveryEnabled ? <p className="whatsapp-settings-empty">No se pudieron consultar las plantillas de WhatsApp. Revisa las credenciales del servidor.</p> : templateLookupError ? <p className="whatsapp-settings-error" role="status"><CircleAlert size={15}/>{templateLookupError}</p> : approvedTemplates.length === 0 ? <p className="whatsapp-settings-empty">No hay plantillas aprobadas disponibles. Crea una abajo; solo podrá activarse después de su aprobación.</p> : <div className="whatsapp-template-list">{templateKinds.map(([key, label]) => <div className="whatsapp-template-row" key={key}><label className="whatsapp-template-toggle"><input type="checkbox" disabled={!settings.templateContentSids?.[key] || !approvedTemplates.some(template => template.sid === settings.templateContentSids[key])} checked={settings.templateReadiness[key] === true && approvedTemplates.some(template => template.sid === settings.templateContentSids?.[key])} onChange={event => setSettings(current => ({ ...current, templateReadiness: { ...current.templateReadiness, [key]: event.target.checked } }))}/><span><strong>{label}</strong><small>{settings.templateReadiness[key] ? 'Activo' : 'Desactivado'}</small></span></label><div className="whatsapp-template-select"><select aria-label={`Plantilla para ${label}`} value={settings.templateContentSids?.[key] || ''} onChange={event => setSettings(current => ({ ...current, templateContentSids: { ...current.templateContentSids, [key]: event.target.value }, templateReadiness: { ...current.templateReadiness, [key]: false } }))}><option value="">Selecciona una plantilla aprobada</option>{approvedTemplates.map(template => <option value={template.sid} key={template.sid}>{template.name}</option>)}</select><ChevronDown size={15} aria-hidden="true"/></div></div>)}</div>}
-        <div className="whatsapp-template-builder"><div className="whatsapp-template-builder-heading"><div><h4>Crear plantilla</h4><p>Usa {'{fecha}'} para la fecha y {'{hora}'} para la hora de la cita.</p></div></div><div className="whatsapp-template-editor"><label>Nombre<input value={templateName} maxLength={60} onChange={event => setTemplateName(event.target.value)} placeholder="Ej. Recordatorio de cita"/></label><label>Mensaje<textarea value={templateBody} maxLength={1024} rows={3} onChange={event => setTemplateBody(event.target.value)}/></label><div className="whatsapp-template-editor-footer"><small>WhatsApp debe aprobar la plantilla antes de usarla para avisos.</small><button className="button outline compact" type="button" disabled={templateBusy || !templateName.trim()} onClick={createTemplate}><Plus size={14}/>{templateBusy ? 'Guardando…' : 'Guardar borrador'}</button></div></div>
-          {templates.filter(template => template.status !== 'approved').length > 0 && <div className="whatsapp-template-drafts"><strong>Plantillas pendientes</strong>{templates.filter(template => template.status !== 'approved').map(template => <div className="whatsapp-template-draft-row" key={template.sid}><span><b>{template.name}</b><small>{template.status === 'pending' || template.status === 'received' ? 'En revisión' : template.status === 'rejected' ? 'Rechazada' : template.status === 'draft' ? 'Borrador' : 'Estado no disponible'}</small></span>{template.status === 'draft' && <button className="button outline compact" type="button" disabled={templateBusy || availableSenders.length === 0} title={availableSenders.length ? '' : 'Registra un remitente de WhatsApp primero'} onClick={() => submitTemplate(template.sid)}><Send size={13}/>{templateBusy ? 'Enviando…' : 'Enviar a aprobación'}</button>}</div>)}</div>}
+      <section className="whatsapp-settings-section"><div className="whatsapp-settings-heading"><div><h3>Avisos dentro del CRM</h3><p>Elige qué actividad de WhatsApp debe aparecer en el centro de notificaciones.</p></div></div>
+        <div className="whatsapp-crm-notification-options">
+          <label className="whatsapp-crm-notification-option"><span className="whatsapp-crm-notification-icon"><MessageSquareText size={17}/></span><span><strong>Nuevos mensajes</strong><small>Recibir un aviso cuando llegue un mensaje nuevo a la bandeja.</small></span><input type="checkbox" checked={settings.notifyWhatsAppMessages} onChange={event => setSettings(current => ({ ...current, notifyWhatsAppMessages: event.target.checked }))}/></label>
+          <label className="whatsapp-crm-notification-option"><span className="whatsapp-crm-notification-icon"><CalendarCheck2 size={17}/></span><span><strong>Confirmaciones de citas</strong><small>Recibir un aviso cuando un paciente confirme su cita por WhatsApp.</small></span><input type="checkbox" checked={settings.notifyWhatsAppConfirmations} onChange={event => setSettings(current => ({ ...current, notifyWhatsAppConfirmations: event.target.checked }))}/></label>
         </div>
       </section>
       {error && <p className="whatsapp-settings-error" role="alert"><CircleAlert size={15}/>{error}</p>}{notice && <p className="whatsapp-settings-success" role="status"><CircleCheck size={15}/>{notice}</p>}

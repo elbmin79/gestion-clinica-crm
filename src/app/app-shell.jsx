@@ -1484,7 +1484,7 @@ function App({ children }) {
 
 const settingsSections = [
   {id:'google-calendar',label:'Google Calendar',icon:CalendarDays,title:'Google Calendar',description:'Conecta tu cuenta de Google para sincronizar tus citas.',status:'Disponible'},
-  {id:'whatsapp',label:'Notificaciones WhatsApp',icon:Bell,title:'Notificaciones WhatsApp',description:'Configura números y plantillas para avisos de citas.',status:'Configurable'},
+  {id:'whatsapp',label:'Notificaciones WhatsApp',icon:Bell,title:'Notificaciones WhatsApp',description:'Asigna números a sucursales y configura avisos internos del CRM.',status:'Configurable'},
   {id:'availability',label:'Disponibilidad',icon:Clock3,title:'Gestión de disponibilidad',description:'Define horarios bloqueados y reglas para citas simultáneas.',status:'Disponible',items:[]},
   {id:'push',label:'Notificaciones Push',icon:Bell,title:'Notificaciones Push',description:'Administra los avisos que recibe el equipo en sus dispositivos.',status:'Disponible',items:[['Nuevas citas','Avisos al equipo cuando se registra una cita.'],['Cambios en la agenda','Notificaciones sobre cancelaciones y cambios de horario.'],['Preferencias por usuario','Cada integrante podrá elegir qué avisos recibe.']]},
   {id:'services',label:'Servicios',icon:Settings2,title:'Catálogo de servicios',description:'Administra tratamientos, duraciones, precios y paquetes de la clínica.',status:'Disponible'},

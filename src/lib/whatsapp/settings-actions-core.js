@@ -1,15 +1,8 @@
-import { createTwilioWhatsAppTemplate, listRegisteredTwilioWhatsAppSenders, listTwilioWhatsAppTemplates, submitTwilioWhatsAppTemplateApproval } from './twilio-whatsapp.server.js';
+import { listRegisteredTwilioWhatsAppSenders } from './twilio-whatsapp.server.js';
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const twilioSenderKeyPattern = /^twilio:\+[1-9]\d{7,14}$/;
-const templateKinds = ['confirmation_2d', 'reminder_1d', 'reminder_5h'];
-const defaultReadiness = Object.freeze({ confirmation_2d: false, reminder_1d: false, reminder_5h: false });
-const contentSidPattern = /^HX[0-9a-fA-F]{32}$/;
 const twilioSandboxNumber = '+14155238886';
-
-function isSpanishTemplate(template) {
-  return /^es(?:[-_]|$)/i.test(String(template?.language || '').trim());
-}
 
 function configuredInboxSender(env) {
   const configuredNumber = String(env.TWILIO_WHATSAPP_SANDBOX_FROM || '').trim().replace(/^whatsapp:/i, '');
@@ -25,9 +18,6 @@ export function createWhatsAppSettingsActions({
   createServerClient,
   env = process.env,
   listWhatsAppSenders = listRegisteredTwilioWhatsAppSenders,
-  getTemplates = listTwilioWhatsAppTemplates,
-  createTemplate = createTwilioWhatsAppTemplate,
-  submitTemplateApproval = submitTwilioWhatsAppTemplateApproval,
 } = {}) {
   async function authorizedAdmin(clinicId) {
     if (!uuidPattern.test(String(clinicId || ''))) return { error: 'Selecciona una clínica válida.' };
@@ -50,7 +40,7 @@ export function createWhatsAppSettingsActions({
       { data: branchAssignments, error: branchAssignmentsError },
     ] = await Promise.all([
       client.from('clinic_whatsapp_configurations')
-        .select('clinic_id, provider_mode, template_readiness, template_content_sids, updated_at')
+      .select('clinic_id, provider_mode, notify_whatsapp_messages, notify_whatsapp_confirmations, updated_at')
         .eq('clinic_id', clinicId).maybeSingle(),
       client.from('clinic_whatsapp_senders')
         .select('sender_key, display_label, branch_id, is_default, active')
@@ -76,8 +66,8 @@ export function createWhatsAppSettingsActions({
     return {
       configured: Boolean(config),
       settings: {
-        templateReadiness: { ...defaultReadiness, ...(config?.template_readiness || {}) },
-        templateContentSids: config?.template_content_sids || {},
+        notifyWhatsAppMessages: config?.notify_whatsapp_messages !== false,
+        notifyWhatsAppConfirmations: config?.notify_whatsapp_confirmations !== false,
         providerMode: 'twilio',
       },
       senders: clinicSenders,
@@ -96,57 +86,22 @@ export function createWhatsAppSettingsActions({
   }
 
   async function loadAvailableSenders(clinicId) {
-    let templates = [];
     let senderLookupError = '';
-    let templateLookupError = '';
-    const deliveryEnabled = /^AC[0-9a-fA-F]{32}$/.test(String(env.TWILIO_ACCOUNT_SID || '').trim()) && Boolean(String(env.TWILIO_AUTH_TOKEN || '').trim());
     const inboxSender = configuredInboxSender(env);
     try {
       const context = await authorizedAdmin(clinicId);
       if (context.error) return { ok: false, message: context.error };
-      const [senderResult, templateResult] = await Promise.allSettled([
-        listWhatsAppSenders({ env }),
-        getTemplates({ env }),
-      ]);
+      const senderResult = await Promise.allSettled([listWhatsAppSenders({ env })]).then(results => results[0]);
       const registeredSenders = senderResult.status === 'fulfilled' ? senderResult.value : [];
       if (senderResult.status === 'rejected') senderLookupError = 'No se pudieron consultar todos los números registrados en Twilio.';
-      if (templateResult.status === 'fulfilled') templates = templateResult.value.filter(isSpanishTemplate);
-      else templateLookupError = 'No se pudieron consultar las plantillas de Twilio.';
       const senders = [...(inboxSender ? [inboxSender] : []), ...registeredSenders]
         .filter((sender, index, rows) => rows.findIndex(row => row.phoneNumber === sender.phoneNumber) === index);
       if (!senders.length && senderLookupError) {
-        return { ok: false, message: senderLookupError, templates, templateLookupError, deliveryEnabled, ...(inboxSender ? { inboxSender } : {}) };
+        return { ok: false, message: senderLookupError, ...(inboxSender ? { inboxSender } : {}) };
       }
-      return { ok: true, senders, templates, senderLookupError, templateLookupError, deliveryEnabled, ...(inboxSender ? { inboxSender } : {}) };
+      return { ok: true, senders, senderLookupError, ...(inboxSender ? { inboxSender } : {}) };
     } catch {
-      return { ok: false, message: 'No se pudo cargar la configuración de WhatsApp.', templates, templateLookupError, deliveryEnabled, ...(inboxSender ? { inboxSender } : {}) };
-    }
-  }
-
-  async function createTemplateDraft(input) {
-    try {
-      const context = await authorizedAdmin(input?.clinicId);
-      if (context.error) return { ok: false, message: context.error };
-      const template = await createTemplate({ name: input?.name, body: input?.body, env });
-      return { ok: true, template, message: 'Borrador guardado. Aún no puede usarse en avisos.' };
-    } catch (error) {
-      return { ok: false, message: error?.message?.startsWith('El ') || error?.message?.startsWith('La plantilla') ? error.message : 'No se pudo guardar el borrador. Revisa la conexión de WhatsApp e inténtalo de nuevo.' };
-    }
-  }
-
-  async function submitTemplate(input) {
-    try {
-      const context = await authorizedAdmin(input?.clinicId);
-      if (context.error) return { ok: false, message: context.error };
-      const senders = await listWhatsAppSenders({ env });
-      if (!senders.length) return { ok: false, message: 'Registra primero un remitente de WhatsApp para enviar la plantilla a aprobación.' };
-      const templates = (await getTemplates({ env })).filter(isSpanishTemplate);
-      const draft = templates.find(template => template.sid === input?.sid && template.status === 'draft');
-      if (!draft) return { ok: false, message: 'Solo puedes enviar a aprobación un borrador en español.' };
-      const result = await submitTemplateApproval({ sid: draft.sid, env });
-      return { ok: true, template: { ...draft, status: result.status || 'pending' }, message: 'Plantilla enviada a aprobación.' };
-    } catch {
-      return { ok: false, message: 'No se pudo enviar la plantilla a aprobación. Inténtalo de nuevo más tarde.' };
+      return { ok: false, message: 'No se pudo cargar la configuración de WhatsApp.', ...(inboxSender ? { inboxSender } : {}) };
     }
   }
 
@@ -158,21 +113,6 @@ export function createWhatsAppSettingsActions({
       const providerMode = 'twilio';
       const senders = Array.isArray(input?.senders) ? input.senders : null;
       if (!senders || senders.length > 50) return { ok: false, message: 'La lista de remitentes no es válida.' };
-      const readiness = input?.templateReadiness || {};
-      const templateContentSids = input?.templateContentSids || {};
-      if (Object.keys(readiness).some(key => !templateKinds.includes(key))
-        || templateKinds.some(key => typeof readiness[key] !== 'boolean')) {
-        return { ok: false, message: 'El estado de las plantillas no es válido.' };
-      }
-      if (Object.keys(templateContentSids).some(key => !templateKinds.includes(key))
-        || templateKinds.some(kind => templateContentSids[kind] != null && !contentSidPattern.test(String(templateContentSids[kind])))) {
-        return { ok: false, message: 'La selección de plantillas no es válida.' };
-      }
-      const availableTemplates = (await getTemplates({ env })).filter(isSpanishTemplate);
-      const approvedSids = new Set(availableTemplates.filter(template => template.status === 'approved').map(template => template.sid));
-      if (templateKinds.some(kind => readiness[kind] && !approvedSids.has(templateContentSids[kind]))) {
-        return { ok: false, message: 'Selecciona una plantilla aprobada para cada aviso que quieras activar.' };
-      }
       const normalizedSenders = senders.map(sender => ({
         ...sender,
         branchIds: Array.isArray(sender?.branchIds) ? sender.branchIds : sender?.branchId ? [sender.branchId] : [],
@@ -210,13 +150,13 @@ export function createWhatsAppSettingsActions({
           return { ok: false, message: 'Solo puedes asignar números disponibles para WhatsApp. Actualiza la lista y vuelve a intentarlo.' };
         }
       }
-      const { data, error } = await context.client.rpc('save_clinic_whatsapp_settings_v3', {
+      const { data, error } = await context.client.rpc('save_clinic_whatsapp_settings_v4', {
         target_clinic_id: clinicId,
         target_provider_mode: providerMode,
         target_allow_default_fallback: false,
-        target_template_readiness: readiness,
         target_senders: safeSenders,
-        target_template_content_sids: templateContentSids,
+        target_notify_whatsapp_messages: input?.notifyWhatsAppMessages !== false,
+        target_notify_whatsapp_confirmations: input?.notifyWhatsAppConfirmations !== false,
       });
       if (error || data !== true) return { ok: false, message: 'No se guardó la configuración. Verifica la sucursal y el número seleccionado.' };
       const saved = await readSettings(context.client, clinicId);
@@ -226,5 +166,5 @@ export function createWhatsAppSettingsActions({
     }
   }
 
-  return { load, loadAvailableSenders, save, createTemplateDraft, submitTemplate };
+  return { load, loadAvailableSenders, save };
 }

@@ -18,9 +18,9 @@ export function useNotificationFeed(scope,clinicId) {
         let items=[];
         if(scope==='demo')items=JSON.parse(localStorage.getItem(demoNotificationKey)||'[]');
         else if(clinicId){
-          const result=await createClient().from('staff_notifications').select('id,message,created_at,read_at,appointment_id').eq('clinic_id',clinicId).order('created_at',{ascending:false}).limit(100);
+          const result=await createClient().from('staff_notifications').select('id,message,kind,created_at,read_at,appointment_id').eq('clinic_id',clinicId).order('created_at',{ascending:false}).limit(100);
           if(result.error)throw new Error();
-          items=(result.data||[]).map(item=>({id:item.id,message:item.message,createdAt:new Date(item.created_at).getTime(),read:Boolean(item.read_at),appointmentAlert:true,href:item.message==='Nueva solicitud de cita'?`/configuracion?tab=public-agenda&clinic=${encodeURIComponent(clinicId)}`:`/agenda?clinic=${encodeURIComponent(clinicId)}${item.appointment_id?`&appointment=${encodeURIComponent(item.appointment_id)}`:''}`}));
+          items=(result.data||[]).map(item=>({id:item.id,message:item.message,kind:item.kind,createdAt:new Date(item.created_at).getTime(),read:Boolean(item.read_at),appointmentAlert:true,href:item.kind==='whatsapp_message'||item.kind==='whatsapp_confirmation'?`/whatsapp?clinic=${encodeURIComponent(clinicId)}`:item.message==='Nueva solicitud de cita'?`/configuracion?tab=public-agenda&clinic=${encodeURIComponent(clinicId)}`:`/agenda?clinic=${encodeURIComponent(clinicId)}${item.appointment_id?`&appointment=${encodeURIComponent(item.appointment_id)}`:''}`}));
         }
         if(active){setSaved({scope,items});setError('');}
       }catch{if(active)setError('No se pudieron cargar los avisos guardados. Revisa la conexión.');}
@@ -134,7 +134,7 @@ export default function NotificationCenter({ items, markRead, markAllRead, clear
         {error&&<p role="alert" className="push-error">{error}</p>}
         {visible.length > 0 ? <ul className="notification-list">{visible.map(item => <li key={item.id} className={item.read ? '' : 'is-unread'}>
           <span className="notification-item-icon" aria-hidden="true"><Bell size={16}/></span>
-          <div className="notification-item-copy"><p>{item.message}</p><time dateTime={new Date(item.createdAt).toISOString()}>{new Intl.DateTimeFormat('es-MX', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }).format(item.createdAt)}</time>{item.href&&<a className="notification-agenda-link" href={item.href} onClick={()=>markRead(item.id)}>{item.message==='Nueva solicitud de cita'?'Revisar solicitudes':'Ver cita en agenda'}</a>}</div>
+          <div className="notification-item-copy"><p>{item.message}</p><time dateTime={new Date(item.createdAt).toISOString()}>{new Intl.DateTimeFormat('es-MX', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }).format(item.createdAt)}</time>{item.href&&<a className="notification-agenda-link" href={item.href} onClick={()=>markRead(item.id)}>{item.kind==='whatsapp_message'||item.kind==='whatsapp_confirmation'?'Abrir WhatsApp':item.message==='Nueva solicitud de cita'?'Revisar solicitudes':'Ver cita en agenda'}</a>}</div>
           <button type="button" className="notification-read" disabled={item.read} aria-label={item.read ? 'Leída' : `Marcar como leída: ${item.message}`} title={item.read ? 'Leída' : 'Marcar como leída'} onClick={() => markRead(item.id)}><Check size={16}/></button>
         </li>)}</ul> : <div className="notification-empty"><span><Bell size={24}/></span><h3>{filter === 'unread' && items.length ? 'Todo al día' : 'Sin notificaciones'}</h3><p>{filter === 'unread' && items.length ? 'Ya leíste todas tus notificaciones.' : 'Los nuevos avisos de tu actividad aparecerán aquí.'}</p></div>}
       </div>

@@ -25,6 +25,28 @@ function emptyTwiML() {
   });
 }
 
+async function createStaffWhatsAppAlert(client, { clinicId, messageSid, event }) {
+  const configColumn = event === 'message' ? 'notify_whatsapp_messages' : 'notify_whatsapp_confirmations';
+  const { data: config, error: configError } = await client.from('clinic_whatsapp_configurations')
+    .select(configColumn).eq('clinic_id', clinicId).maybeSingle();
+  if (configError || config?.[configColumn] !== true) return;
+  const { data: members, error: membersError } = await client.from('clinic_memberships')
+    .select('user_id').eq('clinic_id', clinicId).in('role', ['admin', 'receptionist']);
+  if (membersError || !members?.length) return;
+  const isMessage = event === 'message';
+  const notifications = members.map(member => ({
+    clinic_id: clinicId,
+    user_id: member.user_id,
+    kind: isMessage ? 'whatsapp_message' : 'whatsapp_confirmation',
+    message: isMessage ? 'Nuevo mensaje de WhatsApp' : 'Cita confirmada por WhatsApp',
+    source_event_id: `${messageSid}:${event}`,
+  }));
+  await client.from('staff_notifications').upsert(notifications, {
+    onConflict: 'clinic_id,user_id,source_event_id',
+    ignoreDuplicates: true,
+  });
+}
+
 export function createTwilioWhatsAppWebhookHandler({
   createServiceClient,
   env = process.env,
@@ -102,6 +124,7 @@ export function createTwilioWhatsAppWebhookHandler({
       ...(mediaPath ? { media_object_path: mediaPath, media_content_type: media.contentType, media_filename: `${media.kind}-${messageSid.slice(-6)}.${media.extension}`, media_size_bytes: media.size } : {}),
     }, { onConflict: 'twilio_message_sid', ignoreDuplicates: true });
     if (messageError) return Response.json({ error: 'Could not save inbound WhatsApp message.' }, { status: 503 });
+    try { await createStaffWhatsAppAlert(client, { clinicId: route.clinicId, messageSid, event: 'message' }); } catch { /* Inbox persistence must not depend on the optional staff alert. */ }
     if (action) {
       const result = await client.rpc('apply_appointment_confirmation_reply_v2', {
         target_clinic_id: route.clinicId,
@@ -112,6 +135,9 @@ export function createTwilioWhatsAppWebhookHandler({
         target_action: action,
       });
       if (result.error) return Response.json({ error: 'Could not apply appointment response.' }, { status: 503 });
+      if (result.data === 'confirmed') {
+        try { await createStaffWhatsAppAlert(client, { clinicId: route.clinicId, messageSid, event: 'confirmation' }); } catch { /* The appointment response is already applied. */ }
+      }
     }
     return emptyTwiML();
   };

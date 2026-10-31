@@ -16,11 +16,3 @@ export async function loadAvailableWhatsAppSenders(clinicId) {
 export async function saveClinicWhatsAppSettings(input) {
   return actions.save(input);
 }
-
-export async function createClinicWhatsAppTemplateDraft(input) {
-  return actions.createTemplateDraft(input);
-}
-
-export async function submitClinicWhatsAppTemplateApproval(input) {
-  return actions.submitTemplate(input);
-}

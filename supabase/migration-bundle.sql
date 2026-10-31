@@ -2,7 +2,7 @@
 -- Generated from supabase/migrations in filename order.
 -- Apply to a fresh destination Supabase project as its project owner.
 
--- >>> BEGIN 20261028221430_202610260001_clinic_crm.sql
+-- >>> BEGIN 20261028221430_202610260001_clinic_crm
 -- Shared, clinic-scoped PostgreSQL foundation for the CRM.
 -- Apply only to a Supabase project created for this clinic. No patient data is seeded.
 
@@ -526,9 +526,9 @@ create trigger audit_diagnoses after insert or update or delete on public.patien
   for each row execute function private.capture_audit_event();
 create trigger audit_activities after insert on public.patient_activities
   for each row execute function private.capture_audit_event();
+-- <<< END 20261028221430_202610260001_clinic_crm
 
--- <<< END 20261028221430_202610260001_clinic_crm.sql
--- >>> BEGIN 20261028221433_202610260002_finance_workspace.sql
+-- >>> BEGIN 20261028221433_202610260002_finance_workspace
 -- Minimal finance workspace access for admin, receptionist, and billing roles.
 -- Patient identity is limited to the fields required to reconcile payments.
 
@@ -625,8 +625,9 @@ revoke all on function private.validate_payment_refund() from public, anon, auth
 create trigger payments_validate_refund
   before insert on public.payments
   for each row execute function private.validate_payment_refund();
--- <<< END 20261028221433_202610260002_finance_workspace.sql
--- >>> BEGIN 20261028221436_202610260003_appointment_deposits.sql
+-- <<< END 20261028221433_202610260002_finance_workspace
+
+-- >>> BEGIN 20261028221436_202610260003_appointment_deposits
 -- Clinic-configured booking deposits must be received before confirmation.
 alter table public.appointments
   add column deposit_required boolean not null default false,
@@ -679,8 +680,9 @@ revoke all on function private.enforce_appointment_deposit() from public, anon, 
 create trigger appointments_require_deposit_before_confirmation
   before insert or update of status, deposit_required, deposit_amount on public.appointments
   for each row execute function private.enforce_appointment_deposit();
--- <<< END 20261028221436_202610260003_appointment_deposits.sql
--- >>> BEGIN 20261028221438_202610260004_appointment_reminders.sql
+-- <<< END 20261028221436_202610260003_appointment_deposits
+
+-- >>> BEGIN 20261028221438_202610260004_appointment_reminders
 -- Durable schedule for the clinic's three appointment messages. Delivery is
 -- handled by a separately configured messaging worker; this migration sends
 -- nothing to patients.
@@ -838,8 +840,9 @@ end;
 $$;
 revoke all on function public.get_appointment_reminders(uuid, timestamptz, timestamptz) from public, anon;
 grant execute on function public.get_appointment_reminders(uuid, timestamptz, timestamptz) to authenticated;
--- <<< END 20261028221438_202610260004_appointment_reminders.sql
--- >>> BEGIN 20261028221441_202610260005_reschedule_appointment_reminders.sql
+-- <<< END 20261028221438_202610260004_appointment_reminders
+
+-- >>> BEGIN 20261028221441_202610260005_reschedule_appointment_reminders
 -- Keep a new reminder set when a confirmed appointment is rescheduled or
 -- cancelled and then confirmed again. Earlier sends remain auditable.
 alter table public.appointments
@@ -1006,8 +1009,9 @@ end;
 $$;
 revoke all on function public.get_appointment_reminders(uuid, timestamptz, timestamptz) from public, anon;
 grant execute on function public.get_appointment_reminders(uuid, timestamptz, timestamptz) to authenticated;
--- <<< END 20261028221441_202610260005_reschedule_appointment_reminders.sql
--- >>> BEGIN 20261028221447_202610260006_document_template_versioning.sql
+-- <<< END 20261028221441_202610260005_reschedule_appointment_reminders
+
+-- >>> BEGIN 20261028221447_202610260006_document_template_versioning
 -- Keep one active version per clinic, document type, and normalized title.
 with ranked_active_templates as (
   select template.id,
@@ -1108,8 +1112,9 @@ end;
 $$;
 revoke all on function public.save_clinic_document_template(uuid, text, text, text, text) from public, anon;
 grant execute on function public.save_clinic_document_template(uuid, text, text, text, text) to authenticated;
--- <<< END 20261028221447_202610260006_document_template_versioning.sql
--- >>> BEGIN 20261028221449_202610260007_diagnosis_contract_consistency.sql
+-- <<< END 20261028221447_202610260006_document_template_versioning
+
+-- >>> BEGIN 20261028221449_202610260007_diagnosis_contract_consistency
 -- A patient can have only one currently accepted diagnosis. Keep earlier
 -- accepted records as superseded history rather than deleting them.
 with ranked_accepted_diagnoses as (
@@ -1208,8 +1213,9 @@ end;
 $$;
 revoke all on function public.accept_patient_diagnosis(uuid, uuid, text) from public, anon;
 grant execute on function public.accept_patient_diagnosis(uuid, uuid, text) to authenticated;
--- <<< END 20261028221449_202610260007_diagnosis_contract_consistency.sql
--- >>> BEGIN 20261028221452_202610260008_payment_deposit_consistency.sql
+-- <<< END 20261028221449_202610260007_diagnosis_contract_consistency
+
+-- >>> BEGIN 20261028221452_202610260008_payment_deposit_consistency
 -- Serialize appointment confirmation and refund checks for the same patient.
 -- A refund may not leave an already confirmed appointment below its
 -- required deposit, and a concurrent confirmation must see committed refunds.
@@ -1310,8 +1316,9 @@ begin
 end;
 $$;
 revoke all on function private.validate_payment_refund() from public, anon, authenticated;
--- <<< END 20261028221452_202610260008_payment_deposit_consistency.sql
--- >>> BEGIN 20261028221455_202610260009_appointment_schedule_bounds.sql
+-- <<< END 20261028221452_202610260008_payment_deposit_consistency
+
+-- >>> BEGIN 20261028221455_202610260009_appointment_schedule_bounds
 -- Keep shared bookings inside the day view's 06:00–00:00 schedule and on
 -- quarter-hour starts, using the clinic's timezone rather than the server's.
 create or replace function private.enforce_appointment_schedule_bounds()
@@ -1366,8 +1373,9 @@ revoke all on function private.enforce_appointment_schedule_bounds() from public
 create trigger appointments_enforce_schedule_bounds
   before insert or update of clinic_id, starts_at, ends_at, status on public.appointments
   for each row execute function private.enforce_appointment_schedule_bounds();
--- <<< END 20261028221455_202610260009_appointment_schedule_bounds.sql
--- >>> BEGIN 20261028221458_202610260010_patient_whatsapp_consent.sql
+-- <<< END 20261028221455_202610260009_appointment_schedule_bounds
+
+-- >>> BEGIN 20261028221458_202610260010_patient_whatsapp_consent
 -- Reminder delivery must never infer WhatsApp consent from clinical consent.
 -- Keep the current state on the patient and append every grant/revocation.
 alter table public.patients
@@ -1510,8 +1518,9 @@ $$;
 
 revoke all on function public.update_patient_directory_record(uuid, uuid, text, text, text, text, uuid, uuid, text, boolean, text) from public, anon;
 grant execute on function public.update_patient_directory_record(uuid, uuid, text, text, text, text, uuid, uuid, text, boolean, text) to authenticated;
--- <<< END 20261028221458_202610260010_patient_whatsapp_consent.sql
--- >>> BEGIN 20261028221505_202610260011_reminder_delivery_eligibility.sql
+-- <<< END 20261028221458_202610260010_patient_whatsapp_consent
+
+-- >>> BEGIN 20261028221505_202610260011_reminder_delivery_eligibility
 -- Expose delivery eligibility without returning contact details to the queue UI.
 drop function public.get_appointment_reminders(uuid, timestamptz, timestamptz);
 
@@ -1585,8 +1594,9 @@ $$;
 
 revoke all on function public.get_appointment_reminders(uuid, timestamptz, timestamptz) from public, anon;
 grant execute on function public.get_appointment_reminders(uuid, timestamptz, timestamptz) to authenticated;
--- <<< END 20261028221505_202610260011_reminder_delivery_eligibility.sql
--- >>> BEGIN 20261028221508_202610260012_patient_document_preparation.sql
+-- <<< END 20261028221505_202610260011_reminder_delivery_eligibility
+
+-- >>> BEGIN 20261028221508_202610260012_patient_document_preparation
 -- Clients may only create documents through the atomic preparation RPC.
 revoke insert on public.patient_documents from authenticated;
 
@@ -1701,8 +1711,9 @@ $$;
 
 revoke all on function public.prepare_patient_document(uuid, uuid, uuid, text, text) from public, anon;
 grant execute on function public.prepare_patient_document(uuid, uuid, uuid, text, text) to authenticated;
--- <<< END 20261028221508_202610260012_patient_document_preparation.sql
--- >>> BEGIN 20261028221512_202610260013_whatsapp_reminder_dispatch.sql
+-- <<< END 20261028221508_202610260012_patient_document_preparation
+
+-- >>> BEGIN 20261028221512_202610260013_whatsapp_reminder_dispatch
 -- Server-side WhatsApp delivery. This migration creates no credentials and
 -- sends no messages; only the service-role worker may claim or settle rows.
 alter table public.appointment_reminders
@@ -2073,13 +2084,15 @@ begin
   return new;
 end;
 $$;
--- <<< END 20261028221512_202610260013_whatsapp_reminder_dispatch.sql
--- >>> BEGIN 20261028221515_202610260014_preserve_patient_appointment_history.sql
+-- <<< END 20261028221512_202610260013_whatsapp_reminder_dispatch
+
+-- >>> BEGIN 20261028221515_202610260014_preserve_patient_appointment_history
 -- Staff workflows deactivate patients and cancel appointments; they do not
 -- hard-delete clinical or scheduling records from a browser session.
 revoke delete on public.patients, public.appointments from public, anon, authenticated;
--- <<< END 20261028221515_202610260014_preserve_patient_appointment_history.sql
--- >>> BEGIN 20261028221517_202610260015_protect_confirmed_deposits_from_patient_refunds.sql
+-- <<< END 20261028221515_202610260014_preserve_patient_appointment_history
+
+-- >>> BEGIN 20261028221517_202610260015_protect_confirmed_deposits_from_patient_refunds
 -- A patient-level refund has no appointment association, so it must not be
 -- allowed to consume the funds reserved for any confirmed appointment deposit.
 create or replace function private.validate_payment_refund()
@@ -2154,14 +2167,16 @@ end;
 $$;
 
 revoke all on function private.validate_payment_refund() from public, anon, authenticated;
--- <<< END 20261028221517_202610260015_protect_confirmed_deposits_from_patient_refunds.sql
--- >>> BEGIN 20261028221523_202610260016_align_clinic_timezone_default.sql
+-- <<< END 20261028221517_202610260015_protect_confirmed_deposits_from_patient_refunds
+
+-- >>> BEGIN 20261028221523_202610260016_align_clinic_timezone_default
 -- Keep new clinic records aligned with the clinic's Tijuana UI and reminder
 -- defaults. Existing clinics retain their explicitly stored timezone.
 alter table public.clinics
   alter column timezone set default 'America/Tijuana';
--- <<< END 20261028221523_202610260016_align_clinic_timezone_default.sql
--- >>> BEGIN 20261028221526_202610260017_include_deposit_reserves_in_finance_appointments.sql
+-- <<< END 20261028221523_202610260016_align_clinic_timezone_default
+
+-- >>> BEGIN 20261028221526_202610260017_include_deposit_reserves_in_finance_appointments
 -- Finance-only appointment lookups must include deposit fields so refund
 -- workflows can display the amount reserved by confirmed bookings.
 drop function public.get_finance_appointments(uuid, timestamptz, timestamptz, uuid[]);
@@ -2204,8 +2219,9 @@ $$;
 
 revoke all on function public.get_finance_appointments(uuid, timestamptz, timestamptz, uuid[]) from public, anon;
 grant execute on function public.get_finance_appointments(uuid, timestamptz, timestamptz, uuid[]) to authenticated;
--- <<< END 20261028221526_202610260017_include_deposit_reserves_in_finance_appointments.sql
--- >>> BEGIN 20261028221529_202610270001_patient_encounters_and_files.sql
+-- <<< END 20261028221526_202610260017_include_deposit_reserves_in_finance_appointments
+
+-- >>> BEGIN 20261028221529_202610270001_patient_encounters_and_files
 -- Structured clinical encounters and patient-linked copies of signed documents.
 -- The storage bucket is private; files are served only through short-lived URLs.
 create table public.patient_encounters (
@@ -2277,8 +2293,9 @@ create policy patient_record_files_insert on storage.objects for insert to authe
     and (select private.has_clinic_access((storage.foldername(name))[1]::uuid, array['admin','clinician']))
     and (storage.foldername(name))[2] is not null
   );
--- <<< END 20261028221529_202610270001_patient_encounters_and_files.sql
--- >>> BEGIN 20261028221533_202610270002_appointment_confirmation_responses.sql
+-- <<< END 20261028221529_202610270001_patient_encounters_and_files
+
+-- >>> BEGIN 20261028221533_202610270002_appointment_confirmation_responses
 -- Two-way appointment confirmation requests. No outbound message is sent by
 -- this migration; a separately configured service worker dispatches the queue.
 create table public.appointment_confirmation_requests (
@@ -2507,8 +2524,9 @@ select a.clinic_id,a.id,a.reminder_schedule_version,greatest(a.starts_at-interva
   from public.appointments a
  where a.status='pending' and a.starts_at>now()
 on conflict(appointment_id,schedule_version) do nothing;
--- <<< END 20261028221533_202610270002_appointment_confirmation_responses.sql
--- >>> BEGIN 20261028221536_202610270003_botox_treatment_records.sql
+-- <<< END 20261028221533_202610270002_appointment_confirmation_responses
+
+-- >>> BEGIN 20261028221536_202610270003_botox_treatment_records
 -- Separate, clinician-only audit trail for Botox treatment sessions.
 create table public.botox_treatment_records (
   id uuid primary key default gen_random_uuid(),
@@ -2547,8 +2565,9 @@ create policy botox_records_clinician_insert on public.botox_treatment_records
     created_by = (select auth.uid())
     and (select private.has_clinic_access(clinic_id, array['admin','clinician']))
   );
--- <<< END 20261028221536_202610270003_botox_treatment_records.sql
--- >>> BEGIN 20261028221549_202610270004_botox_consent_links.sql
+-- <<< END 20261028221536_202610270003_botox_treatment_records
+
+-- >>> BEGIN 20261028221549_202610270004_botox_consent_links
 -- Tie a Botox treatment record to the signed consent record or uploaded copy.
 alter table public.patient_documents
   add constraint patient_documents_id_patient_clinic_key unique (id, patient_id, clinic_id);
@@ -2566,13 +2585,15 @@ alter table public.botox_treatment_records
   add constraint botox_treatment_consent_file_fkey
     foreign key (consent_file_id, patient_id, clinic_id)
     references public.patient_document_files(id, patient_id, clinic_id) on delete restrict;
--- <<< END 20261028221549_202610270004_botox_consent_links.sql
--- >>> BEGIN 20261028234726_enable_rls_appointment_confirmation_replies.sql
+-- <<< END 20261028221549_202610270004_botox_consent_links
+
+-- >>> BEGIN 20261028234726_enable_rls_appointment_confirmation_replies
 -- Defense in depth for the service-role-only inbound confirmation table.
 -- Client roles have no table grants; service_role bypasses RLS.
 alter table public.appointment_confirmation_replies enable row level security;
--- <<< END 20261028234726_enable_rls_appointment_confirmation_replies.sql
--- >>> BEGIN 20261029000507_branch_contact_and_hours.sql
+-- <<< END 20261028234726_enable_rls_appointment_confirmation_replies
+
+-- >>> BEGIN 20261029000507_branch_contact_and_hours
 alter table public.branches
   add column phone text,
   add column hours text;
@@ -2611,8 +2632,9 @@ set address = 'Avenida General Ignacio Zaragoza 1747 Col. Nueva 21100, Mexicali,
     phone = '6863086854',
     hours = 'Lunes a sábados de 9:00 am a 7:00 pm'
 where name = 'Zaragoza - Florezen';
--- <<< END 20261029000507_branch_contact_and_hours.sql
--- >>> BEGIN 20261029040726_clinic_business_areas.sql
+-- <<< END 20261029000507_branch_contact_and_hours
+
+-- >>> BEGIN 20261029040726_clinic_business_areas
 -- Split the two clinic brands out of their encoded branch names so the CRM
 -- can switch between clinic and area using business_id / branch_id.
 begin;
@@ -2681,8 +2703,9 @@ alter table public.appointments
   on delete restrict;
 
 commit;
--- <<< END 20261029040726_clinic_business_areas.sql
--- >>> BEGIN 20261029050010_profile_avatars.sql
+-- <<< END 20261029040726_clinic_business_areas
+
+-- >>> BEGIN 20261029050010_profile_avatars
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 values (
   'profile-avatars',
@@ -2717,8 +2740,9 @@ using (
   bucket_id = 'profile-avatars'
   and (storage.foldername(name))[1] = (select auth.uid()::text)
 );
--- <<< END 20261029050010_profile_avatars.sql
--- >>> BEGIN 20261029050539_profile_signatures.sql
+-- <<< END 20261029050010_profile_avatars
+
+-- >>> BEGIN 20261029050539_profile_signatures
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 values (
   'profile-signatures',
@@ -2753,8 +2777,9 @@ using (
   bucket_id = 'profile-signatures'
   and (storage.foldername(name))[1] = (select auth.uid()::text)
 );
--- <<< END 20261029050539_profile_signatures.sql
--- >>> BEGIN 20261029064027_admin_clinic_membership_insert.sql
+-- <<< END 20261029050539_profile_signatures
+
+-- >>> BEGIN 20261029064027_admin_clinic_membership_insert
 -- Let clinic admins grant an existing account access to their clinic.
 -- Membership changes keep RLS and the membership audit trigger in effect.
 grant insert on public.clinic_memberships to authenticated;
@@ -2762,8 +2787,9 @@ grant insert on public.clinic_memberships to authenticated;
 create policy memberships_admin_insert on public.clinic_memberships
   for insert to authenticated
   with check ((select private.has_clinic_access(clinic_id, array['admin'])));
--- <<< END 20261029064027_admin_clinic_membership_insert.sql
--- >>> BEGIN 20261029080207_admin_manage_clinic_memberships.sql
+-- <<< END 20261029064027_admin_clinic_membership_insert
+
+-- >>> BEGIN 20261029080207_admin_manage_clinic_memberships
 -- Allow clinic admins to update roles and revoke access while keeping the audit trigger active.
 grant update (role), delete on public.clinic_memberships to authenticated;
 
@@ -2821,8 +2847,9 @@ revoke all on function private.prevent_last_clinic_admin_removal() from public;
 create trigger prevent_last_clinic_admin_removal
   before update of role or delete on public.clinic_memberships
   for each row execute function private.prevent_last_clinic_admin_removal();
--- <<< END 20261029080207_admin_manage_clinic_memberships.sql
--- >>> BEGIN 20261029180738_professional_account_links.sql
+-- <<< END 20261029080207_admin_manage_clinic_memberships
+
+-- >>> BEGIN 20261029180738_professional_account_links
 -- Identity comes from the account; clinical title and branch assignments stay clinic-owned.
 create or replace function private.enforce_provider_account_identity()
 returns trigger language plpgsql security definer set search_path = '' as $$
@@ -2900,8 +2927,9 @@ end;
 $$;
 revoke all on function public.save_clinic_professional(uuid,uuid,uuid,text,text,uuid[]) from public, anon;
 grant execute on function public.save_clinic_professional(uuid,uuid,uuid,text,text,uuid[]) to authenticated;
--- <<< END 20261029180738_professional_account_links.sql
--- >>> BEGIN 20261029182052_agenda_professional_colors.sql
+-- <<< END 20261029180738_professional_account_links
+
+-- >>> BEGIN 20261029182052_agenda_professional_colors
 -- Agenda identity belongs to a professional at a branch, independently of patient avatars and appointment status.
 create or replace function private.valid_agenda_color_config(color text, service_colors jsonb)
 returns boolean language plpgsql immutable set search_path = '' as $$
@@ -2972,8 +3000,9 @@ create or replace function public.save_clinic_professional(
   select public.save_clinic_professional_with_colors(p_clinic_id,p_provider_id,p_user_id,p_name,p_role_title,p_branch_ids,null);
 $$;
 notify pgrst, 'reload schema';
--- <<< END 20261029182052_agenda_professional_colors.sql
--- >>> BEGIN 20261029191404_clinic_services_catalog.sql
+-- <<< END 20261029182052_agenda_professional_colors
+
+-- >>> BEGIN 20261029191404_clinic_services_catalog
 create table public.clinic_services (
   id uuid primary key default gen_random_uuid(),
   clinic_id uuid not null references public.clinics(id) on delete cascade,
@@ -3146,8 +3175,9 @@ $$;
 revoke all on function private.validate_appointment_catalog_service() from public, anon, authenticated;
 create trigger appointments_catalog_service_guard before insert or update of service_id, service_snapshot, branch_id, provider_id
   on public.appointments for each row execute function private.validate_appointment_catalog_service();
--- <<< END 20261029191404_clinic_services_catalog.sql
--- >>> BEGIN 20261029192115_preserve_service_snapshots.sql
+-- <<< END 20261029191404_clinic_services_catalog
+
+-- >>> BEGIN 20261029192115_preserve_service_snapshots
 create or replace function private.validate_appointment_catalog_service()
 returns trigger language plpgsql security definer set search_path = '' as $$
 declare service_row public.clinic_services%rowtype;
@@ -3186,8 +3216,9 @@ $$;
 drop trigger if exists appointments_catalog_service_guard on public.appointments;
 create trigger appointments_catalog_service_guard before insert or update of service_id, service_snapshot, service, branch_id, provider_id
   on public.appointments for each row execute function private.validate_appointment_catalog_service();
--- <<< END 20261029192115_preserve_service_snapshots.sql
--- >>> BEGIN 20261029192455_multi_service_appointments.sql
+-- <<< END 20261029192115_preserve_service_snapshots
+
+-- >>> BEGIN 20261029192455_multi_service_appointments
 alter table public.appointments add column service_ids uuid[] not null default array[]::uuid[];
 update public.appointments set service_ids = array[service_id] where service_id is not null;
 create index appointments_service_ids_gin on public.appointments using gin (service_ids);
@@ -3272,8 +3303,9 @@ $$;
 drop trigger if exists appointments_catalog_service_guard on public.appointments;
 create trigger appointments_catalog_service_guard before insert or update of service_id, service_ids, service_snapshot, service, branch_id, provider_id, starts_at, ends_at
   on public.appointments for each row execute function private.validate_appointment_catalog_service();
--- <<< END 20261029192455_multi_service_appointments.sql
--- >>> BEGIN 20261029193937_clarify_lipolaser_assessment_currency.sql
+-- <<< END 20261029192455_multi_service_appointments
+
+-- >>> BEGIN 20261029193937_clarify_lipolaser_assessment_currency
 update public.clinic_services
 set offers = jsonb_set(offers, '{0,currency}', '"MXN"'::jsonb, false),
     notes = 'Moneda aclarada por la clínica: MXN.',
@@ -3282,8 +3314,9 @@ where code = 'lipo-assessment'
   and offers #>> '{0,kind}' = 'single'
   and (offers #>> '{0,amount}')::numeric = 500
   and offers #>> '{0,currency}' = 'UNRESOLVED';
--- <<< END 20261029193937_clarify_lipolaser_assessment_currency.sql
--- >>> BEGIN 20261029194320_empty_service_scope_is_clinic_wide.sql
+-- <<< END 20261029193937_clarify_lipolaser_assessment_currency
+
+-- >>> BEGIN 20261029194320_empty_service_scope_is_clinic_wide
 create or replace function private.validate_appointment_catalog_service()
 returns trigger language plpgsql security definer set search_path = '' as $$
 declare
@@ -3362,8 +3395,9 @@ begin
   return new;
 end;
 $$;
--- <<< END 20261029194320_empty_service_scope_is_clinic_wide.sql
--- >>> BEGIN 20261029225620_clinic_whatsapp_mock_setup.sql
+-- <<< END 20261029194320_empty_service_scope_is_clinic_wide
+
+-- >>> BEGIN 20261029225620_clinic_whatsapp_mock_setup
 -- Clinic-scoped WhatsApp setup metadata for a simulated provider only.
 -- No credentials, Meta connection, webhook registration, or message delivery.
 create table public.clinic_whatsapp_configurations (
@@ -3766,8 +3800,9 @@ end;
 $$;
 revoke all on function public.get_appointment_reminders_v2(uuid, timestamptz, timestamptz) from public, anon;
 grant execute on function public.get_appointment_reminders_v2(uuid, timestamptz, timestamptz) to authenticated;
--- <<< END 20261029225620_clinic_whatsapp_mock_setup.sql
--- >>> BEGIN 20261030034458_google_calendar_oauth.sql
+-- <<< END 20261029225620_clinic_whatsapp_mock_setup
+
+-- >>> BEGIN 20261030034458_google_calendar_oauth
 -- Server-only OAuth credentials for a clinic's Google Calendar connection.
 -- The refresh token is encrypted by the application before it is stored.
 create table public.clinic_google_calendar_connections (
@@ -3912,8 +3947,9 @@ revoke all on function public.queue_google_calendar_initial_sync(uuid) from publ
 revoke all on function public.claim_google_calendar_sync_jobs(uuid, integer) from public, anon, authenticated;
 grant execute on function public.queue_google_calendar_initial_sync(uuid) to service_role;
 grant execute on function public.claim_google_calendar_sync_jobs(uuid, integer) to service_role;
--- <<< END 20261030034458_google_calendar_oauth.sql
--- >>> BEGIN 20261030052342_google_calendar_provider_connections.sql
+-- <<< END 20261030034458_google_calendar_oauth
+
+-- >>> BEGIN 20261030052342_google_calendar_provider_connections
 begin;
 
 create table public.clinic_provider_google_calendar_connections (
@@ -4152,8 +4188,9 @@ grant execute on function public.queue_google_calendar_provider_initial_sync(uui
 grant execute on function public.claim_google_calendar_sync_jobs(uuid, integer, uuid) to service_role;
 
 commit;
--- <<< END 20261030052342_google_calendar_provider_connections.sql
--- >>> BEGIN 20261030062740_google_calendar_disable_clinic_fallback.sql
+-- <<< END 20261030052342_google_calendar_provider_connections
+
+-- >>> BEGIN 20261030062740_google_calendar_disable_clinic_fallback
 begin;
 
 -- Only a professional's own connected Google account receives appointment events.
@@ -4312,8 +4349,9 @@ end;
 $$;
 
 commit;
--- <<< END 20261030062740_google_calendar_disable_clinic_fallback.sql
--- >>> BEGIN 20261030070000_google_calendar_per_crm_account.sql
+-- <<< END 20261030062740_google_calendar_disable_clinic_fallback
+
+-- >>> BEGIN 20261030064854_google_calendar_per_crm_account
 -- Google Calendar OAuth connections belong to the CRM account that authorized them.
 -- Each CRM user can independently connect a Google account and sync clinic appointments.
 
@@ -4507,8 +4545,9 @@ end;
 $$;
 revoke all on function public.claim_google_calendar_sync_jobs(uuid, integer, uuid, uuid) from public, anon, authenticated;
 grant execute on function public.claim_google_calendar_sync_jobs(uuid, integer, uuid, uuid) to service_role;
--- <<< END 20261030070000_google_calendar_per_crm_account.sql
--- >>> BEGIN 20261030072515_clinic_availability.sql
+-- <<< END 20261030064854_google_calendar_per_crm_account
+
+-- >>> BEGIN 20261030072515_clinic_availability
 -- Clinic availability rules: scoped blocks and configurable provider overlaps.
 
 create table public.clinic_availability_settings (
@@ -4676,8 +4715,9 @@ create trigger clinic_availability_settings_protect
 create trigger clinic_availability_blocks_protect
   before insert or update on public.clinic_availability_blocks
   for each row execute function private.protect_clinic_availability_block();
--- <<< END 20261030072515_clinic_availability.sql
--- >>> BEGIN 20261030072602_clinic_availability_policy_tuneup.sql
+-- <<< END 20261030072515_clinic_availability
+
+-- >>> BEGIN 20261030072602_clinic_availability_policy_tuneup
 -- Keep read policies single-purpose and index all availability block foreign keys.
 
 drop policy availability_settings_admin_write on public.clinic_availability_settings;
@@ -4702,4 +4742,1282 @@ create index clinic_availability_blocks_provider_fk_idx
   on public.clinic_availability_blocks (provider_id, clinic_id) where provider_id is not null;
 create index clinic_availability_blocks_created_by_fk_idx
   on public.clinic_availability_blocks (created_by) where created_by is not null;
--- <<< END 20261030072602_clinic_availability_policy_tuneup.sql
+-- <<< END 20261030072602_clinic_availability_policy_tuneup
+
+-- >>> BEGIN 20261030194825_team_push_notifications
+-- Staff alerts contain no patient names, services, contact details or clinical text.
+create table public.staff_notification_preferences (
+  clinic_id uuid not null,
+  user_id uuid not null default auth.uid(),
+  new_appointment boolean not null default true,
+  agenda_change boolean not null default true,
+  include_self boolean not null default false,
+  push_enabled boolean not null default true,
+  primary key (clinic_id,user_id),
+  foreign key (clinic_id,user_id) references public.clinic_memberships(clinic_id,user_id) on delete cascade
+);
+create table public.staff_push_subscriptions (
+  id uuid primary key default gen_random_uuid(),
+  clinic_id uuid not null,
+  user_id uuid not null default auth.uid(),
+  endpoint text not null check (length(endpoint) between 20 and 2048),
+  p256dh text not null check (length(p256dh) between 40 and 200),
+  auth text not null check (length(auth) between 16 and 100),
+  created_at timestamptz not null default now(),
+  unique (endpoint),
+  foreign key (clinic_id,user_id) references public.clinic_memberships(clinic_id,user_id) on delete cascade
+);
+create table public.staff_notifications (
+  id uuid primary key default gen_random_uuid(),
+  clinic_id uuid not null,
+  user_id uuid not null,
+  appointment_id uuid references public.appointments(id) on delete cascade,
+  kind text not null check (kind in ('new_appointment','agenda_change','test')),
+  message text not null check (message in ('Nueva cita registrada','Cita cancelada','Horario o asignación de cita actualizado','Prueba de notificaciones')),
+  created_at timestamptz not null default now(),
+  read_at timestamptz,
+  foreign key (clinic_id,user_id) references public.clinic_memberships(clinic_id,user_id) on delete cascade
+);
+create index staff_notifications_inbox on public.staff_notifications(user_id,clinic_id,created_at desc);
+create table private.staff_push_deliveries (
+  id uuid primary key default gen_random_uuid(),
+  notification_id uuid not null references public.staff_notifications(id) on delete cascade,
+  subscription_id uuid not null references public.staff_push_subscriptions(id) on delete cascade,
+  state text not null default 'pending' check (state in ('pending','sending','sent','failed','skipped')),
+  attempts integer not null default 0,
+  available_at timestamptz not null default now(),
+  claim_token uuid,
+  last_error text,
+  unique (notification_id,subscription_id)
+);
+create index staff_push_due on private.staff_push_deliveries(available_at) where state in ('pending','sending');
+alter table public.staff_notification_preferences enable row level security;
+alter table public.staff_push_subscriptions enable row level security;
+alter table public.staff_notifications enable row level security;
+alter table private.staff_push_deliveries enable row level security;
+revoke all on public.staff_notification_preferences,public.staff_push_subscriptions,public.staff_notifications from anon,authenticated;
+grant select,insert,update,delete on public.staff_notification_preferences to authenticated;
+-- Subscriptions may only be written through the validated server route.
+grant select,delete on public.staff_push_subscriptions to authenticated;
+grant select,delete on public.staff_notifications to authenticated;
+grant update (read_at) on public.staff_notifications to authenticated;
+grant all on public.staff_notification_preferences,public.staff_push_subscriptions,public.staff_notifications,private.staff_push_deliveries to service_role;
+create policy preferences_owner on public.staff_notification_preferences to authenticated
+  using (user_id=(select auth.uid()) and private.has_clinic_access(clinic_id))
+  with check (user_id=(select auth.uid()) and private.has_clinic_access(clinic_id));
+create policy subscriptions_owner on public.staff_push_subscriptions to authenticated
+  using (user_id=(select auth.uid()) and private.has_clinic_access(clinic_id));
+create policy notifications_owner on public.staff_notifications to authenticated
+  using (user_id=(select auth.uid()) and private.has_clinic_access(clinic_id));
+
+-- Runs only from the appointment trigger. The definer is needed to fan out to
+-- other members' inboxes; no public role can invoke this function directly.
+create function private.capture_staff_appointment_alert() returns trigger
+language plpgsql security definer set search_path='' as $$
+declare alert_kind text; alert_message text; recipient record; alert_id uuid;
+begin
+  if TG_OP='INSERT' then
+    alert_kind := 'new_appointment'; alert_message := 'Nueva cita registrada';
+  elsif new.status='cancelled' and old.status is distinct from new.status then
+    alert_kind := 'agenda_change'; alert_message := 'Cita cancelada';
+  elsif row(new.starts_at,new.ends_at,new.provider_id,new.branch_id) is distinct from row(old.starts_at,old.ends_at,old.provider_id,old.branch_id) then
+    alert_kind := 'agenda_change'; alert_message := 'Horario o asignación de cita actualizado';
+  else return new;
+  end if;
+  for recipient in
+    select m.user_id,coalesce(p.push_enabled,true) as push_enabled
+    from public.clinic_memberships m
+    left join public.staff_notification_preferences p on p.clinic_id=m.clinic_id and p.user_id=m.user_id
+    where m.clinic_id=new.clinic_id
+      and (m.user_id is distinct from auth.uid() or coalesce(p.include_self,false))
+      and case when alert_kind='new_appointment' then coalesce(p.new_appointment,true) else coalesce(p.agenda_change,true) end
+      and (m.role in ('admin','receptionist') or (m.role='clinician' and exists (
+        select 1 from public.clinic_providers cp where cp.clinic_id=m.clinic_id and cp.user_id=m.user_id and cp.active
+          and (cp.id=new.provider_id or (TG_OP='UPDATE' and cp.id=old.provider_id))
+      )))
+  loop
+    insert into public.staff_notifications(clinic_id,user_id,appointment_id,kind,message)
+      values(new.clinic_id,recipient.user_id,new.id,alert_kind,alert_message) returning id into alert_id;
+    if recipient.push_enabled then
+      insert into private.staff_push_deliveries(notification_id,subscription_id)
+        select alert_id,s.id from public.staff_push_subscriptions s where s.clinic_id=new.clinic_id and s.user_id=recipient.user_id;
+    end if;
+  end loop;
+  return new;
+end $$;
+revoke all on function private.capture_staff_appointment_alert() from public,anon,authenticated;
+create trigger appointments_staff_alert after insert or update on public.appointments
+  for each row execute function private.capture_staff_appointment_alert();
+
+-- SKIP LOCKED and a lease prevent concurrent workers claiming the same delivery.
+create function public.claim_staff_push(target_limit integer default 20)
+returns table(delivery_id uuid,token uuid,subscription_id uuid,endpoint text,p256dh text,auth text,message text,clinic_id uuid,appointment_id uuid)
+language plpgsql security definer set search_path='' as $$
+begin
+  -- Expired leases get at most three attempts. A crash can cause a repeated push;
+  -- the stable notification tag replaces it on the receiving device.
+  update private.staff_push_deliveries set state='failed',last_error='Delivery attempts exhausted'
+    where state='sending' and available_at<=now() and attempts>=3;
+  return query
+  with due as (
+    select d.id from private.staff_push_deliveries d
+    where d.state in ('pending','sending') and d.available_at<=now() and d.attempts<3
+    order by d.available_at for update skip locked limit greatest(1,least(target_limit,50))
+  ), claimed as (
+    update private.staff_push_deliveries d set state='sending',attempts=d.attempts+1,claim_token=gen_random_uuid(),available_at=now()+interval '2 minutes'
+    from due where d.id=due.id returning d.*
+  )
+  select c.id,c.claim_token,s.id,s.endpoint,s.p256dh,s.auth,n.message,n.clinic_id,n.appointment_id
+  from claimed c join public.staff_notifications n on n.id=c.notification_id
+  join public.staff_push_subscriptions s on s.id=c.subscription_id;
+end $$;
+revoke all on function public.claim_staff_push(integer) from public,anon,authenticated;
+grant execute on function public.claim_staff_push(integer) to service_role;
+
+-- Recheck membership and preferences immediately before any provider call.
+create function public.staff_push_is_eligible(target_id uuid,target_token uuid) returns boolean
+language sql security definer set search_path='' as $$
+ select exists(select 1 from private.staff_push_deliveries d
+ join public.staff_notifications n on n.id=d.notification_id
+ join public.clinic_memberships m on m.clinic_id=n.clinic_id and m.user_id=n.user_id
+ join public.staff_push_subscriptions s on s.id=d.subscription_id and s.clinic_id=n.clinic_id and s.user_id=n.user_id
+ left join public.staff_notification_preferences p on p.clinic_id=m.clinic_id and p.user_id=m.user_id
+ where d.id=target_id and d.claim_token=target_token and d.state='sending' and d.available_at>now()
+ and (m.role in ('admin','receptionist') or n.kind='test' or (m.role='clinician' and exists(select 1 from public.clinic_providers cp where cp.clinic_id=m.clinic_id and cp.user_id=m.user_id and cp.active)))
+ and coalesce(p.push_enabled,true)
+ and case n.kind when 'new_appointment' then coalesce(p.new_appointment,true) when 'agenda_change' then coalesce(p.agenda_change,true) else true end);
+$$;
+revoke all on function public.staff_push_is_eligible(uuid,uuid) from public,anon,authenticated;
+grant execute on function public.staff_push_is_eligible(uuid,uuid) to service_role;
+create function public.settle_staff_push(target_id uuid,target_token uuid,target_state text,target_error text default null) returns boolean
+language plpgsql security definer set search_path='' as $$
+begin
+ if target_state not in ('sent','failed','skipped','pending') then raise exception 'Invalid delivery state'; end if;
+ update private.staff_push_deliveries set state=case when target_state='pending' and attempts>=3 then 'failed' else target_state end,
+   available_at=now()+interval '1 minute' * power(2,attempts),last_error=left(target_error,120),claim_token=null
+ where id=target_id and claim_token=target_token and state='sending';
+ return found;
+end $$;
+revoke all on function public.settle_staff_push(uuid,uuid,text,text) from public,anon,authenticated;
+grant execute on function public.settle_staff_push(uuid,uuid,text,text) to service_role;
+
+create function public.queue_staff_push_test(target_clinic uuid,target_user uuid,target_subscription uuid) returns uuid
+language plpgsql security definer set search_path='' as $$
+declare alert_id uuid;
+begin
+ perform pg_advisory_xact_lock(hashtextextended(target_user::text,0));
+ if not exists(select 1 from public.staff_push_subscriptions where id=target_subscription and clinic_id=target_clinic and user_id=target_user) then raise exception 'Device not registered'; end if;
+ if exists(select 1 from public.staff_notifications where clinic_id=target_clinic and user_id=target_user and kind='test' and created_at>now()-interval '1 minute') then raise exception 'Wait one minute before testing again'; end if;
+ insert into public.staff_notifications(clinic_id,user_id,kind,message) values(target_clinic,target_user,'test','Prueba de notificaciones') returning id into alert_id;
+ insert into private.staff_push_deliveries(notification_id,subscription_id) values(alert_id,target_subscription);
+ return alert_id;
+end $$;
+revoke all on function public.queue_staff_push_test(uuid,uuid,uuid) from public,anon,authenticated;
+grant execute on function public.queue_staff_push_test(uuid,uuid,uuid) to service_role;
+-- <<< END 20261030194825_team_push_notifications
+
+-- >>> BEGIN 20261030202528_public_agenda_requests
+-- Public reads/writes go through server-only, narrowly scoped functions.
+create table public.public_agenda_settings (
+ clinic_id uuid primary key references public.clinics(id) on delete cascade,
+ slug text not null unique check(slug ~ '^[a-z0-9][a-z0-9-]{2,59}$'),
+ published boolean not null default false,
+ min_notice_minutes integer not null default 1440 check(min_notice_minutes between 0 and 43200),
+ max_days integer not null default 90 check(max_days between 1 and 365),
+ buffer_minutes integer not null default 0 check(buffer_minutes between 0 and 120),
+ require_email boolean not null default false
+);
+create table public.public_agenda_offers (
+ id uuid primary key default gen_random_uuid(),clinic_id uuid not null references public.clinics(id) on delete cascade,
+ service_id uuid not null,branch_id uuid not null,provider_id uuid not null,
+ duration_minutes integer not null check(duration_minutes between 15 and 720 and duration_minutes%15=0),
+ deposit_amount numeric(12,2) not null check(deposit_amount>0),active boolean not null default true,
+ unique(id,clinic_id),unique(clinic_id,service_id,branch_id,provider_id),
+ foreign key(service_id,clinic_id) references public.clinic_services(id,clinic_id),
+ foreign key(branch_id,clinic_id) references public.branches(id,clinic_id),
+ foreign key(provider_id,clinic_id) references public.clinic_providers(id,clinic_id)
+);
+create table public.public_agenda_hours (
+ id uuid primary key default gen_random_uuid(),clinic_id uuid not null references public.clinics(id) on delete cascade,
+ branch_id uuid not null,provider_id uuid not null,
+ day_of_week integer check(day_of_week between 0 and 6),on_date date,
+ closed boolean not null default false,opens_minute integer,closes_minute integer,
+ check((day_of_week is null)<>(on_date is null)),
+ check((closed and on_date is not null and opens_minute is null and closes_minute is null)
+   or (not closed and opens_minute is not null and closes_minute is not null and opens_minute>=360 and closes_minute<=1440 and closes_minute>opens_minute and opens_minute%15=0 and closes_minute%15=0)),
+ foreign key(branch_id,clinic_id) references public.branches(id,clinic_id),
+ foreign key(provider_id,clinic_id) references public.clinic_providers(id,clinic_id)
+);
+create index public_agenda_hours_lookup on public.public_agenda_hours(clinic_id,provider_id,branch_id,day_of_week,on_date);
+create table public.public_booking_requests (
+ id uuid primary key default gen_random_uuid(),clinic_id uuid not null references public.clinics(id) on delete cascade,
+ offer_id uuid not null,nonce uuid not null unique,fingerprint text not null check(length(fingerprint)=64),
+ full_name text not null check(length(trim(full_name)) between 2 and 160),
+ phone text not null check(phone ~ '^\+[1-9][0-9]{7,14}$'),email text check(email is null or (length(email)<=254 and email ~ '^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$')),
+ contact_consent boolean not null check(contact_consent),
+ starts_at timestamptz not null,ends_at timestamptz not null,
+ duration_minutes integer not null,deposit_amount numeric(12,2) not null,service_name text not null,
+ status text not null default 'pending' check(status in ('pending','approved','rejected')),
+ appointment_id uuid unique references public.appointments(id),
+ created_at timestamptz not null default now(),reviewed_at timestamptz,reviewed_by uuid references auth.users(id),
+ foreign key(offer_id,clinic_id) references public.public_agenda_offers(id,clinic_id)
+);
+create index public_booking_request_inbox on public.public_booking_requests(clinic_id,status,created_at desc);
+create unique index public_booking_request_no_duplicates on public.public_booking_requests(clinic_id,phone,offer_id,starts_at) where status='pending';
+create table private.public_agenda_rate_limits (
+ key_hash text not null,window_start timestamptz not null,hits integer not null,
+ primary key(key_hash,window_start)
+);
+alter table private.public_agenda_rate_limits enable row level security;
+alter table public.public_agenda_settings enable row level security;
+alter table public.public_agenda_offers enable row level security;
+alter table public.public_agenda_hours enable row level security;
+alter table public.public_booking_requests enable row level security;
+revoke all on public.public_agenda_settings,public.public_agenda_offers,public.public_agenda_hours,public.public_booking_requests from anon,authenticated;
+grant select on public.public_agenda_settings,public.public_agenda_offers,public.public_agenda_hours to authenticated;
+grant select on public.public_booking_requests to authenticated;
+grant all on public.public_agenda_settings,public.public_agenda_offers,public.public_agenda_hours,public.public_booking_requests,private.public_agenda_rate_limits to service_role;
+create policy public_agenda_settings_staff on public.public_agenda_settings for select to authenticated using(private.has_clinic_access(clinic_id,array['admin','receptionist']));
+create policy public_agenda_offers_staff on public.public_agenda_offers for select to authenticated using(private.has_clinic_access(clinic_id,array['admin','receptionist']));
+create policy public_agenda_hours_staff on public.public_agenda_hours for select to authenticated using(private.has_clinic_access(clinic_id,array['admin','receptionist']));
+create policy public_booking_requests_staff on public.public_booking_requests for select to authenticated using(private.has_clinic_access(clinic_id,array['admin','receptionist']));
+
+create function private.public_offer_valid(p_offer uuid) returns boolean language sql stable set search_path='' as $$
+ select exists(select 1 from public.public_agenda_offers o
+ join public.branches b on b.id=o.branch_id and b.clinic_id=o.clinic_id and b.active
+ join public.businesses business on business.id=b.business_id and business.clinic_id=o.clinic_id and business.active
+ join public.clinic_providers p on p.id=o.provider_id and p.clinic_id=o.clinic_id and p.active
+ join public.provider_branches pb on pb.provider_id=p.id and pb.branch_id=b.id and pb.clinic_id=o.clinic_id
+ join public.clinic_services s on s.id=o.service_id and s.clinic_id=o.clinic_id and s.active
+ where o.id=p_offer and o.active
+ and (not exists(select 1 from public.clinic_service_branches x where x.service_id=s.id) or exists(select 1 from public.clinic_service_branches x where x.service_id=s.id and x.branch_id=b.id))
+ and (not exists(select 1 from public.clinic_service_providers x where x.service_id=s.id) or exists(select 1 from public.clinic_service_providers x where x.service_id=s.id and x.provider_id=p.id)));
+$$;
+revoke all on function private.public_offer_valid(uuid) from public,anon,authenticated;
+
+create function private.public_slot_open(p_offer uuid,p_start timestamptz,p_review boolean default false) returns boolean
+language plpgsql stable set search_path='' as $$
+declare o public.public_agenda_offers;cfg public.public_agenda_settings;tz text;local_start timestamp;day date;minute integer;visit_end timestamptz;
+begin
+ select * into o from public.public_agenda_offers where id=p_offer;
+ if not found or not private.public_offer_valid(p_offer) then return false;end if;
+ select * into cfg from public.public_agenda_settings where clinic_id=o.clinic_id;
+ if not found or not cfg.published then return false;end if;
+ select timezone into tz from public.clinics where id=o.clinic_id;
+ local_start:=p_start at time zone tz;day:=local_start::date;
+ minute:=extract(hour from local_start)::integer*60+extract(minute from local_start)::integer;
+ visit_end:=p_start+make_interval(mins=>o.duration_minutes);
+ if p_start<=now() or (not p_review and p_start<now()+make_interval(mins=>cfg.min_notice_minutes))
+ or day>(now() at time zone tz)::date+cfg.max_days or extract(second from local_start)<>0 or minute%15<>0 then return false;end if;
+ -- Date exceptions replace that day's recurring windows, including all-day closures.
+ if not exists(select 1 from public.public_agenda_hours h where h.clinic_id=o.clinic_id and h.branch_id=o.branch_id and h.provider_id=o.provider_id and not h.closed
+   and (h.on_date=day or (h.day_of_week=extract(dow from day)::integer and not exists(select 1 from public.public_agenda_hours e where e.clinic_id=o.clinic_id and e.branch_id=o.branch_id and e.provider_id=o.provider_id and e.on_date=day)))
+   and minute>=h.opens_minute and minute+o.duration_minutes<=h.closes_minute) then return false;end if;
+ -- Public capacity is always one, even if internal staff permit overlapping visits.
+ if exists(select 1 from public.appointments a where a.clinic_id=o.clinic_id and a.provider_id=o.provider_id and a.status<>'cancelled'
+   and tstzrange(a.starts_at,a.ends_at,'[)') && tstzrange(p_start-make_interval(mins=>cfg.buffer_minutes),visit_end+make_interval(mins=>cfg.buffer_minutes),'[)')) then return false;end if;
+ if exists(select 1 from public.clinic_availability_blocks b where b.clinic_id=o.clinic_id and (b.scope='clinic' or b.branch_id=o.branch_id or b.provider_id=o.provider_id)
+   and tstzrange(b.starts_at,b.ends_at,'[)') && tstzrange(p_start,visit_end,'[)')) then return false;end if;
+ return true;
+end $$;
+revoke all on function private.public_slot_open(uuid,timestamptz,boolean) from public,anon,authenticated;
+
+create function public.save_public_agenda(p_clinic uuid,p_settings jsonb,p_offers jsonb,p_hours jsonb) returns void
+language plpgsql security definer set search_path='' as $$
+declare item jsonb;offer_id uuid;
+begin
+ if auth.uid() is null or not private.has_clinic_access(p_clinic,array['admin']) then raise exception 'Solo administración puede configurar la agenda pública.' using errcode='42501';end if;
+ if jsonb_array_length(p_offers)>100 or jsonb_array_length(p_hours)>300 then raise exception 'Demasiadas opciones u horarios.';end if;
+ perform pg_advisory_xact_lock(hashtextextended('availability:'||p_clinic::text,0));
+ insert into public.public_agenda_settings(clinic_id,slug,published,min_notice_minutes,max_days,buffer_minutes,require_email)
+ values(p_clinic,p_settings->>'slug',coalesce((p_settings->>'published')::boolean,false),(p_settings->>'min_notice_minutes')::integer,(p_settings->>'max_days')::integer,(p_settings->>'buffer_minutes')::integer,coalesce((p_settings->>'require_email')::boolean,false))
+ on conflict(clinic_id) do update set slug=excluded.slug,published=excluded.published,min_notice_minutes=excluded.min_notice_minutes,max_days=excluded.max_days,buffer_minutes=excluded.buffer_minutes,require_email=excluded.require_email;
+ update public.public_agenda_offers set active=false where clinic_id=p_clinic;
+ for item in select * from jsonb_array_elements(p_offers) loop
+   offer_id:=coalesce(nullif(item->>'id','')::uuid,gen_random_uuid());
+   if exists(select 1 from public.public_agenda_offers where id=offer_id and (clinic_id<>p_clinic or service_id<>(item->>'service_id')::uuid or branch_id<>(item->>'branch_id')::uuid or provider_id<>(item->>'provider_id')::uuid)) then raise exception 'La identidad de una opción guardada no puede cambiar; agrega una opción nueva.';end if;
+   -- Re-adding an archived combination retains its identity and request history.
+   select coalesce((select id from public.public_agenda_offers where clinic_id=p_clinic and service_id=(item->>'service_id')::uuid and branch_id=(item->>'branch_id')::uuid and provider_id=(item->>'provider_id')::uuid),offer_id) into offer_id;
+   insert into public.public_agenda_offers(id,clinic_id,service_id,branch_id,provider_id,duration_minutes,deposit_amount,active)
+   values(offer_id,p_clinic,(item->>'service_id')::uuid,(item->>'branch_id')::uuid,(item->>'provider_id')::uuid,(item->>'duration_minutes')::integer,(item->>'deposit_amount')::numeric,true)
+   on conflict(id) do update set duration_minutes=excluded.duration_minutes,deposit_amount=excluded.deposit_amount,active=true;
+   if not private.public_offer_valid(offer_id) then raise exception 'Revisa el servicio, sucursal y profesional de cada opción.';end if;
+ end loop;
+ delete from public.public_agenda_hours where clinic_id=p_clinic;
+ for item in select * from jsonb_array_elements(p_hours) loop
+   insert into public.public_agenda_hours(clinic_id,branch_id,provider_id,day_of_week,on_date,closed,opens_minute,closes_minute)
+   values(p_clinic,(item->>'branch_id')::uuid,(item->>'provider_id')::uuid,nullif(item->>'day_of_week','')::integer,nullif(item->>'on_date','')::date,coalesce((item->>'closed')::boolean,false),nullif(item->>'opens_minute','')::integer,nullif(item->>'closes_minute','')::integer);
+ end loop;
+ if exists(select 1 from public.public_agenda_hours h join public.public_agenda_hours e on e.clinic_id=h.clinic_id and e.branch_id=h.branch_id and e.provider_id=h.provider_id and e.id>h.id
+   and e.day_of_week is not distinct from h.day_of_week and e.on_date is not distinct from h.on_date
+   where h.clinic_id=p_clinic and (h.closed or e.closed or int4range(h.opens_minute,h.closes_minute,'[)') && int4range(e.opens_minute,e.closes_minute,'[)'))) then raise exception 'Los horarios no pueden traslaparse ni combinar un cierre con una apertura en la misma fecha.';end if;
+ if (p_settings->>'published')::boolean and (not exists(select 1 from public.public_agenda_offers where clinic_id=p_clinic and active)
+   or exists(select 1 from public.public_agenda_offers o where o.clinic_id=p_clinic and o.active and not exists(select 1 from public.public_agenda_hours h where h.clinic_id=o.clinic_id and h.branch_id=o.branch_id and h.provider_id=o.provider_id and not h.closed))) then raise exception 'Agrega opciones y horarios de atención antes de publicar.';end if;
+end $$;
+revoke all on function public.save_public_agenda(uuid,jsonb,jsonb,jsonb) from public,anon;
+grant execute on function public.save_public_agenda(uuid,jsonb,jsonb,jsonb) to authenticated;
+
+create function public.public_agenda_catalog(p_slug text) returns jsonb language sql stable security definer set search_path='' as $$
+ select jsonb_build_object('name',c.name,'timezone',c.timezone,'slug',cfg.slug,'today',(now() at time zone c.timezone)::date,'lastDate',(now() at time zone c.timezone)::date+cfg.max_days,'minNotice',cfg.min_notice_minutes,'maxDays',cfg.max_days,'requireEmail',cfg.require_email,
+ 'offers',coalesce((select jsonb_agg(jsonb_build_object('id',o.id,'serviceId',s.id,'branchId',b.id,'providerId',p.id,'service',s.name,'branch',b.name,'provider',p.name,'duration',o.duration_minutes,'deposit',o.deposit_amount) order by s.name,b.name,p.name)
+ from public.public_agenda_offers o join public.clinic_services s on s.id=o.service_id join public.branches b on b.id=o.branch_id join public.clinic_providers p on p.id=o.provider_id
+ where o.clinic_id=c.id and private.public_offer_valid(o.id)),'[]'::jsonb))
+ from public.public_agenda_settings cfg join public.clinics c on c.id=cfg.clinic_id where cfg.slug=p_slug and cfg.published;
+$$;
+create function public.public_agenda_slots(p_slug text,p_offer uuid,p_date date) returns table(starts_at timestamptz,ends_at timestamptz)
+language sql stable security definer set search_path='' as $$
+ select slot.at,slot.at+make_interval(mins=>o.duration_minutes)
+ from public.public_agenda_settings cfg join public.clinics c on c.id=cfg.clinic_id
+ join public.public_agenda_offers o on o.clinic_id=c.id and o.id=p_offer
+ cross join generate_series(360,1425,15) minute
+ cross join lateral(select (p_date::timestamp+make_interval(mins=>minute)) at time zone c.timezone as at) slot
+ where cfg.slug=p_slug and cfg.published and p_date between (now() at time zone c.timezone)::date and (now() at time zone c.timezone)::date+cfg.max_days
+ and private.public_slot_open(o.id,slot.at);
+$$;
+revoke all on function public.public_agenda_catalog(text),public.public_agenda_slots(text,uuid,date) from public,anon,authenticated;
+grant execute on function public.public_agenda_catalog(text),public.public_agenda_slots(text,uuid,date) to service_role;
+
+create function public.public_agenda_rate_check(p_key text,p_limit integer,p_seconds integer) returns boolean
+language plpgsql security definer set search_path='' as $$
+declare bucket timestamptz;total integer;
+begin
+ if length(p_key)<>64 or p_seconds not in (60,3600) or p_limit not between 1 and 100 then return false;end if;
+ bucket:=to_timestamp(floor(extract(epoch from now())/p_seconds)*p_seconds);
+ insert into private.public_agenda_rate_limits values(p_key,bucket,1) on conflict(key_hash,window_start) do update set hits=public_agenda_rate_limits.hits+1 returning hits into total;
+ delete from private.public_agenda_rate_limits where window_start<now()-interval '2 hours';
+ return total<=p_limit;
+end $$;
+revoke all on function public.public_agenda_rate_check(text,integer,integer) from public,anon,authenticated;
+grant execute on function public.public_agenda_rate_check(text,integer,integer) to service_role;
+
+create function public.submit_public_booking(p_slug text,p_offer uuid,p_start timestamptz,p_nonce uuid,p_fingerprint text,p_name text,p_phone text,p_email text,p_consent boolean) returns uuid
+language plpgsql security definer set search_path='' as $$
+declare cfg public.public_agenda_settings;o public.public_agenda_offers;existing public.public_booking_requests;request_id uuid;
+begin
+ select * into cfg from public.public_agenda_settings where slug=p_slug and published;
+ if not found then raise exception 'La agenda no está disponible.' using errcode='P0002';end if;
+ perform pg_advisory_xact_lock(hashtextextended('availability:'||cfg.clinic_id::text,0));
+ select * into existing from public.public_booking_requests where nonce=p_nonce;
+ if found then
+   if existing.clinic_id<>cfg.clinic_id or existing.fingerprint<>p_fingerprint then raise exception 'La solicitud ya se utilizó con otros datos.';end if;
+   return existing.id;
+ end if;
+ select * into o from public.public_agenda_offers where id=p_offer and clinic_id=cfg.clinic_id;
+ if not found or not private.public_slot_open(p_offer,p_start) then raise exception 'Ese horario ya no está disponible. Elige otro.' using errcode='23P01';end if;
+ if cfg.require_email and nullif(trim(p_email),'') is null then raise exception 'El correo es obligatorio.';end if;
+ insert into public.public_booking_requests(clinic_id,offer_id,nonce,fingerprint,full_name,phone,email,contact_consent,starts_at,ends_at,duration_minutes,deposit_amount,service_name)
+ values(cfg.clinic_id,p_offer,p_nonce,p_fingerprint,trim(p_name),p_phone,nullif(lower(trim(p_email)),''),p_consent,p_start,p_start+make_interval(mins=>o.duration_minutes),o.duration_minutes,o.deposit_amount,(select name from public.clinic_services where id=o.service_id)) returning id into request_id;
+ return request_id;
+end $$;
+revoke all on function public.submit_public_booking(text,uuid,timestamptz,uuid,text,text,text,text,boolean) from public,anon,authenticated;
+grant execute on function public.submit_public_booking(text,uuid,timestamptz,uuid,text,text,text,text,boolean) to service_role;
+
+create function public.review_public_booking(p_request uuid,p_action text,p_patient uuid default null) returns uuid
+language plpgsql security definer set search_path='' as $$
+declare r public.public_booking_requests;o public.public_agenda_offers;v_patient_id uuid;booked_id uuid;business_id uuid;
+begin
+ select * into r from public.public_booking_requests where id=p_request;
+ if not found or auth.uid() is null or not private.has_clinic_access(r.clinic_id,array['admin','receptionist']) then raise exception 'No tienes permiso para revisar esta solicitud.' using errcode='42501';end if;
+ perform pg_advisory_xact_lock(hashtextextended('availability:'||r.clinic_id::text,0));
+ select * into r from public.public_booking_requests where id=p_request for update;
+ if r.status='approved' and p_action='approve' then return r.appointment_id;end if;
+ if r.status<>'pending' then raise exception 'Esta solicitud ya fue revisada.';end if;
+ if p_action='reject' then update public.public_booking_requests set status='rejected',reviewed_at=now(),reviewed_by=auth.uid() where id=r.id;return null;end if;
+ if p_action<>'approve' then raise exception 'Acción inválida.';end if;
+ select * into o from public.public_agenda_offers where id=r.offer_id;
+ if not private.public_slot_open(o.id,r.starts_at,true) or r.duration_minutes<>o.duration_minutes or r.deposit_amount<>o.deposit_amount then raise exception 'El horario o la configuración cambió. Revisa la solicitud con el paciente antes de agendar.' using errcode='23P01';end if;
+ v_patient_id:=p_patient;
+ if v_patient_id is not null then
+   if not exists(select 1 from public.patients where id=v_patient_id and clinic_id=r.clinic_id) then raise exception 'El expediente no pertenece a esta clínica.';end if;
+   if exists(select 1 from public.appointments a where a.clinic_id=r.clinic_id and a.patient_id=v_patient_id and a.status<>'cancelled' and tstzrange(a.starts_at,a.ends_at,'[)') && tstzrange(r.starts_at,r.ends_at,'[)')) then raise exception 'El paciente ya tiene una cita en ese horario.' using errcode='23P01';end if;
+ else
+   insert into public.patients(clinic_id,record_number,full_name,phone,email,service_summary,status,primary_branch_id,primary_provider_id)
+   values(r.clinic_id,'WEB-'||replace(r.id::text,'-',''),r.full_name,r.phone,r.email,r.service_name,'new',o.branch_id,o.provider_id) returning id into v_patient_id;
+ end if;
+ select b.business_id into business_id from public.branches b where b.id=o.branch_id;
+ insert into public.appointments(clinic_id,patient_id,business_id,branch_id,provider_id,starts_at,ends_at,service,service_id,service_ids,service_snapshot,status,deposit_required,deposit_amount,created_by)
+ values(r.clinic_id,v_patient_id,business_id,o.branch_id,o.provider_id,r.starts_at,r.ends_at,r.service_name,o.service_id,array[o.service_id],jsonb_build_object('source','public_agenda','service',r.service_name,'durationMinutes',r.duration_minutes),'pending',true,r.deposit_amount,auth.uid()) returning id into booked_id;
+ update public.public_booking_requests set status='approved',appointment_id=booked_id,reviewed_at=now(),reviewed_by=auth.uid() where id=r.id;
+ return booked_id;
+end $$;
+revoke all on function public.review_public_booking(uuid,text,uuid) from public,anon;
+grant execute on function public.review_public_booking(uuid,text,uuid) to authenticated;
+
+alter table public.staff_notifications drop constraint staff_notifications_message_check;
+alter table public.staff_notifications add constraint staff_notifications_message_check check(message in ('Nueva cita registrada','Cita cancelada','Horario o asignación de cita actualizado','Prueba de notificaciones','Nueva solicitud de cita'));
+alter table public.staff_notifications add column booking_request_id uuid references public.public_booking_requests(id) on delete cascade;
+create function private.notify_public_booking_request() returns trigger language plpgsql security definer set search_path='' as $$
+declare recipient record;alert_id uuid;
+begin
+ for recipient in select m.user_id,coalesce(p.push_enabled,true) as push_enabled from public.clinic_memberships m
+ left join public.staff_notification_preferences p on p.clinic_id=m.clinic_id and p.user_id=m.user_id
+ where m.clinic_id=new.clinic_id and m.role in ('admin','receptionist') and coalesce(p.new_appointment,true)
+ loop
+   insert into public.staff_notifications(clinic_id,user_id,kind,message,booking_request_id) values(new.clinic_id,recipient.user_id,'new_appointment','Nueva solicitud de cita',new.id) returning id into alert_id;
+   if recipient.push_enabled then insert into private.staff_push_deliveries(notification_id,subscription_id) select alert_id,s.id from public.staff_push_subscriptions s where s.clinic_id=new.clinic_id and s.user_id=recipient.user_id;end if;
+ end loop;
+ return new;
+end $$;
+revoke all on function private.notify_public_booking_request() from public,anon,authenticated;
+create trigger public_booking_request_notice after insert on public.public_booking_requests for each row execute function private.notify_public_booking_request();
+-- <<< END 20261030202528_public_agenda_requests
+
+-- >>> BEGIN 20261030204811_allow_clinic_delete_admin_cascade
+-- Preserve last-admin protection while allowing an authorized whole-clinic deletion.
+create or replace function private.prevent_last_clinic_admin_removal()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  affected_clinic uuid;
+  admins_remaining integer;
+begin
+  if tg_op = 'UPDATE' then
+    if old.role <> 'admin' or new.role = 'admin' then
+      return new;
+    end if;
+    affected_clinic := old.clinic_id;
+  else
+    if old.role <> 'admin' then
+      return old;
+    end if;
+    affected_clinic := old.clinic_id;
+  end if;
+
+  -- Serialize admin demotions/revocations for this clinic to prevent concurrent lockout.
+  perform 1 from public.clinics where id = affected_clinic for update;
+  -- Cascading membership deletion happens after the parent clinic is gone.
+  -- Keep the guard for ordinary demotions/revocations on existing clinics.
+  if not found and tg_op = 'DELETE' then
+    return old;
+  end if;
+
+  select count(*) into admins_remaining
+  from public.clinic_memberships
+  where clinic_id = affected_clinic and role = 'admin';
+
+  if admins_remaining <= 1 then
+    raise exception 'clinic_must_keep_admin'
+      using errcode = '23514';
+  end if;
+
+  if tg_op = 'DELETE' then
+    return old;
+  end if;
+  return new;
+end;
+$$;
+
+revoke all on function private.prevent_last_clinic_admin_removal() from public;
+-- <<< END 20261030204811_allow_clinic_delete_admin_cascade
+
+-- >>> BEGIN 20261030204929_skip_audit_for_deleted_clinic_cascades
+create or replace function private.capture_audit_event()
+returns trigger
+language plpgsql security definer
+set search_path = ''
+as $$
+declare
+  event_row jsonb;
+begin
+  event_row := case when tg_op = 'DELETE' then to_jsonb(old) else to_jsonb(new) end;
+  -- Audit rows belong to the clinic and already cascade with it. During a
+  -- whole-clinic deletion, do not insert a row referencing the deleted parent.
+  if tg_op = 'DELETE' and not exists (select 1 from public.clinics where id=(event_row ->> 'clinic_id')::uuid) then
+    return old;
+  end if;
+
+  insert into public.audit_events (clinic_id, actor_id, entity, action, record_id)
+  values (
+    (event_row ->> 'clinic_id')::uuid,
+    (select auth.uid()),
+    tg_table_name,
+    tg_op,
+    coalesce(
+      event_row ->> 'id',
+      event_row ->> 'record_number',
+      event_row ->> 'user_id',
+      case when event_row ? 'provider_id'
+        then (event_row ->> 'provider_id') || ':' || (event_row ->> 'branch_id')
+        else null
+      end,
+      'unknown'
+    )
+  );
+  if tg_op = 'DELETE' then
+    return old;
+  end if;
+  return new;
+end;
+$$;
+revoke all on function private.capture_audit_event() from public, anon, authenticated;
+-- <<< END 20261030204929_skip_audit_for_deleted_clinic_cascades
+
+-- >>> BEGIN 20261030224417_clinic_whatsapp_twilio_provider
+-- Enable Twilio as a clinic-scoped WhatsApp provider while keeping mock mode
+-- available for local UI development. Account credentials remain server-only.
+alter table public.clinic_whatsapp_configurations
+  drop constraint clinic_whatsapp_configurations_provider_mode_check,
+  add constraint clinic_whatsapp_configurations_provider_mode_check
+    check (provider_mode in ('mock', 'twilio'));
+
+alter table public.clinic_whatsapp_senders
+  drop constraint clinic_whatsapp_senders_sender_key_check,
+  add constraint clinic_whatsapp_senders_sender_key_check
+    check (sender_key ~ '^mock:[a-z0-9]+(-[a-z0-9]+)*$' or sender_key ~ '^twilio:\+[1-9][0-9]{7,14}$'),
+  drop constraint clinic_whatsapp_mock_senders_no_meta_id;
+
+create function public.save_clinic_whatsapp_settings_v2(
+  target_clinic_id uuid,
+  target_provider_mode text,
+  target_allow_default_fallback boolean,
+  target_template_readiness jsonb,
+  target_senders jsonb
+)
+returns boolean
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  sender jsonb;
+  sender_key_value text;
+  display_label_value text;
+  requested_branch uuid;
+  is_default_sender boolean;
+  active_sender boolean;
+  sender_count integer := 0;
+  default_count integer := 0;
+begin
+  if not private.has_clinic_access(target_clinic_id, array['admin']) then
+    raise exception 'Only clinic administrators can update WhatsApp settings.' using errcode = '42501';
+  end if;
+  if target_provider_mode not in ('mock', 'twilio') then
+    raise exception 'Unsupported WhatsApp provider mode.' using errcode = '22023';
+  end if;
+  if target_senders is null or jsonb_typeof(target_senders) <> 'array' or jsonb_array_length(target_senders) > 50 then
+    raise exception 'Invalid sender configuration.' using errcode = '22023';
+  end if;
+  if target_template_readiness is null or jsonb_typeof(target_template_readiness) <> 'object'
+    or target_template_readiness - array['confirmation_2d','reminder_1d','reminder_5h'] <> '{}'::jsonb
+    or not (target_template_readiness ?& array['confirmation_2d','reminder_1d','reminder_5h'])
+    or exists (
+      select 1 from jsonb_each(target_template_readiness) as item(key, value)
+      where jsonb_typeof(item.value) <> 'boolean'
+    ) then
+    raise exception 'Invalid WhatsApp template readiness.' using errcode = '22023';
+  end if;
+
+  insert into public.clinic_whatsapp_configurations (
+    clinic_id, provider_mode, allow_default_fallback, template_readiness, updated_at
+  ) values (
+    target_clinic_id, target_provider_mode, coalesce(target_allow_default_fallback, false), target_template_readiness, now()
+  ) on conflict (clinic_id) do update
+    set provider_mode = excluded.provider_mode,
+        allow_default_fallback = excluded.allow_default_fallback,
+        template_readiness = excluded.template_readiness,
+        updated_at = now();
+
+  update public.clinic_whatsapp_senders
+     set active = false, is_default = false, branch_id = null, updated_at = now()
+   where clinic_id = target_clinic_id;
+  for sender in select value from jsonb_array_elements(target_senders)
+  loop
+    sender_count := sender_count + 1;
+    if jsonb_typeof(sender) <> 'object' then
+      raise exception 'Invalid WhatsApp sender.' using errcode = '22023';
+    end if;
+    sender_key_value := trim(coalesce(sender->>'sender_key', ''));
+    display_label_value := trim(coalesce(sender->>'display_label', ''));
+    requested_branch := nullif(sender->>'branch_id', '')::uuid;
+    is_default_sender := coalesce((sender->>'is_default')::boolean, false);
+    active_sender := coalesce((sender->>'active')::boolean, true);
+    if (target_provider_mode = 'mock' and sender_key_value !~ '^mock:[a-z0-9]+(-[a-z0-9]+)*$')
+      or (target_provider_mode = 'twilio' and sender_key_value !~ '^twilio:\+[1-9][0-9]{7,14}$')
+      or length(display_label_value) not between 1 and 120 then
+      raise exception 'Sender does not match the selected WhatsApp provider.' using errcode = '22023';
+    end if;
+    if coalesce(sender->>'meta_phone_number_id', '') <> '' then
+      raise exception 'Meta sender IDs are not supported by this provider.' using errcode = '22023';
+    end if;
+    if is_default_sender then default_count := default_count + 1; end if;
+    insert into public.clinic_whatsapp_senders (
+      clinic_id, branch_id, sender_key, display_label, is_default, active
+    ) values (
+      target_clinic_id, requested_branch, sender_key_value, display_label_value, is_default_sender, active_sender
+    ) on conflict (clinic_id, sender_key) do update
+      set branch_id = excluded.branch_id,
+          display_label = excluded.display_label,
+          is_default = excluded.is_default,
+          active = excluded.active,
+          updated_at = now();
+  end loop;
+  if default_count > 1 or (target_allow_default_fallback and default_count <> 1) then
+    raise exception 'Default fallback requires exactly one default WhatsApp sender.' using errcode = '22023';
+  end if;
+  if target_allow_default_fallback and not exists (
+    select 1 from public.clinic_whatsapp_senders where clinic_id = target_clinic_id and is_default and active
+  ) then
+    raise exception 'The default WhatsApp sender must be active.' using errcode = '22023';
+  end if;
+  return true;
+end;
+$$;
+
+revoke all on function public.save_clinic_whatsapp_settings_v2(uuid, text, boolean, jsonb, jsonb) from public, anon;
+grant execute on function public.save_clinic_whatsapp_settings_v2(uuid, text, boolean, jsonb, jsonb) to authenticated;
+
+create or replace function public.get_appointment_reminders_v2(
+  target_clinic_id uuid,
+  window_start timestamptz default now(),
+  window_end timestamptz default now() + interval '90 days'
+)
+returns table (
+  id uuid,
+  appointment_id uuid,
+  kind text,
+  scheduled_at timestamptz,
+  status text,
+  attempt_count integer,
+  patient_name text,
+  appointment_at timestamptz,
+  service text,
+  provider_name text,
+  branch_name text,
+  delivery_eligible boolean,
+  delivery_block_reason text,
+  simulated boolean
+)
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+begin
+  if not private.has_clinic_access(target_clinic_id, array['admin', 'receptionist']) then
+    raise exception 'Appointment reminder access is not enabled for this role.' using errcode = '42501';
+  end if;
+  return query
+    select reminder.id, reminder.appointment_id, reminder.kind, reminder.scheduled_at,
+           reminder.status, reminder.attempt_count, patient.full_name, appointment.starts_at,
+           appointment.service, provider.name, branch.name,
+           (patient.appointment_whatsapp_opt_in and coalesce(trim(patient.phone), '') ~ '^\+[1-9][0-9]{7,14}$'),
+           case
+             when not patient.appointment_whatsapp_opt_in then 'Sin autorización de WhatsApp'
+             when nullif(trim(patient.phone), '') is null then 'Falta teléfono'
+             when coalesce(trim(patient.phone), '') !~ '^\+[1-9][0-9]{7,14}$' then 'Teléfono inválido: usa formato internacional'
+             else null
+           end,
+           (coalesce(configuration.provider_mode, 'mock') = 'mock')
+      from public.appointment_reminders reminder
+      join public.appointments appointment
+        on appointment.id = reminder.appointment_id
+       and appointment.clinic_id = reminder.clinic_id
+       and appointment.reminder_schedule_version = reminder.schedule_version
+      join public.patients patient
+        on patient.id = appointment.patient_id and patient.clinic_id = appointment.clinic_id
+      join public.clinic_providers provider
+        on provider.id = appointment.provider_id and provider.clinic_id = appointment.clinic_id
+      join public.branches branch
+        on branch.id = appointment.branch_id and branch.clinic_id = appointment.clinic_id
+      left join public.clinic_whatsapp_configurations configuration
+        on configuration.clinic_id = reminder.clinic_id
+     where reminder.clinic_id = target_clinic_id
+       and reminder.scheduled_at >= window_start and reminder.scheduled_at < window_end
+     order by reminder.scheduled_at asc;
+end;
+$$;
+revoke all on function public.get_appointment_reminders_v2(uuid, timestamptz, timestamptz) from public, anon;
+grant execute on function public.get_appointment_reminders_v2(uuid, timestamptz, timestamptz) to authenticated;
+-- <<< END 20261030224417_clinic_whatsapp_twilio_provider
+
+-- >>> BEGIN 20261030234622_clinic_whatsapp_conversations
+create table public.clinic_whatsapp_conversations (
+  id uuid primary key default gen_random_uuid(),
+  clinic_id uuid not null references public.clinics(id) on delete cascade,
+  contact_phone text not null check (contact_phone ~ '^\\+[1-9][0-9]{7,14}$'),
+  contact_name text,
+  sender_phone text not null check (sender_phone ~ '^\\+[1-9][0-9]{7,14}$'),
+  last_inbound_at timestamptz,
+  last_message_at timestamptz not null default now(),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (clinic_id, contact_phone),
+  unique (id, clinic_id)
+);
+
+create table public.clinic_whatsapp_messages (
+  id uuid primary key default gen_random_uuid(),
+  clinic_id uuid not null references public.clinics(id) on delete cascade,
+  conversation_id uuid not null,
+  direction text not null check (direction in ('inbound', 'outbound')),
+  body text not null check (length(body) between 1 and 4096),
+  twilio_message_sid text not null unique check (twilio_message_sid ~ '^SM[0-9a-fA-F]{32}$'),
+  delivery_status text not null default 'received' check (delivery_status in ('received', 'queued', 'sent', 'delivered', 'failed', 'undelivered', 'unknown')),
+  created_at timestamptz not null default now(),
+  foreign key (conversation_id, clinic_id) references public.clinic_whatsapp_conversations(id, clinic_id) on delete cascade
+);
+
+create index clinic_whatsapp_conversations_recent_idx on public.clinic_whatsapp_conversations(clinic_id, last_message_at desc);
+create index clinic_whatsapp_messages_history_idx on public.clinic_whatsapp_messages(conversation_id, created_at);
+
+alter table public.clinic_whatsapp_conversations enable row level security;
+alter table public.clinic_whatsapp_messages enable row level security;
+
+create policy clinic_whatsapp_conversations_staff_read on public.clinic_whatsapp_conversations
+  for select to authenticated using (private.has_clinic_access(clinic_id, array['admin','receptionist']));
+create policy clinic_whatsapp_messages_staff_read on public.clinic_whatsapp_messages
+  for select to authenticated using (private.has_clinic_access(clinic_id, array['admin','receptionist']));
+
+grant select on public.clinic_whatsapp_conversations, public.clinic_whatsapp_messages to authenticated;
+revoke all on public.clinic_whatsapp_conversations, public.clinic_whatsapp_messages from anon;
+
+create function public.route_twilio_sandbox_whatsapp(target_phone text)
+returns table (clinic_id uuid)
+language sql stable security definer
+set search_path = ''
+as $$
+  select configuration.clinic_id
+    from public.clinic_whatsapp_configurations configuration
+   where configuration.provider_mode = 'twilio'
+     and target_phone = '+14155238886'
+     and (select count(*) from public.clinic_whatsapp_configurations active
+           where active.provider_mode = 'twilio') = 1
+   limit 1;
+$$;
+revoke all on function public.route_twilio_sandbox_whatsapp(text) from public, anon, authenticated;
+grant execute on function public.route_twilio_sandbox_whatsapp(text) to service_role;
+-- <<< END 20261030234622_clinic_whatsapp_conversations
+
+-- >>> BEGIN 20261031000926_fix_whatsapp_conversation_phone_checks
+alter table public.clinic_whatsapp_conversations
+  drop constraint clinic_whatsapp_conversations_contact_phone_check,
+  add constraint clinic_whatsapp_conversations_contact_phone_check
+    check (contact_phone ~ '^\+[1-9][0-9]{7,14}$'),
+  drop constraint clinic_whatsapp_conversations_sender_phone_check,
+  add constraint clinic_whatsapp_conversations_sender_phone_check
+    check (sender_phone ~ '^\+[1-9][0-9]{7,14}$');
+-- <<< END 20261031000926_fix_whatsapp_conversation_phone_checks
+
+-- >>> BEGIN 20261031003604_whatsapp_media_support
+alter table public.clinic_whatsapp_messages
+  add column media_object_path text,
+  add column media_content_type text,
+  add column media_filename text,
+  add column media_size_bytes bigint;
+
+alter table public.clinic_whatsapp_messages
+  drop constraint clinic_whatsapp_messages_body_check,
+  add constraint clinic_whatsapp_messages_body_content_check
+    check ((length(body) between 1 and 4096) or (media_object_path is not null and body = '')),
+  add constraint clinic_whatsapp_messages_media_type_check
+    check (media_content_type is null or media_content_type = any (array['image/jpeg','image/png','image/webp','video/mp4'])),
+  add constraint clinic_whatsapp_messages_media_metadata_check
+    check (
+      (media_object_path is null and media_content_type is null and media_filename is null and media_size_bytes is null)
+      or (media_object_path is not null and media_content_type is not null and media_filename is not null and media_size_bytes between 1 and 20971520)
+    );
+
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values (
+  'clinic-whatsapp-media',
+  'clinic-whatsapp-media',
+  false,
+  20971520,
+  array['image/jpeg','image/png','image/webp','video/mp4']
+)
+on conflict (id) do update
+set public = false,
+    file_size_limit = excluded.file_size_limit,
+    allowed_mime_types = excluded.allowed_mime_types;
+-- <<< END 20261031003604_whatsapp_media_support
+
+-- >>> BEGIN 20261031004449_allow_media_message_sid_prefix
+alter table public.clinic_whatsapp_messages
+  drop constraint clinic_whatsapp_messages_twilio_message_sid_check,
+  add constraint clinic_whatsapp_messages_twilio_message_sid_check
+    check (twilio_message_sid ~ '^(SM|MM)[0-9a-fA-F]{32}$');
+-- <<< END 20261031004449_allow_media_message_sid_prefix
+
+-- >>> BEGIN 20261031011253_add_whatsapp_audio_support
+alter table public.clinic_whatsapp_messages
+  drop constraint clinic_whatsapp_messages_media_type_check,
+  add constraint clinic_whatsapp_messages_media_type_check
+    check (
+      media_content_type is null
+      or media_content_type = any (array[
+        'image/jpeg', 'image/png', 'image/webp', 'video/mp4',
+        'audio/ogg', 'audio/mpeg', 'audio/mp4', 'audio/3gpp'
+      ])
+    );
+
+update storage.buckets
+set allowed_mime_types = array[
+  'image/jpeg', 'image/png', 'image/webp', 'video/mp4',
+  'audio/ogg', 'audio/mpeg', 'audio/mp4', 'audio/3gpp'
+]
+where id = 'clinic-whatsapp-media';
+-- <<< END 20261031011253_add_whatsapp_audio_support
+
+-- >>> BEGIN 20261031044446_whatsapp_sender_multiple_branches
+-- Allow a single WhatsApp sender to serve multiple clinic branches.
+create table public.clinic_whatsapp_sender_branches (
+  clinic_id uuid not null,
+  sender_key text not null,
+  branch_id uuid not null,
+  created_at timestamptz not null default now(),
+  primary key (clinic_id, sender_key, branch_id),
+  constraint clinic_whatsapp_sender_branches_clinic_branch_unique unique (clinic_id, branch_id),
+  foreign key (clinic_id, sender_key)
+    references public.clinic_whatsapp_senders (clinic_id, sender_key) on delete cascade,
+  foreign key (branch_id, clinic_id)
+    references public.branches (id, clinic_id) on delete cascade
+);
+
+create index clinic_whatsapp_sender_branches_branch_idx
+  on public.clinic_whatsapp_sender_branches (clinic_id, branch_id, sender_key);
+
+alter table public.clinic_whatsapp_sender_branches enable row level security;
+revoke all on public.clinic_whatsapp_sender_branches from anon, authenticated;
+grant select on public.clinic_whatsapp_sender_branches to authenticated;
+create policy clinic_whatsapp_sender_branches_member_read
+  on public.clinic_whatsapp_sender_branches
+  for select to authenticated
+  using ((select private.has_clinic_access(clinic_id)));
+
+insert into public.clinic_whatsapp_sender_branches (clinic_id, sender_key, branch_id)
+select clinic_id, sender_key, branch_id
+  from public.clinic_whatsapp_senders
+ where branch_id is not null
+on conflict do nothing;
+
+create or replace function public.save_clinic_whatsapp_settings_v2(
+  target_clinic_id uuid,
+  target_provider_mode text,
+  target_allow_default_fallback boolean,
+  target_template_readiness jsonb,
+  target_senders jsonb
+)
+returns boolean
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  sender jsonb;
+  sender_key_value text;
+  display_label_value text;
+  branch_list jsonb;
+  requested_branches uuid[];
+  requested_branch uuid;
+  branch_count integer;
+  is_default_sender boolean;
+  active_sender boolean;
+  sender_count integer := 0;
+  default_count integer := 0;
+begin
+  if not private.has_clinic_access(target_clinic_id, array['admin']) then
+    raise exception 'Only clinic administrators can update WhatsApp settings.' using errcode = '42501';
+  end if;
+  if target_provider_mode not in ('mock', 'twilio') then
+    raise exception 'Unsupported WhatsApp provider mode.' using errcode = '22023';
+  end if;
+  if target_senders is null or jsonb_typeof(target_senders) <> 'array' or jsonb_array_length(target_senders) > 50 then
+    raise exception 'Invalid sender configuration.' using errcode = '22023';
+  end if;
+  if target_template_readiness is null or jsonb_typeof(target_template_readiness) <> 'object'
+    or target_template_readiness - array['confirmation_2d','reminder_1d','reminder_5h'] <> '{}'::jsonb
+    or not (target_template_readiness ?& array['confirmation_2d','reminder_1d','reminder_5h'])
+    or exists (
+      select 1 from jsonb_each(target_template_readiness) as item(key, value)
+      where jsonb_typeof(item.value) <> 'boolean'
+    ) then
+    raise exception 'Invalid WhatsApp template readiness.' using errcode = '22023';
+  end if;
+
+  insert into public.clinic_whatsapp_configurations (
+    clinic_id, provider_mode, allow_default_fallback, template_readiness, updated_at
+  ) values (
+    target_clinic_id, target_provider_mode, coalesce(target_allow_default_fallback, false), target_template_readiness, now()
+  ) on conflict (clinic_id) do update
+    set provider_mode = excluded.provider_mode,
+        allow_default_fallback = excluded.allow_default_fallback,
+        template_readiness = excluded.template_readiness,
+        updated_at = now();
+
+  update public.clinic_whatsapp_senders
+     set active = false, is_default = false, branch_id = null, updated_at = now()
+   where clinic_id = target_clinic_id;
+  delete from public.clinic_whatsapp_sender_branches where clinic_id = target_clinic_id;
+
+  for sender in select value from jsonb_array_elements(target_senders)
+  loop
+    sender_count := sender_count + 1;
+    if jsonb_typeof(sender) <> 'object' then
+      raise exception 'Invalid WhatsApp sender.' using errcode = '22023';
+    end if;
+    sender_key_value := trim(coalesce(sender->>'sender_key', ''));
+    display_label_value := trim(coalesce(sender->>'display_label', ''));
+    branch_list := sender->'branch_ids';
+    if branch_list is null then
+      requested_branch := nullif(sender->>'branch_id', '')::uuid;
+      branch_list := case when requested_branch is null then '[]'::jsonb else jsonb_build_array(requested_branch::text) end;
+    end if;
+    if jsonb_typeof(branch_list) <> 'array' or jsonb_array_length(branch_list) > 100 then
+      raise exception 'Invalid WhatsApp sender branch list.' using errcode = '22023';
+    end if;
+    select coalesce(array_agg(item.value::uuid order by item.ordinality), array[]::uuid[])
+      into requested_branches
+      from jsonb_array_elements_text(branch_list) with ordinality as item(value, ordinality);
+    select count(distinct assigned.branch_id)::integer
+      into branch_count
+      from unnest(requested_branches) as assigned(branch_id);
+    if cardinality(requested_branches) = 0 or branch_count <> cardinality(requested_branches) then
+      raise exception 'Select at least one distinct branch for each WhatsApp sender.' using errcode = '22023';
+    end if;
+    if exists (
+      select 1
+        from unnest(requested_branches) as assigned(branch_id)
+        left join public.branches branch
+          on branch.id = assigned.branch_id
+         and branch.clinic_id = target_clinic_id
+         and branch.active
+       where branch.id is null
+    ) then
+      raise exception 'WhatsApp sender branches must be active branches in this clinic.' using errcode = '22023';
+    end if;
+
+    requested_branch := requested_branches[1];
+    is_default_sender := coalesce((sender->>'is_default')::boolean, false);
+    active_sender := coalesce((sender->>'active')::boolean, true);
+    if (target_provider_mode = 'mock' and sender_key_value !~ '^mock:[a-z0-9]+(-[a-z0-9]+)*$')
+      or (target_provider_mode = 'twilio' and sender_key_value !~ '^twilio:\+[1-9][0-9]{7,14}$')
+      or length(display_label_value) not between 1 and 120 then
+      raise exception 'Sender does not match the selected WhatsApp provider.' using errcode = '22023';
+    end if;
+    if coalesce(sender->>'meta_phone_number_id', '') <> '' then
+      raise exception 'Meta sender IDs are not supported by this provider.' using errcode = '22023';
+    end if;
+    if is_default_sender then default_count := default_count + 1; end if;
+    insert into public.clinic_whatsapp_senders (
+      clinic_id, branch_id, sender_key, display_label, is_default, active
+    ) values (
+      target_clinic_id, case when active_sender then requested_branch else null end,
+      sender_key_value, display_label_value, is_default_sender, active_sender
+    ) on conflict (clinic_id, sender_key) do update
+      set branch_id = excluded.branch_id,
+          display_label = excluded.display_label,
+          is_default = excluded.is_default,
+          active = excluded.active,
+          updated_at = now();
+
+    if active_sender then
+      if exists (
+        select 1 from public.clinic_whatsapp_sender_branches existing
+         where existing.clinic_id = target_clinic_id
+           and existing.branch_id = any(requested_branches)
+           and existing.sender_key <> sender_key_value
+      ) then
+        raise exception 'Each branch can be assigned to only one active WhatsApp sender.' using errcode = '23505';
+      end if;
+      insert into public.clinic_whatsapp_sender_branches (clinic_id, sender_key, branch_id)
+      select target_clinic_id, sender_key_value, assigned.branch_id
+        from unnest(requested_branches) as assigned(branch_id);
+    end if;
+  end loop;
+
+  if default_count > 1 or (target_allow_default_fallback and default_count <> 1) then
+    raise exception 'Default fallback requires exactly one default WhatsApp sender.' using errcode = '22023';
+  end if;
+  if target_allow_default_fallback and not exists (
+    select 1 from public.clinic_whatsapp_senders where clinic_id = target_clinic_id and is_default and active
+  ) then
+    raise exception 'The default WhatsApp sender must be active.' using errcode = '22023';
+  end if;
+  return true;
+end;
+$$;
+
+revoke all on function public.save_clinic_whatsapp_settings_v2(uuid, text, boolean, jsonb, jsonb) from public, anon;
+grant execute on function public.save_clinic_whatsapp_settings_v2(uuid, text, boolean, jsonb, jsonb) to authenticated;
+-- <<< END 20261031044446_whatsapp_sender_multiple_branches
+
+-- >>> BEGIN 20261031050133_whatsapp_template_selection
+-- Keep appointment template identifiers in clinic configuration. Twilio
+-- credentials remain server-side; administrators select from approved items.
+alter table public.clinic_whatsapp_configurations
+  add column template_content_sids jsonb not null default '{}'::jsonb,
+  add constraint clinic_whatsapp_template_content_sids_object
+    check (jsonb_typeof(template_content_sids) = 'object');
+
+create function public.save_clinic_whatsapp_settings_v3(
+  target_clinic_id uuid,
+  target_provider_mode text,
+  target_allow_default_fallback boolean,
+  target_template_readiness jsonb,
+  target_senders jsonb,
+  target_template_content_sids jsonb
+)
+returns boolean
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if not private.has_clinic_access(target_clinic_id, array['admin']) then
+    raise exception 'Only clinic administrators can update WhatsApp settings.' using errcode = '42501';
+  end if;
+  if target_template_content_sids is null
+    or jsonb_typeof(target_template_content_sids) <> 'object'
+    or target_template_content_sids - array['confirmation_2d','reminder_1d','reminder_5h'] <> '{}'::jsonb
+    or exists (
+      select 1 from jsonb_each(target_template_content_sids) as item(key, value)
+      where jsonb_typeof(item.value) is distinct from 'string'
+        or (trim(item.value #>> '{}') <> '' and item.value #>> '{}' !~ '^HX[0-9a-fA-F]{32}$')
+    ) then
+    raise exception 'Invalid WhatsApp template selection.' using errcode = '22023';
+  end if;
+  if not public.save_clinic_whatsapp_settings_v2(
+    target_clinic_id,
+    target_provider_mode,
+    target_allow_default_fallback,
+    target_template_readiness,
+    target_senders
+  ) then
+    return false;
+  end if;
+  if exists (
+    select 1 from jsonb_each(target_template_readiness) as item(key, value)
+    where item.value = 'true'::jsonb
+      and coalesce(nullif(target_template_content_sids ->> item.key, ''), '') !~ '^HX[0-9a-fA-F]{32}$'
+  ) then
+    raise exception 'An enabled WhatsApp notice must have a selected template.' using errcode = '22023';
+  end if;
+  update public.clinic_whatsapp_configurations
+     set template_content_sids = target_template_content_sids,
+         updated_at = now()
+   where clinic_id = target_clinic_id;
+  return true;
+end;
+$$;
+
+revoke all on function public.save_clinic_whatsapp_settings_v3(uuid, text, boolean, jsonb, jsonb, jsonb) from public, anon;
+grant execute on function public.save_clinic_whatsapp_settings_v3(uuid, text, boolean, jsonb, jsonb, jsonb) to authenticated;
+
+create or replace function public.claim_due_appointment_reminders(target_limit integer default 20)
+returns table (reminder_id uuid, kind text, patient_name text, appointment_at timestamptz)
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if coalesce(auth.role(), '') <> 'service_role' then
+    raise exception 'Reminder dispatch is restricted to the server worker.' using errcode = '42501';
+  end if;
+
+  update public.appointment_reminders as reminder
+     set status = 'unknown', sending_started_at = null,
+         last_error = 'Worker stopped after claiming; provider delivery is uncertain.', updated_at = now()
+   where reminder.status = 'sending'
+     and (reminder.sending_started_at is null or reminder.sending_started_at < now() - interval '2 minutes');
+
+  update public.appointment_reminders as reminder
+     set status = case when appointment.status = 'confirmed'
+                       and appointment.reminder_schedule_version = reminder.schedule_version
+                       then 'skipped' else 'cancelled' end,
+         last_error = case
+           when appointment.status <> 'confirmed' then 'Appointment is no longer confirmed.'
+           when appointment.reminder_schedule_version <> reminder.schedule_version then 'Appointment schedule changed.'
+           when appointment.starts_at <= now() then 'Appointment has already started.'
+           when not patient.appointment_whatsapp_opt_in then 'Patient has not authorized WhatsApp appointment messages.'
+           else 'Patient phone number is missing or not in international E.164 format.' end,
+         updated_at = now()
+    from public.appointments as appointment
+    join public.patients as patient on patient.id = appointment.patient_id and patient.clinic_id = appointment.clinic_id
+   where reminder.appointment_id = appointment.id and reminder.clinic_id = appointment.clinic_id
+     and reminder.status in ('pending', 'failed') and reminder.scheduled_at <= now()
+     and (appointment.status <> 'confirmed'
+       or appointment.reminder_schedule_version <> reminder.schedule_version
+       or appointment.starts_at <= now()
+       or not patient.appointment_whatsapp_opt_in
+       or coalesce(trim(patient.phone), '') !~ '^\+[1-9][0-9]{7,14}$');
+
+  return query
+    with due as (
+      select reminder.id
+        from public.appointment_reminders as reminder
+        join public.appointments as appointment on appointment.id = reminder.appointment_id
+          and appointment.clinic_id = reminder.clinic_id and appointment.reminder_schedule_version = reminder.schedule_version
+        join public.patients as patient on patient.id = appointment.patient_id and patient.clinic_id = appointment.clinic_id
+       where (reminder.status = 'pending' or (reminder.status = 'failed' and reminder.attempt_count < 3
+          and reminder.updated_at <= now() - interval '15 minutes'))
+         and reminder.scheduled_at <= now() and appointment.status = 'confirmed' and appointment.starts_at > now()
+         and patient.appointment_whatsapp_opt_in and coalesce(trim(patient.phone), '') ~ '^\+[1-9][0-9]{7,14}$'
+         and exists (
+           select 1 from public.clinic_whatsapp_configurations as config
+            where config.clinic_id = appointment.clinic_id and config.provider_mode = 'twilio'
+              and config.template_readiness ->> reminder.kind = 'true'
+              and coalesce(config.template_content_sids ->> reminder.kind, '') ~ '^HX[0-9a-fA-F]{32}$'
+         )
+         and exists (
+           select 1 from public.clinic_whatsapp_senders as sender
+            where sender.clinic_id = appointment.clinic_id and sender.active
+              and sender.sender_key ~ '^twilio:\+[1-9][0-9]{7,14}$'
+              and (sender.branch_id = appointment.branch_id or exists (
+                select 1 from public.clinic_whatsapp_sender_branches as assignment
+                 where assignment.clinic_id = appointment.clinic_id and assignment.sender_key = sender.sender_key
+                   and assignment.branch_id = appointment.branch_id
+              ))
+         )
+       order by reminder.scheduled_at, reminder.id
+       limit greatest(1, least(coalesce(target_limit, 20), 50))
+       for update of reminder skip locked
+    ), claimed as (
+      update public.appointment_reminders as reminder
+         set status = 'sending', attempt_count = reminder.attempt_count + 1,
+             sending_started_at = now(), last_error = null, updated_at = now()
+        from due where reminder.id = due.id
+       returning reminder.id, reminder.kind, reminder.appointment_id, reminder.clinic_id, reminder.schedule_version
+    )
+    select claimed.id, claimed.kind, patient.full_name, appointment.starts_at
+      from claimed
+      join public.appointments as appointment on appointment.id = claimed.appointment_id and appointment.clinic_id = claimed.clinic_id
+      join public.patients as patient on patient.id = appointment.patient_id and patient.clinic_id = appointment.clinic_id;
+end;
+$$;
+revoke all on function public.claim_due_appointment_reminders(integer) from public, anon, authenticated;
+grant execute on function public.claim_due_appointment_reminders(integer) to service_role;
+
+create or replace function public.claim_due_appointment_confirmations(target_limit integer default 20)
+returns table(request_id uuid)
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if coalesce(auth.role(), '') <> 'service_role' then
+    raise exception 'Confirmation dispatch is restricted to the server worker.' using errcode = '42501';
+  end if;
+  update public.appointment_confirmation_requests as request
+     set status = 'unknown', sending_started_at = null,
+         last_error = 'Worker stopped after claiming; provider delivery is uncertain.', updated_at = now()
+   where request.status = 'sending'
+     and (request.sending_started_at is null or request.sending_started_at < now() - interval '2 minutes');
+
+  return query
+    with due as (
+      select request.id
+        from public.appointment_confirmation_requests as request
+        join public.appointments as appointment on appointment.id = request.appointment_id and appointment.clinic_id = request.clinic_id
+        join public.patients as patient on patient.id = appointment.patient_id and patient.clinic_id = appointment.clinic_id
+       where (request.status = 'pending' or (request.status = 'failed' and request.attempt_count < 3
+           and request.updated_at <= now() - interval '15 minutes'))
+         and request.scheduled_at <= now() and appointment.status = 'pending' and appointment.starts_at > now()
+         and appointment.reminder_schedule_version = request.schedule_version
+         and patient.appointment_whatsapp_opt_in and coalesce(trim(patient.phone), '') ~ '^\+[1-9][0-9]{7,14}$'
+         and exists (
+           select 1 from public.clinic_whatsapp_configurations as config
+            where config.clinic_id = appointment.clinic_id and config.provider_mode = 'twilio'
+              and config.template_readiness ->> 'confirmation_2d' = 'true'
+              and coalesce(config.template_content_sids ->> 'confirmation_2d', '') ~ '^HX[0-9a-fA-F]{32}$'
+         )
+         and exists (
+           select 1 from public.clinic_whatsapp_senders as sender
+            where sender.clinic_id = appointment.clinic_id and sender.active
+              and sender.sender_key ~ '^twilio:\+[1-9][0-9]{7,14}$'
+              and (sender.branch_id = appointment.branch_id or exists (
+                select 1 from public.clinic_whatsapp_sender_branches as assignment
+                 where assignment.clinic_id = appointment.clinic_id and assignment.sender_key = sender.sender_key
+                   and assignment.branch_id = appointment.branch_id
+              ))
+         )
+       order by request.scheduled_at
+       limit least(greatest(coalesce(target_limit, 20), 1), 50)
+       for update of request skip locked
+    ), claimed as (
+      update public.appointment_confirmation_requests as request
+         set status = 'sending', attempt_count = request.attempt_count + 1,
+             sending_started_at = now(), last_error = null, updated_at = now()
+        from due where request.id = due.id
+       returning request.id
+    )
+    select claimed.id from claimed;
+end;
+$$;
+revoke all on function public.claim_due_appointment_confirmations(integer) from public, anon, authenticated;
+grant execute on function public.claim_due_appointment_confirmations(integer) to service_role;
+-- <<< END 20261031050133_whatsapp_template_selection
+
+-- >>> BEGIN 20261031060000_whatsapp_crm_notifications
+-- Keep the WhatsApp settings focused on sender routing and internal CRM alerts.
+alter table public.clinic_whatsapp_configurations
+  add column notify_whatsapp_messages boolean not null default true,
+  add column notify_whatsapp_confirmations boolean not null default true;
+
+-- Disable the legacy template-driven appointment messages. Future automation
+-- will be managed separately and must not reuse stale template selections.
+update public.clinic_whatsapp_configurations
+   set template_readiness = '{"confirmation_2d":false,"reminder_1d":false,"reminder_5h":false}'::jsonb,
+       template_content_sids = '{}'::jsonb,
+       updated_at = now();
+
+alter table public.staff_notifications
+  add column source_event_id text,
+  add constraint staff_notifications_source_event_unique unique (clinic_id, user_id, source_event_id);
+
+alter table public.staff_notifications drop constraint staff_notifications_kind_check;
+alter table public.staff_notifications add constraint staff_notifications_kind_check
+  check (kind in ('new_appointment','agenda_change','test','whatsapp_message','whatsapp_confirmation'));
+alter table public.staff_notifications drop constraint staff_notifications_message_check;
+alter table public.staff_notifications add constraint staff_notifications_message_check
+  check (message in (
+    'Nueva cita registrada',
+    'Cita cancelada',
+    'Horario o asignación de cita actualizado',
+    'Prueba de notificaciones',
+    'Nueva solicitud de cita',
+    'Nuevo mensaje de WhatsApp',
+    'Cita confirmada por WhatsApp'
+  ));
+
+create or replace function public.save_clinic_whatsapp_settings_v4(
+  target_clinic_id uuid,
+  target_provider_mode text,
+  target_allow_default_fallback boolean,
+  target_senders jsonb,
+  target_notify_whatsapp_messages boolean,
+  target_notify_whatsapp_confirmations boolean
+)
+returns boolean
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if not private.has_clinic_access(target_clinic_id, array['admin']) then
+    raise exception 'Only clinic administrators can update WhatsApp settings.' using errcode = '42501';
+  end if;
+  if not public.save_clinic_whatsapp_settings_v2(
+    target_clinic_id,
+    target_provider_mode,
+    target_allow_default_fallback,
+    '{"confirmation_2d":false,"reminder_1d":false,"reminder_5h":false}'::jsonb,
+    target_senders
+  ) then
+    return false;
+  end if;
+  update public.clinic_whatsapp_configurations
+     set template_content_sids = '{}'::jsonb,
+         notify_whatsapp_messages = coalesce(target_notify_whatsapp_messages, true),
+         notify_whatsapp_confirmations = coalesce(target_notify_whatsapp_confirmations, true),
+         updated_at = now()
+   where clinic_id = target_clinic_id;
+  return true;
+end;
+$$;
+
+revoke all on function public.save_clinic_whatsapp_settings_v4(uuid, text, boolean, jsonb, boolean, boolean) from public, anon;
+grant execute on function public.save_clinic_whatsapp_settings_v4(uuid, text, boolean, jsonb, boolean, boolean) to authenticated;
+-- <<< END 20261031060000_whatsapp_crm_notifications

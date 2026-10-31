@@ -31,7 +31,7 @@ export default function SetupPage() {
       <li><h3>Completa el equipo y la agenda</h3><p>Agrega profesionales, sucursales y negocios; después configura citas, duración y anticipo requerido. La base impide confirmar una cita antes de registrar el anticipo.</p></li>
     </ol>
     </section>
-    <aside className="setup-note"><strong>Recordatorios</strong><p>La cola de avisos de dos días, un día y cinco horas está implementada. El envío por WhatsApp requiere cuenta, plantillas aprobadas y credenciales de la clínica; queda apagado hasta configurarlas.</p></aside>
+    <aside className="setup-note"><strong>Avisos de WhatsApp</strong><p>Desde Configuración puedes asignar números a sucursales y elegir qué avisos internos aparecen en el CRM. Los mensajes automáticos para pacientes se definirán después con la automatización de IA.</p></aside>
     <p className="setup-back"><Link href="/login">Volver al inicio de sesión</Link> · <Link href="/">Abrir el CRM</Link></p>
   </article></main>;
 }
