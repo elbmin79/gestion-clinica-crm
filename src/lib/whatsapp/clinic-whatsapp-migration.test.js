@@ -8,6 +8,8 @@ test('WhatsApp migrations persist provider and branch settings with admin-only w
   t.after(() => db.close());
   const migration = await readFile(new URL('../../../supabase/migrations/20261029225620_clinic_whatsapp_mock_setup.sql', import.meta.url), 'utf8');
   const twilioMigration = await readFile(new URL('../../../supabase/migrations/20261030224417_clinic_whatsapp_twilio_provider.sql', import.meta.url), 'utf8');
+  const conversationsMigration = await readFile(new URL('../../../supabase/migrations/20261030234622_clinic_whatsapp_conversations.sql', import.meta.url), 'utf8');
+  const phoneCheckFixMigration = await readFile(new URL('../../../supabase/migrations/20261031000926_fix_whatsapp_conversation_phone_checks.sql', import.meta.url), 'utf8');
   await db.exec(`create role anon; create role authenticated; create role service_role;
     create schema auth; create schema private;
     create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid $$;
@@ -28,7 +30,9 @@ test('WhatsApp migrations persist provider and branch settings with admin-only w
     create table public.patient_activities(clinic_id uuid, patient_id uuid, activity_type text, note text, author_id uuid);
     create function public.get_appointment_reminders(uuid,timestamptz,timestamptz) returns table(id uuid) language sql as $$ select null::uuid $$;
     ${migration}
-    ${twilioMigration}`);
+    ${twilioMigration}
+    ${conversationsMigration}
+    ${phoneCheckFixMigration}`);
   assert.equal((await db.query("select to_regprocedure('public.get_appointment_reminders(uuid,timestamptz,timestamptz)') is not null preserved")).rows[0].preserved, true);
 
   const clinic = '10000000-0000-0000-0000-000000000001';
@@ -39,6 +43,13 @@ test('WhatsApp migrations persist provider and branch settings with admin-only w
   await db.exec(`insert into public.clinics values ('${clinic}','Clinic'),('${other}','Other');
     insert into public.branches values ('${branch}','${clinic}','Branch');
     insert into public.clinic_memberships values ('${clinic}','${admin}','admin'),('${clinic}','${receptionist}','receptionist');`);
+  await t.test('conversation phone constraints accept E.164 numbers after the corrective migration', async () => {
+    await db.query('insert into public.clinic_whatsapp_conversations(clinic_id,contact_phone,sender_phone) values ($1,$2,$3)', [clinic, '+15551234567', '+14155238886']);
+    await assert.rejects(
+      db.query('insert into public.clinic_whatsapp_conversations(clinic_id,contact_phone,sender_phone) values ($1,$2,$3)', [clinic, '5551234567', '+14155238886']),
+      /clinic_whatsapp_conversations_contact_phone_check/,
+    );
+  });
   const session = async (user, role = 'authenticated') => db.query("select set_config('request.jwt.claim.sub',$1,false),set_config('request.jwt.claim.role',$2,false)",[user || '', role]);
   const save = async (user, senders, fallback = false) => {
     await session(user); await db.exec('set role authenticated');
