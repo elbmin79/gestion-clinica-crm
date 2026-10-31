@@ -22,6 +22,7 @@ export default function WhatsAppSettings({ clinicId, role, branches = [], shared
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [senderLookupError, setSenderLookupError] = useState('');
+  const [templateLookupError, setTemplateLookupError] = useState('');
   const [notice, setNotice] = useState('');
   const [settings, setSettings] = useState(initialSettings);
   const [senders, setSenders] = useState([]);
@@ -55,12 +56,13 @@ export default function WhatsAppSettings({ clinicId, role, branches = [], shared
       if (!active) return;
       setInboxSender(result.inboxSender || null);
       if (result.ok) setAvailableSenders(result.senders);
-      else setSenderLookupError(result.message);
+      setSenderLookupError(result.senderLookupError || (result.ok ? '' : result.message));
+      setTemplateLookupError(result.templateLookupError || '');
       setTemplates(result.templates || []);
       setDeliveryEnabled(result.deliveryEnabled === true);
       setLoadingAvailableSenders(false);
     }).catch(() => {
-      if (active) { setInboxSender(null); setSenderLookupError('No se pudieron consultar los números registrados.'); setAvailableSenders([]); setTemplates([]); setDeliveryEnabled(false); setLoadingAvailableSenders(false); }
+      if (active) { setInboxSender(null); setSenderLookupError('No se pudieron consultar los números registrados.'); setTemplateLookupError('No se pudieron consultar las plantillas de Twilio.'); setAvailableSenders([]); setTemplates([]); setDeliveryEnabled(false); setLoadingAvailableSenders(false); }
     });
     return () => { active = false; };
   }, [clinicId, role, sharedMode]);
@@ -159,7 +161,7 @@ export default function WhatsAppSettings({ clinicId, role, branches = [], shared
             </div>
           </article>})}</div> : null}
       </section>
-      <section className="whatsapp-settings-section"><div className="whatsapp-settings-heading"><div><h3>Avisos automáticos de citas</h3><p>Elige una plantilla aprobada por WhatsApp para cada aviso. La lista se carga desde tu cuenta.</p></div></div>{!deliveryEnabled ? <p className="whatsapp-settings-empty">No se pudieron consultar las plantillas de Twilio. Revisa las credenciales del servidor.</p> : approvedTemplates.length === 0 ? <p className="whatsapp-settings-empty">No hay plantillas aprobadas disponibles en la cuenta.</p> : <div className="whatsapp-template-list">{templateKinds.map(([key, label]) => <div className="whatsapp-template-row" key={key}><label className="whatsapp-template-toggle"><input type="checkbox" disabled={!settings.templateContentSids?.[key] || !approvedTemplates.some(template => template.sid === settings.templateContentSids[key])} checked={settings.templateReadiness[key] === true && approvedTemplates.some(template => template.sid === settings.templateContentSids?.[key])} onChange={event => setSettings(current => ({ ...current, templateReadiness: { ...current.templateReadiness, [key]: event.target.checked } }))}/><span><strong>{label}</strong><small>{settings.templateReadiness[key] ? 'Activo' : 'Desactivado'}</small></span></label><select aria-label={`Plantilla para ${label}`} value={settings.templateContentSids?.[key] || ''} onChange={event => setSettings(current => ({ ...current, templateContentSids: { ...current.templateContentSids, [key]: event.target.value }, templateReadiness: { ...current.templateReadiness, [key]: false } }))}><option value="">Selecciona una plantilla aprobada</option>{approvedTemplates.map(template => <option value={template.sid} key={template.sid}>{template.name}{template.language ? ` · ${template.language}` : ''}</option>)}</select></div>)}</div>}</section>
+      <section className="whatsapp-settings-section"><div className="whatsapp-settings-heading"><div><h3>Avisos automáticos de citas</h3><p>Elige una plantilla aprobada por WhatsApp para cada aviso. La lista se carga desde tu cuenta.</p></div></div>{!deliveryEnabled ? <p className="whatsapp-settings-empty">No se pudieron consultar las plantillas de Twilio. Revisa las credenciales del servidor.</p> : templateLookupError ? <p className="whatsapp-settings-error" role="status"><CircleAlert size={15}/>{templateLookupError}</p> : approvedTemplates.length === 0 ? <p className="whatsapp-settings-empty">No hay plantillas aprobadas disponibles en la cuenta.</p> : <div className="whatsapp-template-list">{templateKinds.map(([key, label]) => <div className="whatsapp-template-row" key={key}><label className="whatsapp-template-toggle"><input type="checkbox" disabled={!settings.templateContentSids?.[key] || !approvedTemplates.some(template => template.sid === settings.templateContentSids[key])} checked={settings.templateReadiness[key] === true && approvedTemplates.some(template => template.sid === settings.templateContentSids?.[key])} onChange={event => setSettings(current => ({ ...current, templateReadiness: { ...current.templateReadiness, [key]: event.target.checked } }))}/><span><strong>{label}</strong><small>{settings.templateReadiness[key] ? 'Activo' : 'Desactivado'}</small></span></label><select aria-label={`Plantilla para ${label}`} value={settings.templateContentSids?.[key] || ''} onChange={event => setSettings(current => ({ ...current, templateContentSids: { ...current.templateContentSids, [key]: event.target.value }, templateReadiness: { ...current.templateReadiness, [key]: false } }))}><option value="">Selecciona una plantilla aprobada</option>{approvedTemplates.map(template => <option value={template.sid} key={template.sid}>{template.name}{template.language ? ` · ${template.language}` : ''}</option>)}</select></div>)}</div>}</section>
       {error && <p className="whatsapp-settings-error" role="alert"><CircleAlert size={15}/>{error}</p>}{notice && <p className="whatsapp-settings-success" role="status"><CircleCheck size={15}/>{notice}</p>}
       <div className="whatsapp-settings-actions"><button className="button primary" type="submit" disabled={saving || loading}><Save size={15}/>{saving ? 'Guardando…' : 'Guardar configuración'}</button></div>
     </form>}

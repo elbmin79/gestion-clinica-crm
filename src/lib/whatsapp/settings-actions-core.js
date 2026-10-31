@@ -5,12 +5,15 @@ const twilioSenderKeyPattern = /^twilio:\+[1-9]\d{7,14}$/;
 const templateKinds = ['confirmation_2d', 'reminder_1d', 'reminder_5h'];
 const defaultReadiness = Object.freeze({ confirmation_2d: false, reminder_1d: false, reminder_5h: false });
 const contentSidPattern = /^HX[0-9a-fA-F]{32}$/;
+const twilioSandboxNumber = '+14155238886';
 
 function configuredInboxSender(env) {
-  const phoneNumber = String(env.TWILIO_WHATSAPP_SANDBOX_FROM || '').trim().replace(/^whatsapp:/i, '');
-  const credentialsAvailable = /^AC[0-9a-fA-F]{32}$/.test(String(env.TWILIO_ACCOUNT_SID || '').trim()) && Boolean(env.TWILIO_AUTH_TOKEN);
-  return env.TWILIO_WHATSAPP_SANDBOX_ENABLED === 'true' && credentialsAvailable && /^\+[1-9]\d{7,14}$/.test(phoneNumber)
-    ? { phoneNumber }
+  const configuredNumber = String(env.TWILIO_WHATSAPP_SANDBOX_FROM || '').trim().replace(/^whatsapp:/i, '');
+  const credentialsAvailable = /^AC[0-9a-fA-F]{32}$/.test(String(env.TWILIO_ACCOUNT_SID || '').trim()) && Boolean(String(env.TWILIO_AUTH_TOKEN || '').trim());
+  const sandboxEnabled = String(env.TWILIO_WHATSAPP_SANDBOX_ENABLED || '').toLowerCase() !== 'false';
+  const phoneNumber = configuredNumber || twilioSandboxNumber;
+  return sandboxEnabled && credentialsAvailable && /^\+[1-9]\d{7,14}$/.test(phoneNumber)
+    ? { phoneNumber, displayLabel: 'WhatsApp' }
     : null;
 }
 
@@ -88,19 +91,29 @@ export function createWhatsAppSettingsActions({
 
   async function loadAvailableSenders(clinicId) {
     let templates = [];
+    let senderLookupError = '';
+    let templateLookupError = '';
     const deliveryEnabled = /^AC[0-9a-fA-F]{32}$/.test(String(env.TWILIO_ACCOUNT_SID || '').trim()) && Boolean(String(env.TWILIO_AUTH_TOKEN || '').trim());
     const inboxSender = configuredInboxSender(env);
     try {
       const context = await authorizedAdmin(clinicId);
       if (context.error) return { ok: false, message: context.error };
-      const [registeredSenders, availableTemplates] = await Promise.all([listWhatsAppSenders({ env }), getTemplates({ env })]);
-      templates = availableTemplates;
-      const senders = inboxSender && !registeredSenders.some(sender => sender.phoneNumber === inboxSender.phoneNumber)
-        ? [{ ...inboxSender, displayLabel: 'Número conectado' }, ...registeredSenders]
-        : registeredSenders;
-      return { ok: true, senders, templates, deliveryEnabled, ...(inboxSender ? { inboxSender } : {}) };
+      const [senderResult, templateResult] = await Promise.allSettled([
+        listWhatsAppSenders({ env }),
+        getTemplates({ env }),
+      ]);
+      const registeredSenders = senderResult.status === 'fulfilled' ? senderResult.value : [];
+      if (senderResult.status === 'rejected') senderLookupError = 'No se pudieron consultar todos los números registrados en Twilio.';
+      if (templateResult.status === 'fulfilled') templates = templateResult.value;
+      else templateLookupError = 'No se pudieron consultar las plantillas de Twilio.';
+      const senders = [...(inboxSender ? [inboxSender] : []), ...registeredSenders]
+        .filter((sender, index, rows) => rows.findIndex(row => row.phoneNumber === sender.phoneNumber) === index);
+      if (!senders.length && senderLookupError) {
+        return { ok: false, message: senderLookupError, templates, templateLookupError, deliveryEnabled, ...(inboxSender ? { inboxSender } : {}) };
+      }
+      return { ok: true, senders, templates, senderLookupError, templateLookupError, deliveryEnabled, ...(inboxSender ? { inboxSender } : {}) };
     } catch {
-      return { ok: false, message: 'No se pudieron consultar Twilio. Verifica las credenciales del servidor y vuelve a cargar.', templates, deliveryEnabled, ...(inboxSender ? { inboxSender } : {}) };
+      return { ok: false, message: 'No se pudo cargar la configuración de WhatsApp.', templates, templateLookupError, deliveryEnabled, ...(inboxSender ? { inboxSender } : {}) };
     }
   }
 
