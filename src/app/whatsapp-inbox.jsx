@@ -105,6 +105,9 @@ export default function WhatsAppInbox({ clinicId = '', sharedMode = false, role 
   const [conversations, setConversations] = useState([]);
   const [messages, setMessages] = useState([]);
   const [messageHistoryConversationId, setMessageHistoryConversationId] = useState('');
+  const [messageHistoryLoadError, setMessageHistoryLoadError] = useState('');
+  const [messageHistoryRetry, setMessageHistoryRetry] = useState(0);
+  const [positioningInitialHistory, setPositioningInitialHistory] = useState(false);
   const [isAtLatestMessage, setIsAtLatestMessage] = useState(true);
   const [newMessageCount, setNewMessageCount] = useState(0);
   const [query, setQuery] = useState('');
@@ -132,6 +135,8 @@ export default function WhatsAppInbox({ clinicId = '', sharedMode = false, role 
   const actionDialogRef = useRef(null);
   const messageSearchRef = useRef(null);
   const messageHistoryRef = useRef(null);
+  const mediaScrollTimerRef = useRef(null);
+  const mediaPositionFallbackRef = useRef(null);
   const shouldFollowLatestRef = useRef(true);
   const observedMessagesRef = useRef({ conversationId: '', ids: new Set() });
   const selectedIdRef = useRef('');
@@ -154,9 +159,18 @@ export default function WhatsAppInbox({ clinicId = '', sharedMode = false, role 
     if (atLatest) setNewMessageCount(0);
   }, []);
   const keepLatestVisible = useCallback(() => {
-    if (shouldFollowLatestRef.current) scrollToLatest('auto');
-  }, [scrollToLatest]);
-
+    if (!shouldFollowLatestRef.current) return;
+    window.clearTimeout(mediaScrollTimerRef.current);
+    mediaScrollTimerRef.current = window.setTimeout(() => {
+      const history = messageHistoryRef.current;
+      if (!history || !shouldFollowLatestRef.current) return;
+      history.scrollTop = history.scrollHeight;
+      setIsAtLatestMessage(true);
+      setNewMessageCount(0);
+      setPositioningInitialHistory(false);
+      window.clearTimeout(mediaPositionFallbackRef.current);
+    }, 400);
+  }, []);
   const refresh = useCallback(async () => {
     if (!sharedMode || !clinicId) { setStatus('idle'); return; }
     const client = createClient();
@@ -236,9 +250,13 @@ export default function WhatsAppInbox({ clinicId = '', sharedMode = false, role 
 
   useEffect(() => {
     selectedIdRef.current = selected?.id || '';
+    window.clearTimeout(mediaScrollTimerRef.current);
+    window.clearTimeout(mediaPositionFallbackRef.current);
+    setPositioningInitialHistory(Boolean(selected?.id));
     shouldFollowLatestRef.current = true;
     observedMessagesRef.current = { conversationId: '', ids: new Set() };
     setMessageHistoryConversationId('');
+    setMessageHistoryLoadError('');
     setIsAtLatestMessage(true);
     setNewMessageCount(0);
     setMessages([]);
@@ -265,14 +283,15 @@ export default function WhatsAppInbox({ clinicId = '', sharedMode = false, role 
       const result = await createClient().from('clinic_whatsapp_messages').select('id,direction,body,delivery_status,delivery_error_code,delivery_error_message,created_at,media_object_path,media_content_type,media_filename,media_size_bytes')
         .eq('clinic_id', clinicId).eq('conversation_id', selected.id).order('created_at', { ascending: true }).limit(300);
       if (!active) return;
-      if (result.error) { setError('No se pudieron cargar los mensajes.'); return; }
+      if (result.error) { setMessageHistoryLoadError('No se pudieron cargar los mensajes.'); setPositioningInitialHistory(false); return; }
+      setMessageHistoryLoadError('');
       setMessages(result.data || []);
       setMessageHistoryConversationId(selected.id);
     };
     void load();
     const timer = window.setInterval(() => void load(), 5000);
     return () => { active = false; window.clearInterval(timer); };
-  }, [clinicId, selected?.id]);
+  }, [clinicId, messageHistoryRetry, selected?.id]);
 
   useEffect(() => {
     if (!selected?.id || messageHistoryConversationId !== selected.id) return;
@@ -280,7 +299,18 @@ export default function WhatsAppInbox({ clinicId = '', sharedMode = false, role 
     const observed = observedMessagesRef.current;
     if (observed.conversationId !== selected.id) {
       observedMessagesRef.current = { conversationId: selected.id, ids: currentIds };
-      requestAnimationFrame(() => scrollToLatest('auto'));
+      requestAnimationFrame(() => {
+        const history = messageHistoryRef.current;
+        if (!history) return;
+        history.scrollTop = history.scrollHeight;
+        const hasVisualMedia = messages.some(message => message.media_content_type?.startsWith('image/') || message.media_content_type?.startsWith('video/'));
+        if (!hasVisualMedia) { setPositioningInitialHistory(false); return; }
+        mediaPositionFallbackRef.current = window.setTimeout(() => {
+          const currentHistory = messageHistoryRef.current;
+          if (currentHistory && shouldFollowLatestRef.current) currentHistory.scrollTop = currentHistory.scrollHeight;
+          setPositioningInitialHistory(false);
+        }, 2400);
+      });
       return;
     }
     const newlyLoaded = messages.filter(message => !observed.ids.has(message.id));
@@ -402,13 +432,20 @@ export default function WhatsAppInbox({ clinicId = '', sharedMode = false, role 
     });
   }
 
+  const loadingMessages = Boolean(selected && messageHistoryConversationId !== selected.id && !messageHistoryLoadError);
+
   return <section className="whatsapp-inbox-page" aria-label="Conversaciones de WhatsApp">
     <header className="whatsapp-inbox-heading"><div><h1>WhatsApp</h1><p>Conversaciones con tus contactos</p></div></header>
-    <div className="whatsapp-inbox-shell">
+    <div className="whatsapp-inbox-shell" aria-busy={status === 'loading'}>
       <aside className="whatsapp-thread-list" aria-label="Conversaciones">
         <div className="whatsapp-thread-search"><Search size={16}/><input aria-label="Buscar conversación" placeholder="Buscar conversación" value={query} onChange={event => setQuery(event.target.value)}/></div>
         <div className="whatsapp-thread-groups">
-          {conversationGroups.map(group => <section className="whatsapp-sender-group" key={group.sender}>
+          {status === 'loading' ? <div className="whatsapp-inbox-list-skeleton" role="status" aria-label="Cargando conversaciones">
+            <div className="whatsapp-inbox-skeleton-sender"><span className="whatsapp-skeleton-block is-short"/><span className="whatsapp-skeleton-block is-count"/></div>
+            {[0, 1, 2, 3].map(index => <div className="whatsapp-inbox-skeleton-thread" key={index}>
+              <span className="whatsapp-skeleton-block is-avatar"/><span className="whatsapp-inbox-skeleton-thread-copy"><span className="whatsapp-skeleton-block is-name"/><span className="whatsapp-skeleton-block is-preview"/></span><span className="whatsapp-skeleton-block is-time"/>
+            </div>)}
+          </div> : conversationGroups.map(group => <section className="whatsapp-sender-group" key={group.sender}>
             <h2 className="whatsapp-sender-heading"><button type="button" aria-expanded={!collapsedSenders.has(group.sender)} onClick={() => toggleSenderGroup(group.sender)} aria-label={`${collapsedSenders.has(group.sender) ? 'Mostrar' : 'Ocultar'} conversaciones de ${group.sender}`}>
               {collapsedSenders.has(group.sender) ? <ChevronRight size={14}/> : <ChevronDown size={14}/>}<span>Recibidos en</span><strong>{group.sender}</strong><small>{group.items.length}</small>
             </button></h2>
@@ -422,7 +459,6 @@ export default function WhatsAppInbox({ clinicId = '', sharedMode = false, role 
             </div>)}
           </section>)}
         </div>
-        {status === 'loading' && <p className="whatsapp-inbox-empty-list">Cargando conversaciones…</p>}
         {status === 'idle' && <p className="whatsapp-inbox-empty-list">Conecta la clínica para recibir mensajes.</p>}
         {status === 'ready' && !visibleConversations.length && <p className="whatsapp-inbox-empty-list">Aún no hay mensajes.</p>}
       </aside>
@@ -433,8 +469,12 @@ export default function WhatsAppInbox({ clinicId = '', sharedMode = false, role 
             {renderConversationMenu(selected, 'header')}
           </div></header>
           {searchOpen && <div className="whatsapp-message-search"><Search size={16}/><input ref={messageSearchRef} type="search" placeholder="Buscar en esta conversación" value={messageQuery} onChange={event => { setMessageQuery(event.target.value); setActiveMatchIndex(0); }} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); showNextMatch(event.shiftKey ? -1 : 1); } if (event.key === 'Escape') setSearchOpen(false); }} aria-label="Buscar mensajes en esta conversación"/><span className="whatsapp-message-search-count">{messageQuery.trim() ? `${messageMatches.length ? activeMatchIndex + 1 : 0} de ${messageMatches.length}` : '300 mensajes recientes'}</span><button type="button" className="whatsapp-icon-action" aria-label="Coincidencia anterior" disabled={!messageMatches.length} onClick={() => showNextMatch(-1)}><ChevronUp size={17}/></button><button type="button" className="whatsapp-icon-action" aria-label="Coincidencia siguiente" disabled={!messageMatches.length} onClick={() => showNextMatch(1)}><ChevronDown size={17}/></button><button type="button" className="whatsapp-icon-action" aria-label="Cerrar búsqueda" onClick={() => setSearchOpen(false)}><X size={17}/></button></div>}
-          <div ref={messageHistoryRef} className="whatsapp-message-history" aria-live="polite" onScroll={handleMessageHistoryScroll}>
-            {messages.length ? buildWhatsAppTimeline(messages).map(item => item.type === 'day'
+          <div ref={messageHistoryRef} className={`whatsapp-message-history${positioningInitialHistory && !loadingMessages ? ' is-positioning' : ''}`} aria-live="polite" onScroll={handleMessageHistoryScroll}>
+            {loadingMessages ? <div className="whatsapp-inbox-message-skeleton" role="status" aria-label="Cargando mensajes">
+              <span className="whatsapp-skeleton-block is-message is-inbound is-one"/><span className="whatsapp-skeleton-block is-message is-inbound is-two"/><span className="whatsapp-skeleton-block is-message is-outbound is-three"/><span className="whatsapp-skeleton-block is-message is-outbound is-four"/>
+            </div> : <>
+            <div className="whatsapp-message-history-content">{messageHistoryLoadError ? <div className="whatsapp-inbox-load-error" role="alert"><span>No se pudieron cargar los mensajes.</span><button type="button" onClick={() => { setMessageHistoryLoadError(''); setMessageHistoryRetry(value => value + 1); }}>Reintentar</button></div>
+            : messages.length ? buildWhatsAppTimeline(messages).map(item => item.type === 'day'
               ? <div className="whatsapp-day-divider" role="separator" key={item.key}><span>{item.label}</span></div>
               : <article className={`whatsapp-message-row is-${item.message.direction}${activeMessageMatch?.id === item.message.id ? ' is-search-match' : ''}`} key={item.key} data-message-id={item.message.id}>
                 <div className="whatsapp-message-bubble">{item.message.media_content_type?.startsWith('image/') && (() => {
@@ -442,7 +482,11 @@ export default function WhatsAppInbox({ clinicId = '', sharedMode = false, role 
                   const filename = readableMediaName(item.message.media_filename);
                   return <WhatsAppMessageImage src={mediaUrl} filename={filename} onExpand={() => setExpandedImage({ src: mediaUrl, filename })} onMediaLoad={keepLatestVisible}/>;
                 })()}{item.message.media_content_type?.startsWith('video/') && <video className="whatsapp-message-media" src={`/api/whatsapp/media?clinicId=${encodeURIComponent(clinicId)}&messageId=${encodeURIComponent(item.message.id)}`} aria-label={item.message.media_filename || 'Video compartido'} controls playsInline preload="metadata" onLoadedMetadata={keepLatestVisible}/ >}{item.message.media_content_type?.startsWith('audio/') && <WhatsAppAudioPlayer src={`/api/whatsapp/media?clinicId=${encodeURIComponent(clinicId)}&messageId=${encodeURIComponent(item.message.id)}`} filename={item.message.media_filename || 'audio'}/>}{item.message.body && <p>{highlightSearchText(item.message.body, messageQuery)}</p>}<div className="whatsapp-message-details"><time dateTime={item.message.created_at}>{formatWhatsAppMessageTime(item.message.created_at)}</time>{item.message.direction === 'outbound' && <WhatsAppDeliveryStatus status={item.message.delivery_status} errorCode={item.message.delivery_error_code} errorMessage={item.message.delivery_error_message}/>}</div></div>
-              </article>) : <div className="whatsapp-conversation-empty"><MessageCircle size={28}/><strong>Conversación nueva</strong><span>Los mensajes que se reciban aparecerán aquí.</span></div>}
+              </article>) : <div className="whatsapp-conversation-empty"><MessageCircle size={28}/><strong>Conversación nueva</strong><span>Los mensajes que se reciban aparecerán aquí.</span></div>}</div>
+            {positioningInitialHistory && <div className="whatsapp-inbox-positioning-overlay" role="status" aria-label="Preparando conversación">
+              <div className="whatsapp-inbox-message-skeleton" aria-hidden="true"><span className="whatsapp-skeleton-block is-message is-inbound is-one"/><span className="whatsapp-skeleton-block is-message is-inbound is-two"/><span className="whatsapp-skeleton-block is-message is-outbound is-three"/><span className="whatsapp-skeleton-block is-message is-outbound is-four"/></div>
+            </div>}
+            </>}
           </div>
           {(!isAtLatestMessage || newMessageCount > 0) && <button type="button" className="whatsapp-jump-to-latest" onClick={() => scrollToLatest('smooth')} aria-label={newMessageCount ? `Ver ${newMessageCount} mensajes nuevos` : 'Ir al último mensaje'}>
             <ChevronDown size={17}/><span>{newMessageCount ? `${newMessageCount} mensaje${newMessageCount === 1 ? '' : 's'} nuevo${newMessageCount === 1 ? '' : 's'}` : 'Ir al último mensaje'}</span>{newMessageCount > 0 && <small>{newMessageCount}</small>}
@@ -457,7 +501,10 @@ export default function WhatsAppInbox({ clinicId = '', sharedMode = false, role 
             : <footer className="whatsapp-composer-dock"><span className="whatsapp-composer-dock-copy"><MessageCircle size={16}/><span>{draft || attachment ? 'Tienes un borrador pendiente' : 'La conversación está en modo lectura'}</span></span><button type="button" className="whatsapp-composer-open" onClick={() => setComposerOpen(true)} aria-expanded={false} aria-controls="whatsapp-message-composer"><PencilLine size={16}/><span>{draft || attachment ? 'Continuar escribiendo' : 'Escribir mensaje'}</span></button></footer>
             : <footer className="whatsapp-composer-disabled"><MessageCircle size={16}/><span>Para responder, espera a que el contacto envíe un nuevo mensaje.</span></footer>
             : null}
-        </> : <div className="whatsapp-conversation-empty"><MessageCircle size={28}/><strong>Tu bandeja de WhatsApp</strong><span>{sharedMode ? 'Envía un WhatsApp al número del Sandbox para iniciar una conversación.' : 'Conecta la clínica para recibir mensajes.'}</span></div>}
+        </> : status === 'loading' ? <div className="whatsapp-inbox-conversation-skeleton" role="status" aria-label="Cargando WhatsApp">
+          <header className="whatsapp-conversation-header"><span className="whatsapp-skeleton-block is-avatar"/><span className="whatsapp-inbox-skeleton-contact"><span className="whatsapp-skeleton-block is-name"/><span className="whatsapp-skeleton-block is-preview"/></span><span className="whatsapp-skeleton-block is-action"/></header>
+          <div className="whatsapp-message-history"><div className="whatsapp-inbox-message-skeleton" aria-hidden="true"><span className="whatsapp-skeleton-block is-message is-inbound is-one"/><span className="whatsapp-skeleton-block is-message is-inbound is-two"/><span className="whatsapp-skeleton-block is-message is-outbound is-three"/><span className="whatsapp-skeleton-block is-message is-outbound is-four"/></div></div>
+        </div> : <div className="whatsapp-conversation-empty"><MessageCircle size={28}/><strong>Tu bandeja de WhatsApp</strong><span>{sharedMode ? 'Envía un WhatsApp al número del Sandbox para iniciar una conversación.' : 'Conecta la clínica para recibir mensajes.'}</span></div>}
       </main>
     </div>
     <dialog ref={imageDialogRef} className="whatsapp-image-dialog" aria-label="Vista ampliada de imagen" onClose={() => setExpandedImage(null)} onClick={event => { if (event.target === imageDialogRef.current) imageDialogRef.current.close(); }}>
