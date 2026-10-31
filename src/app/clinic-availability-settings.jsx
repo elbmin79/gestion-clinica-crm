@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { CalendarOff, Check, CircleAlert, Plus, RotateCcw, Trash2 } from 'lucide-react';
 import { createClinicAvailabilityStore } from '../lib/supabase/clinic-availability';
-import { hasClinicPermission } from '../lib/clinic-permissions.js';
+import { hasClinicPermission, normalizeClinicPermissions } from '../lib/clinic-permissions.js';
 
 function todayInZone(timeZone) {
   const parts = new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date());
@@ -26,7 +26,7 @@ export default function ClinicAvailabilitySettings({ clinicId, currentUserId, ro
   const [scope, setScope] = useState('clinic');
   const [today, setToday] = useState(() => todayInZone(timeZone));
   const [form, setForm] = useState({ title: '', startDate: '', startTime: '09:00', endDate: '', endTime: '10:00', branchId: '', providerId: '' });
-  const permissionScope = sharedMode ? (permissions['availability.scope'] || 'self') : 'clinic';
+  const permissionScope = sharedMode ? normalizeClinicPermissions(permissions, role)['availability.scope'] : 'clinic';
   const currentProvider = providers.find(provider => provider.userId && provider.userId === currentUserId && provider.active !== false);
   const canManageClinic = !sharedMode || hasClinicPermission(role, permissions, 'availability.manage_clinic');
   const canManageBranch = !sharedMode || hasClinicPermission(role, permissions, 'availability.manage_branch');
