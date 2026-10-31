@@ -185,8 +185,11 @@ export default function WhatsAppInbox({ clinicId = '', sharedMode = false, role 
   }, [searchOpen]);
 
   useEffect(() => {
-    if (composerOpen) requestAnimationFrame(() => composerInputRef.current?.focus());
-  }, [composerOpen]);
+    if (composerOpen) requestAnimationFrame(() => {
+      composerInputRef.current?.focus();
+      scrollToLatest('smooth');
+    });
+  }, [composerOpen, scrollToLatest]);
 
   useEffect(() => {
     if (!searchOpen || !activeMessageMatch) return;
