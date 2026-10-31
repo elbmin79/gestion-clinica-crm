@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, Download, Expand, MessageCircle, Paperclip, Search, Send, X } from 'lucide-react';
+import { ArrowLeft, ChevronDown, ChevronRight, Download, Expand, MessageCircle, Paperclip, Search, Send, X } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { buildWhatsAppTimeline, formatWhatsAppMessageTime, formatWhatsAppThreadTime } from '@/lib/whatsapp/time-format.js';
 import './whatsapp-inbox.css';
@@ -18,6 +18,7 @@ export default function WhatsAppInbox({ clinicId = '', sharedMode = false, role 
   const [messages, setMessages] = useState([]);
   const [query, setQuery] = useState('');
   const [selectedId, setSelectedId] = useState('');
+  const [collapsedSenders, setCollapsedSenders] = useState(() => new Set());
   const [draft, setDraft] = useState('');
   const [status, setStatus] = useState('loading');
   const [error, setError] = useState('');
@@ -47,6 +48,18 @@ export default function WhatsAppInbox({ clinicId = '', sharedMode = false, role 
   useEffect(() => { void refresh(); const timer = window.setInterval(() => void refresh(), 8000); return () => window.clearInterval(timer); }, [refresh]);
 
   const visibleConversations = useMemo(() => conversations.filter(item => `${item.contact_name || ''} ${item.contact_phone}`.toLowerCase().includes(query.trim().toLowerCase())), [conversations, query]);
+  const conversationGroups = useMemo(() => {
+    const groups = new Map();
+    for (const conversation of visibleConversations) {
+      const sender = String(conversation.sender_phone || '').trim() || 'Número no identificado';
+      if (!groups.has(sender)) groups.set(sender, []);
+      groups.get(sender).push(conversation);
+    }
+    return [...groups.entries()]
+      .map(([sender, items]) => ({ sender, items: items.sort((a, b) => Date.parse(b.last_message_at || '') - Date.parse(a.last_message_at || '')),
+        latestAt: Math.max(...items.map(item => Date.parse(item.last_message_at || '') || 0)) }))
+      .sort((a, b) => b.latestAt - a.latestAt || a.sender.localeCompare(b.sender));
+  }, [visibleConversations]);
   const selected = visibleConversations.find(item => item.id === selectedId) || visibleConversations[0] || null;
 
   useEffect(() => {
@@ -132,17 +145,32 @@ export default function WhatsAppInbox({ clinicId = '', sharedMode = false, role 
     event.preventDefault();
     event.currentTarget.form?.requestSubmit();
   }
+  function toggleSenderGroup(sender) {
+    setCollapsedSenders(current => {
+      const next = new Set(current);
+      if (next.has(sender)) next.delete(sender);
+      else next.add(sender);
+      return next;
+    });
+  }
 
   return <section className="whatsapp-inbox-page" aria-label="Conversaciones de WhatsApp">
     <header className="whatsapp-inbox-heading"><div><h1>WhatsApp</h1><p>Conversaciones con tus contactos</p></div></header>
     <div className="whatsapp-inbox-shell">
       <aside className="whatsapp-thread-list" aria-label="Conversaciones">
         <div className="whatsapp-thread-search"><Search size={16}/><input aria-label="Buscar conversación" placeholder="Buscar conversación" value={query} onChange={event => setQuery(event.target.value)}/></div>
-        {visibleConversations.map(item => <button className={`whatsapp-thread-item${selected?.id === item.id ? ' is-selected' : ''}`} type="button" key={item.id} onClick={() => setSelectedId(item.id)}>
-          <span className="whatsapp-thread-avatar">{initials(item.contact_name || item.contact_phone)}</span>
-          <span className="whatsapp-thread-copy"><strong>{item.contact_name || item.contact_phone}</strong><span>{item.contact_phone}</span></span>
-          <span className="whatsapp-thread-meta"><time>{formatWhatsAppThreadTime(item.last_message_at)}</time></span>
-        </button>)}
+        <div className="whatsapp-thread-groups">
+          {conversationGroups.map(group => <section className="whatsapp-sender-group" key={group.sender}>
+            <h2 className="whatsapp-sender-heading"><button type="button" aria-expanded={!collapsedSenders.has(group.sender)} onClick={() => toggleSenderGroup(group.sender)} aria-label={`${collapsedSenders.has(group.sender) ? 'Mostrar' : 'Ocultar'} conversaciones de ${group.sender}`}>
+              {collapsedSenders.has(group.sender) ? <ChevronRight size={14}/> : <ChevronDown size={14}/>}<span>Recibidos en</span><strong>{group.sender}</strong><small>{group.items.length}</small>
+            </button></h2>
+            {!collapsedSenders.has(group.sender) && group.items.map(item => <button className={`whatsapp-thread-item${selected?.id === item.id ? ' is-selected' : ''}`} type="button" key={item.id} onClick={() => setSelectedId(item.id)}>
+              <span className="whatsapp-thread-avatar">{initials(item.contact_name || item.contact_phone)}</span>
+              <span className="whatsapp-thread-copy"><strong>{item.contact_name || item.contact_phone}</strong><span>{item.contact_phone}</span></span>
+              <span className="whatsapp-thread-meta"><time>{formatWhatsAppThreadTime(item.last_message_at)}</time></span>
+            </button>)}
+          </section>)}
+        </div>
         {status === 'loading' && <p className="whatsapp-inbox-empty-list">Cargando conversaciones…</p>}
         {status === 'idle' && <p className="whatsapp-inbox-empty-list">Conecta la clínica para recibir mensajes.</p>}
         {status === 'ready' && !visibleConversations.length && <p className="whatsapp-inbox-empty-list">Aún no hay mensajes.</p>}

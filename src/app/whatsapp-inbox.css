@@ -5,6 +5,16 @@
 .whatsapp-message-history{min-height:0;overscroll-behavior:contain}
 .whatsapp-thread-list{background:var(--paper)}
 .whatsapp-thread-search{margin:12px;padding:9px 11px;border:1px solid var(--line);border-radius:9px}
+.whatsapp-thread-groups{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain}
+.whatsapp-sender-group+.whatsapp-sender-group{border-top:1px solid var(--line)}
+.whatsapp-sender-heading{position:sticky;top:0;z-index:1;min-width:0;margin:0;background:var(--paper)}
+.whatsapp-sender-heading button{display:flex;align-items:center;gap:6px;width:100%;min-width:0;padding:9px 13px;border:0;background:transparent;color:var(--muted);font-size:10px;font-weight:600;line-height:1.2;text-align:left}
+.whatsapp-sender-heading button:hover{background:var(--canvas)}
+.whatsapp-sender-heading button:focus-visible{outline:2px solid var(--green);outline-offset:-2px}
+.whatsapp-sender-heading svg{flex:none;color:var(--muted)}
+.whatsapp-sender-heading>span{flex:none}
+.whatsapp-sender-heading button strong{min-width:0;overflow:hidden;color:var(--ink);font-size:11px;font-weight:750;text-overflow:ellipsis;white-space:nowrap}
+.whatsapp-sender-heading button small{display:grid;place-items:center;min-width:18px;height:18px;margin-left:auto;padding:0 5px;border:1px solid var(--line);border-radius:10px;color:var(--muted);font-size:9px;font-weight:700}
 .whatsapp-thread-item{gap:10px;padding:13px 14px;border-top:0;cursor:pointer}
 .whatsapp-thread-item.is-selected{background:var(--canvas)}
 .whatsapp-thread-item:focus-visible,.whatsapp-composer button:focus-visible{outline:2px solid var(--green);outline-offset:-2px}
