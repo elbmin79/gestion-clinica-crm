@@ -11,3 +11,4 @@ supabase/bootstrap/clinic-admin.generated.sql
 /logo-header.png
 
 supabase/.temp/
+/.invitation-qa/

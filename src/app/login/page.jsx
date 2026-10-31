@@ -3,7 +3,6 @@ import { ArrowRight, CalendarDays, FileHeart, LockKeyhole, UsersRound } from 'lu
 import { isSupabaseConfigured } from '../../lib/supabase/config';
 import AuthBrand from '../auth/auth-brand';
 import { signIn } from './actions';
-import RecoveryLinkHandler from './recovery-link-handler';
 
 const messages = {
   invalid: 'No se pudo iniciar sesión. Revisa el correo y la contraseña.',
@@ -16,7 +15,6 @@ export default async function LoginPage({ searchParams }) {
   const configured = isSupabaseConfigured();
 
   return <main className="auth-page auth-login-page">
-    <RecoveryLinkHandler />
     <div className="auth-login-backdrop" aria-hidden="true">
       <span className="auth-backdrop-orbit auth-backdrop-orbit-one" />
       <span className="auth-backdrop-orbit auth-backdrop-orbit-two" />

@@ -37,6 +37,15 @@ and document counts reflect the records in this demo.
 
 ## Run locally
 
+### Team invitations
+
+Clinic administrators can invite an email from Equipo y sucursales → Acceso a
+la clínica, review its role and permissions, and resend or revoke pending
+invitations. New accounts create a password before clinic access activates and
+then enter directly. Existing accounts accept without changing their password.
+See [clinic invitation setup and testing](docs/clinic-invitations.md) for the
+required Auth email templates, redirect settings, and migration details.
+
 ### Agenda colors and filters
 
 Agenda colors belong to the professional's branch assignment, independently of

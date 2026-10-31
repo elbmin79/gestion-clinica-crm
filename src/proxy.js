@@ -72,6 +72,22 @@ export async function proxy(request) {
     return redirectResponse;
   }
 
+  if (claims && !error && !isLoginRoute && !isForgotPasswordRoute && pathname !== '/accept-invite' && pathname !== '/update-password') {
+    const { data: invitation } = await supabase.from('clinic_invitations').select('id')
+      .eq('email', String(claims.email || '').toLowerCase()).eq('status', 'pending').eq('requires_password', true)
+      .order('created_at', { ascending: true }).limit(1).maybeSingle();
+    if (invitation) {
+      const onboardingUrl = request.nextUrl.clone();
+      onboardingUrl.pathname = '/accept-invite';
+      onboardingUrl.search = '';
+      onboardingUrl.searchParams.set('id', invitation.id);
+      const redirectResponse = NextResponse.redirect(onboardingUrl);
+      response.cookies.getAll().forEach(cookie => redirectResponse.cookies.set(cookie));
+      redirectResponse.headers.set('Cache-Control', 'private, no-store');
+      return redirectResponse;
+    }
+  }
+
   return response;
 }
 

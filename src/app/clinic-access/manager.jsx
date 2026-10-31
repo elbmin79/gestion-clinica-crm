@@ -1,8 +1,11 @@
 'use client';
 
+import './invitations.css';
+
 import { useEffect, useState } from 'react';
 import { assignClinicAccess, loadClinicAccessData, revokeClinicAccess, updateClinicAccessRole } from './actions';
 import { CLINIC_PERMISSION_GROUPS, CLINIC_ROLES, permissionsForPreset, sanitizeClinicPermissions } from '../../lib/clinic-permissions.js';
+import { inviteClinicMember, loadClinicInvitations, revokeClinicInvitation } from './invitation-actions';
 
 const roleLabels = Object.fromEntries(CLINIC_ROLES);
 
@@ -32,11 +35,16 @@ export default function ClinicAccessManager({ clinicId }) {
   const [permissionEditorError, setPermissionEditorError] = useState('');
   const [editorSaving, setEditorSaving] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
+  const [invitations, setInvitations] = useState([]);
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteRole, setInviteRole] = useState('clinician');
+  const [message, setMessage] = useState('');
+  const [invitationBusy, setInvitationBusy] = useState('');
 
   useEffect(() => {
     let active = true;
     setLoading(true);
-    loadClinicAccessData(clinicId).then(result => {
+    Promise.all([loadClinicAccessData(clinicId), loadClinicInvitations(clinicId)]).then(([result, invites]) => {
       if (!active) return;
       if (!result.ok) {
         setError(result.message);
@@ -45,7 +53,8 @@ export default function ClinicAccessManager({ clinicId }) {
       setMembers(result.members);
       setAccounts(result.accounts);
       setCurrentUserId(result.currentUserId);
-      setError('');
+      setInvitations(invites.ok ? invites.invitations : []);
+      setError(invites.ok ? '' : invites.message);
     }).catch(() => {
       if (active) setError('No se pudieron cargar las cuentas de la clínica.');
     }).finally(() => {
@@ -57,6 +66,8 @@ export default function ClinicAccessManager({ clinicId }) {
   useEffect(() => {
     setConfirmAction(null);
     setPermissionEditor(null);
+    setInviteEmail('');
+    setMessage('');
   }, [clinicId]);
 
   useEffect(() => {
@@ -97,7 +108,9 @@ export default function ClinicAccessManager({ clinicId }) {
     setPermissionEditorError('');
     try {
       const permissions = sanitizeClinicPermissions(permissionEditor.permissions, permissionEditor.role);
-      const result = permissionEditor.type === 'assign'
+      const result = permissionEditor.type === 'invite'
+        ? await inviteClinicMember({ clinicId, email: permissionEditor.email, role: permissionEditor.role, permissions })
+        : permissionEditor.type === 'assign'
         ? await assignClinicAccess({ clinicId, userId: permissionEditor.account.userId, role: permissionEditor.role, permissions })
         : await updateClinicAccessRole({ clinicId, userId: permissionEditor.member.userId, role: permissionEditor.role, permissions });
       if (!result.ok) {
@@ -105,12 +118,28 @@ export default function ClinicAccessManager({ clinicId }) {
         return;
       }
       setPermissionEditor(null);
+      if (permissionEditor.type === 'invite') setInviteEmail('');
+      setMessage(result.message);
       setReloadKey(value => value + 1);
     } catch {
-      setPermissionEditorError(permissionEditor.type === 'assign' ? 'No se pudo asignar acceso a la clínica.' : 'No se pudieron guardar los permisos.');
+      setPermissionEditorError(permissionEditor.type === 'invite' ? 'No se pudo enviar la invitación.' : permissionEditor.type === 'assign' ? 'No se pudo asignar acceso a la clínica.' : 'No se pudieron guardar los permisos.');
     } finally {
       setEditorSaving(false);
     }
+  };
+
+  const manageInvitation = async (invitation, revoke = false) => {
+    setInvitationBusy(invitation.id);
+    setError('');
+    setMessage('');
+    try {
+      const result = revoke
+        ? await revokeClinicInvitation({ clinicId, invitationId: invitation.id })
+        : await inviteClinicMember({ clinicId, email: invitation.email, role: invitation.role, permissions: invitation.permissions });
+      if (!result.ok) setError(result.message);
+      else { setMessage(result.message); setReloadKey(value => value + 1); }
+    } catch { setError('No se pudo actualizar la invitación. Inténtalo de nuevo.'); }
+    finally { setInvitationBusy(''); }
   };
 
   const requestMemberChange = (member, value) => {
@@ -153,9 +182,27 @@ export default function ClinicAccessManager({ clinicId }) {
     <div className="panel-heading padded">
       <div>
         <div className="panel-title">Acceso a la clínica</div>
-        <p className="panel-subtitle">Asigna roles a cuentas existentes del equipo.</p>
+        <p className="panel-subtitle">Invita al equipo y administra su acceso a esta clínica.</p>
       </div>
     </div>
+    <form className="clinic-invite-form" onSubmit={event => {
+      event.preventDefault();
+      setPermissionEditorError('');
+      setPermissionEditor({ type: 'invite', email: inviteEmail.trim(), role: inviteRole, permissions: permissionsForPreset(inviteRole) });
+    }}>
+      <div className="clinic-invite-intro"><h3>Invitar persona</h3><p>Recibirá un enlace para aceptar el acceso. Si es su primera vez, creará su contraseña antes de entrar.</p></div>
+      <label>Correo electrónico<input type="email" autoComplete="email" value={inviteEmail} maxLength={254} onChange={event => setInviteEmail(event.target.value)} required placeholder="nombre@correo.com" disabled={loading || editorSaving || Boolean(invitationBusy)}/></label>
+      <label>Rol inicial<select value={inviteRole} onChange={event => setInviteRole(event.target.value)} disabled={loading || editorSaving || Boolean(invitationBusy)}>{CLINIC_ROLES.map(([role, label]) => <option key={role} value={role}>{label}</option>)}</select></label>
+      <button className="button primary" type="submit" disabled={loading || editorSaving || Boolean(invitationBusy)}>Revisar invitación</button>
+    </form>
+    {message && <p className="clinic-access-message" role="status">{message}</p>}
+    {!loading && invitations.length > 0 && <section className="clinic-invitations" aria-labelledby="clinic-invitations-title">
+      <h3 id="clinic-invitations-title">Invitaciones pendientes · {invitations.length}</h3>
+      <div>{invitations.map(invitation => <article className="clinic-invitation-row" key={invitation.id}>
+        <div><strong>{invitation.email}</strong><small>{roleLabels[invitation.role]} · {invitation.delivery_status === 'failed' ? 'Envío fallido' : new Date(invitation.expires_at).getTime() <= Date.now() ? 'Invitación vencida' : invitation.delivery_status === 'sending' ? 'Envío en proceso' : 'Pendiente de aceptar'}</small></div>
+        <div className="clinic-invitation-actions"><button type="button" className="button secondary compact" onClick={() => manageInvitation(invitation)} disabled={Boolean(invitationBusy) || editorSaving}>{invitationBusy === invitation.id ? 'Actualizando…' : 'Reenviar'}</button><button type="button" className="clinic-access-revoke" onClick={() => manageInvitation(invitation, true)} disabled={Boolean(invitationBusy) || editorSaving} aria-label={`Revocar invitación de ${invitation.email}`}>Revocar</button></div>
+      </article>)}</div>
+    </section>}
     {!loading && accounts.length > 0 && <section className="clinic-access-pending has-pending" aria-labelledby="clinic-access-pending-title" aria-live="polite">
       <div className="clinic-access-pending-heading">
         <span className="clinic-access-pending-count" aria-hidden="true">{accounts.length}</span>
@@ -195,7 +242,7 @@ export default function ClinicAccessManager({ clinicId }) {
   </section>
   {permissionEditor && <div className="clinic-access-confirm-backdrop" onMouseDown={event => event.target === event.currentTarget && !editorSaving && setPermissionEditor(null)}>
     <section className="clinic-access-permissions-modal" role="dialog" aria-modal="true" aria-labelledby="clinic-access-permissions-title">
-      <header><div><span>ACCESO A LA CLÍNICA</span><h2 id="clinic-access-permissions-title">{permissionEditor.type === 'assign' ? 'Configurar acceso' : 'Editar permisos'}</h2><p>{permissionEditor.account?.name || permissionEditor.account?.email || permissionEditor.member?.name || permissionEditor.member?.email}</p></div><button type="button" aria-label="Cerrar" disabled={editorSaving} onClick={() => setPermissionEditor(null)}>×</button></header>
+      <header><div><h2 id="clinic-access-permissions-title">{permissionEditor.type === 'invite' ? 'Revisar invitación' : permissionEditor.type === 'assign' ? 'Configurar acceso' : 'Editar permisos'}</h2><p>{permissionEditor.email || permissionEditor.account?.name || permissionEditor.account?.email || permissionEditor.member?.name || permissionEditor.member?.email}</p></div><button type="button" aria-label="Cerrar" disabled={editorSaving} onClick={() => setPermissionEditor(null)}>×</button></header>
       <div className="clinic-access-permissions-body">
         <label className="clinic-access-template-select"><span>Plantilla inicial</span><select value={permissionEditor.role} disabled={editorSaving} onChange={event => setEditorRole(event.target.value)}>{CLINIC_ROLES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select><small>La plantilla rellena los permisos; puedes ajustarlos antes de guardar.</small></label>
         <div className="clinic-access-read-rule"><span className="clinic-access-read-check">✓</span><div><strong>Lectura completa en la clínica</strong><p>Todos pueden consultar los módulos, incluida Agenda Pública. WhatsApp solo aparece cuando se habilita; los permisos de acción controlan qué puede modificarse.</p></div></div>
@@ -206,7 +253,7 @@ export default function ClinicAccessManager({ clinicId }) {
         {permissionEditor.type === 'update' && <button className="clinic-access-revoke" type="button" onClick={() => requestMemberChange(permissionEditor.member, '__revoke__')} disabled={editorSaving} aria-label={`Revocar el acceso de ${permissionEditor.member.name || permissionEditor.member.email}`}>Revocar acceso</button>}
         <span className="clinic-access-permissions-footer-spacer" aria-hidden="true"/>
         <button className="button secondary" type="button" onClick={() => setPermissionEditor(null)} disabled={editorSaving}>Cancelar</button>
-        <button className="button primary" type="button" onClick={savePermissionEditor} disabled={editorSaving}>{editorSaving ? 'Guardando…' : permissionEditor.type === 'assign' ? 'Dar acceso' : 'Guardar permisos'}</button>
+        <button className="button primary" type="button" onClick={savePermissionEditor} disabled={editorSaving}>{editorSaving ? (permissionEditor.type === 'invite' ? 'Enviando invitación…' : 'Guardando…') : permissionEditor.type === 'invite' ? 'Enviar invitación' : permissionEditor.type === 'assign' ? 'Dar acceso' : 'Guardar permisos'}</button>
       </footer>
     </section>
   </div>}

@@ -84,6 +84,10 @@ export async function loadClinicAccessData(clinicId) {
 
     if (error) return { ok: false, message: 'No se pudo cargar el equipo con acceso a esta clínica.' };
 
+    const { data: invitations, error: invitationsError } = await context.serviceClient.from('clinic_invitations')
+      .select('email').eq('clinic_id', clinicId).eq('status', 'pending');
+    if (invitationsError) return { ok: false, message: 'No se pudieron cargar las invitaciones de la clínica.' };
+    const pendingEmails = new Set((invitations || []).map(invitation => invitation.email));
     const assignedIds = new Set((rows || []).map(member => member.user_id));
     const [{ users, error: usersError }, members] = await Promise.all([
       listAuthUsers(context.serviceClient),
@@ -104,7 +108,7 @@ export async function loadClinicAccessData(clinicId) {
     if (usersError) return { ok: false, message: 'No se pudieron cargar las cuentas registradas.' };
 
     const accounts = users
-      .filter(user => user.email && !assignedIds.has(user.id) && !isHiddenDirectoryAccount(user))
+      .filter(user => user.email && !assignedIds.has(user.id) && !pendingEmails.has(user.email.toLowerCase()) && !isHiddenDirectoryAccount(user))
       .map(user => ({
         userId: user.id,
         name: displayName(user.user_metadata),
@@ -136,6 +140,10 @@ export async function assignClinicAccess({ clinicId, userId, role, permissions }
     const targetUser = data?.user;
     if (!targetUser?.email) return { ok: false, message: 'No se encontró la cuenta seleccionada.' };
     if (isHiddenDirectoryAccount(targetUser)) return { ok: false, message: 'No se encontró la cuenta seleccionada.' };
+    const { data: pendingInvite, error: invitationError } = await context.serviceClient.from('clinic_invitations')
+      .select('id').eq('clinic_id', clinicId).eq('email', targetUser.email.toLowerCase()).eq('status', 'pending').maybeSingle();
+    if (invitationError) return { ok: false, message: 'No se pudo verificar la invitación de esa cuenta.' };
+    if (pendingInvite) return { ok: false, message: 'Esa persona debe aceptar su invitación para activar el acceso.' };
     if (!targetUser.email_confirmed_at) {
       return { ok: false, message: 'Esa cuenta debe confirmar su correo antes de recibir acceso a la clínica.' };
     }
