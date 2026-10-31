@@ -120,9 +120,9 @@ export default function ClinicAccessManager({ clinicId }) {
         setError(result.message);
         return;
       }
-      setSuccess(type === 'role'
-        ? `${member.name || member.email}: rol actualizado a ${roleLabels[role]}.`
-        : `${member.name || member.email}: acceso revocado.`);
+      if (type === 'role') {
+        setSuccess(`${member.name || member.email}: rol actualizado a ${roleLabels[role]}.`);
+      }
       if (type === 'revoke') setRoleByUser(current => {
         const next = { ...current };
         delete next[member.userId];
