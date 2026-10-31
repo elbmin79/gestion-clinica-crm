@@ -33,20 +33,9 @@ export function createConfirmationDispatchHandler({
     if (!secrets.length) return Response.json({ error: 'Confirmation dispatch is not configured.' }, { status: 503 });
     if (!secrets.some(secret => authorized(request, secret))) return Response.json({ error: 'Unauthorized.' }, { status: 401 });
 
-    if (request.method === 'GET' && (
-      env.WHATSAPP_PROVIDER_MODE !== 'twilio'
-      || env.TWILIO_WHATSAPP_ENABLED !== 'true'
-      || env.WHATSAPP_AUTOMATION_ENABLED !== 'true'
-    )) {
-      return Response.json({ processed: 0, skipped: true, mode: 'twilio', simulated: false, counts: { claimed: 0, sent: 0, failed: 0, unknown: 0, skipped: 0 } }, { headers: { 'Cache-Control': 'no-store' } });
-    }
-
     const provider = createProvider({ env });
     if (!['mock', 'twilio'].includes(provider.mode) || provider.available === false) {
       return Response.json({ error: provider.error || 'WhatsApp provider is not configured.' }, { status: 503 });
-    }
-    if (provider.mode === 'twilio' && env.WHATSAPP_AUTOMATION_ENABLED !== 'true') {
-      return Response.json({ error: 'Automated WhatsApp delivery is disabled until explicitly enabled.' }, { status: 503 });
     }
     const client = createServiceClient();
     if (!client) return Response.json({ error: 'Server-side Supabase configuration is incomplete.' }, { status: 503 });
@@ -73,6 +62,7 @@ export function createConfirmationDispatchHandler({
       const result = await provider.sendTemplate({
         sender: route.sender,
         templateKind: 'confirmation_2d',
+        contentSid: route.settings?.template_content_sids?.confirmation_2d,
         recipient: appointment.phone,
         context: { patientName: appointment.patient_name, appointmentAt: appointment.appointment_at },
       });

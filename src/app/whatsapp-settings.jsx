@@ -13,18 +13,7 @@ const templateKinds = [
 const initialSettings = {
   providerMode: 'twilio',
   templateReadiness: { confirmation_2d: false, reminder_1d: false, reminder_5h: false },
-};
-const initialAvailableTemplates = { confirmation_2d: false, reminder_1d: false, reminder_5h: false };
-const initialTemplateStatuses = { confirmation_2d: 'not_configured', reminder_1d: 'not_configured', reminder_5h: 'not_configured' };
-const templateStatusLabels = {
-  approved: 'Aprobada',
-  received: 'Enviada para revisión',
-  pending: 'En revisión',
-  rejected: 'Rechazada',
-  paused: 'Pausada',
-  disabled: 'Desactivada',
-  not_configured: 'Falta configurar el identificador',
-  unavailable: 'No se pudo verificar',
+  templateContentSids: {},
 };
 
 export default function WhatsAppSettings({ clinicId, role, branches = [], sharedMode }) {
@@ -39,8 +28,7 @@ export default function WhatsAppSettings({ clinicId, role, branches = [], shared
   const [editingAssignments, setEditingAssignments] = useState(() => new Set());
   const [availableSenders, setAvailableSenders] = useState([]);
   const [inboxSender, setInboxSender] = useState(null);
-  const [availableTemplates, setAvailableTemplates] = useState(initialAvailableTemplates);
-  const [templateStatuses, setTemplateStatuses] = useState(initialTemplateStatuses);
+  const [templates, setTemplates] = useState([]);
   const [deliveryEnabled, setDeliveryEnabled] = useState(false);
 
   useEffect(() => {
@@ -68,12 +56,11 @@ export default function WhatsAppSettings({ clinicId, role, branches = [], shared
       setInboxSender(result.inboxSender || null);
       if (result.ok) setAvailableSenders(result.senders);
       else setSenderLookupError(result.message);
-      setAvailableTemplates(result.availableTemplates || initialAvailableTemplates);
-      setTemplateStatuses({ ...initialTemplateStatuses, ...(result.templateStatuses || {}) });
+      setTemplates(result.templates || []);
       setDeliveryEnabled(result.deliveryEnabled === true);
       setLoadingAvailableSenders(false);
     }).catch(() => {
-      if (active) { setInboxSender(null); setSenderLookupError('No se pudieron consultar los números registrados.'); setAvailableSenders([]); setAvailableTemplates(initialAvailableTemplates); setTemplateStatuses(initialTemplateStatuses); setDeliveryEnabled(false); setLoadingAvailableSenders(false); }
+      if (active) { setInboxSender(null); setSenderLookupError('No se pudieron consultar los números registrados.'); setAvailableSenders([]); setTemplates([]); setDeliveryEnabled(false); setLoadingAvailableSenders(false); }
     });
     return () => { active = false; };
   }, [clinicId, role, sharedMode]);
@@ -107,7 +94,9 @@ export default function WhatsAppSettings({ clinicId, role, branches = [], shared
   const save = async event => {
     event.preventDefault();
     setSaving(true); setError(''); setNotice('');
-    const templateReadiness = Object.fromEntries(templateKinds.map(([kind]) => [kind, settings.templateReadiness[kind] === true && availableTemplates[kind] === true]));
+    const templateReadiness = Object.fromEntries(templateKinds.map(([kind]) => [kind,
+      settings.templateReadiness[kind] === true && templates.some(template => template.status === 'approved' && template.sid === settings.templateContentSids?.[kind]),
+    ]));
     const result = await saveClinicWhatsAppSettings({ clinicId, ...settings, providerMode: 'twilio', templateReadiness, senders });
     if (!result.ok) setError(result.message);
     else {
@@ -135,8 +124,9 @@ export default function WhatsAppSettings({ clinicId, role, branches = [], shared
     ...availableSenders.map(sender => sender.phoneNumber),
   ].filter(Boolean));
   const inboxConnected = connectedNumbers.size > 0;
+  const approvedTemplates = templates.filter(template => template.status === 'approved');
   const whatsappReady = deliveryEnabled && readySenderCount > 0
-    && templateKinds.some(([kind]) => settings.templateReadiness[kind] && availableTemplates[kind]);
+    && templateKinds.some(([kind]) => settings.templateReadiness[kind] && approvedTemplates.some(template => template.sid === settings.templateContentSids?.[kind]));
 
   return <div className="whatsapp-settings-content" aria-busy={loading || saving || loadingAvailableSenders}>
     <header className="whatsapp-page-heading"><h1>WhatsApp</h1><p>Configura confirmaciones y recordatorios de citas.</p></header>
@@ -169,7 +159,7 @@ export default function WhatsAppSettings({ clinicId, role, branches = [], shared
             </div>
           </article>})}</div> : null}
       </section>
-      <section className="whatsapp-settings-section"><div className="whatsapp-settings-heading"><div><h3>Plantillas aprobadas</h3><p>El estado se consulta automáticamente. Las plantillas activas se usan para avisos automáticos de citas.</p></div></div><div className="whatsapp-template-list">{templateKinds.map(([key, label]) => <label key={key}><input type="checkbox" disabled={!availableTemplates[key]} checked={settings.templateReadiness[key] === true && availableTemplates[key] === true} onChange={event => setSettings(current => ({ ...current, templateReadiness: { ...current.templateReadiness, [key]: event.target.checked } }))}/><span className="whatsapp-template-copy"><strong>{label}</strong><small>{templateStatusLabels[templateStatuses[key]] || templateStatusLabels.unavailable}</small></span></label>)}</div></section>
+      <section className="whatsapp-settings-section"><div className="whatsapp-settings-heading"><div><h3>Avisos automáticos de citas</h3><p>Elige una plantilla aprobada por WhatsApp para cada aviso. La lista se carga desde tu cuenta.</p></div></div>{!deliveryEnabled ? <p className="whatsapp-settings-empty">No se pudieron consultar las plantillas de Twilio. Revisa las credenciales del servidor.</p> : approvedTemplates.length === 0 ? <p className="whatsapp-settings-empty">No hay plantillas aprobadas disponibles en la cuenta.</p> : <div className="whatsapp-template-list">{templateKinds.map(([key, label]) => <div className="whatsapp-template-row" key={key}><label className="whatsapp-template-toggle"><input type="checkbox" disabled={!settings.templateContentSids?.[key] || !approvedTemplates.some(template => template.sid === settings.templateContentSids[key])} checked={settings.templateReadiness[key] === true && approvedTemplates.some(template => template.sid === settings.templateContentSids?.[key])} onChange={event => setSettings(current => ({ ...current, templateReadiness: { ...current.templateReadiness, [key]: event.target.checked } }))}/><span><strong>{label}</strong><small>{settings.templateReadiness[key] ? 'Activo' : 'Desactivado'}</small></span></label><select aria-label={`Plantilla para ${label}`} value={settings.templateContentSids?.[key] || ''} onChange={event => setSettings(current => ({ ...current, templateContentSids: { ...current.templateContentSids, [key]: event.target.value }, templateReadiness: { ...current.templateReadiness, [key]: false } }))}><option value="">Selecciona una plantilla aprobada</option>{approvedTemplates.map(template => <option value={template.sid} key={template.sid}>{template.name}{template.language ? ` · ${template.language}` : ''}</option>)}</select></div>)}</div>}</section>
       {error && <p className="whatsapp-settings-error" role="alert"><CircleAlert size={15}/>{error}</p>}{notice && <p className="whatsapp-settings-success" role="status"><CircleCheck size={15}/>{notice}</p>}
       <div className="whatsapp-settings-actions"><button className="button primary" type="submit" disabled={saving || loading}><Save size={15}/>{saving ? 'Guardando…' : 'Guardar configuración'}</button></div>
     </form>}

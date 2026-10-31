@@ -1,53 +1,48 @@
 import { Buffer } from 'node:buffer';
 
-const liveContentSidKeys = Object.freeze({
-  confirmation_2d: 'TWILIO_WHATSAPP_CONTENT_SID_CONFIRMATION_2D',
-  reminder_1d: 'TWILIO_WHATSAPP_CONTENT_SID_REMINDER_1D',
-  reminder_5h: 'TWILIO_WHATSAPP_CONTENT_SID_REMINDER_5H',
-});
-
 const e164Pattern = /^\+[1-9]\d{7,14}$/;
 const contentSidPattern = /^HX[0-9a-fA-F]{32}$/;
 
-export function getConfiguredWhatsAppTemplates(env = process.env) {
-  return Object.freeze(Object.fromEntries(Object.entries(liveContentSidKeys).map(([kind, key]) => [
-    kind,
-    contentSidPattern.test(String(env[key] || '').trim()),
-  ])));
+function normalizedApprovalStatus(record) {
+  const approval = record?.approvals?.whatsapp
+    || record?.whatsapp
+    || record?.approval_requests?.whatsapp
+    || record?.approval_content?.channel;
+  const status = String(approval?.status || '').toLowerCase();
+  return ['received', 'pending', 'approved', 'rejected', 'paused', 'disabled'].includes(status) ? status : 'unavailable';
 }
 
-const templateKinds = Object.keys(liveContentSidKeys);
-
-export async function getWhatsAppTemplateStatuses({ env = process.env, fetchImpl = globalThis.fetch } = {}) {
+export async function listTwilioWhatsAppTemplates({ env = process.env, fetchImpl = globalThis.fetch } = {}) {
   const accountSid = String(env.TWILIO_ACCOUNT_SID || '').trim();
   const authToken = String(env.TWILIO_AUTH_TOKEN || '').trim();
   const credentialsAvailable = /^AC[0-9a-fA-F]{32}$/.test(accountSid) && Boolean(authToken);
-  const authorization = credentialsAvailable ? Buffer.from(`${accountSid}:${authToken}`).toString('base64') : '';
-  const entries = await Promise.all(Object.entries(liveContentSidKeys).map(async ([kind, key]) => {
-    const contentSid = String(env[key] || '').trim();
-    if (!contentSidPattern.test(contentSid)) return [kind, 'not_configured'];
-    if (!credentialsAvailable) return [kind, 'unavailable'];
-    try {
-      const response = await fetchImpl(`https://content.twilio.com/v1/Content/${contentSid}/ApprovalRequests`, {
-        method: 'GET',
-        headers: { Authorization: `Basic ${authorization}` },
-        signal: AbortSignal.timeout(15000),
-        cache: 'no-store',
-      });
-      if (!response.ok) return [kind, 'unavailable'];
-      const payload = await response.json();
-      const status = String(payload?.whatsapp?.status || '').toLowerCase();
-      return [kind, ['received', 'pending', 'approved', 'rejected', 'paused', 'disabled'].includes(status) ? status : 'unavailable'];
-    } catch {
-      return [kind, 'unavailable'];
+  if (!credentialsAvailable) throw new Error('WhatsApp template lookup is not configured.');
+  const authorization = Buffer.from(`${accountSid}:${authToken}`).toString('base64');
+  const records = [];
+  let pageUrl = new URL('https://content.twilio.com/v1/ContentAndApprovals');
+  pageUrl.search = new URLSearchParams({ PageSize: '100' }).toString();
+  let pageCount = 0;
+  while (pageUrl) {
+    if (pageCount++ >= 100 || pageUrl.origin !== 'https://content.twilio.com' || pageUrl.pathname !== '/v1/ContentAndApprovals') {
+      throw new Error('WhatsApp template lookup returned an invalid page.');
     }
-  }));
-  return Object.freeze(Object.fromEntries(entries));
-}
-
-export async function getApprovedWhatsAppTemplates(options = {}) {
-  const statuses = await getWhatsAppTemplateStatuses(options);
-  return Object.freeze(Object.fromEntries(templateKinds.map(kind => [kind, statuses[kind] === 'approved'])));
+    const response = await fetchImpl(pageUrl, {
+      method: 'GET',
+      headers: { Authorization: `Basic ${authorization}` },
+      signal: AbortSignal.timeout(15000),
+      cache: 'no-store',
+    });
+    if (!response.ok) throw new Error('WhatsApp template lookup failed.');
+    const payload = await response.json();
+    if (Array.isArray(payload?.contents)) records.push(...payload.contents);
+    const nextPage = payload?.meta?.next_page_url;
+    pageUrl = typeof nextPage === 'string' && nextPage ? new URL(nextPage, pageUrl) : null;
+  }
+  return records.filter(record => contentSidPattern.test(String(record?.sid || ''))).map(record => {
+    const status = normalizedApprovalStatus(record);
+    const name = record.friendly_name || record.whatsapp?.name || record.types && Object.keys(record.types)[0] || record.sid;
+    return { sid: String(record.sid), name: String(name).slice(0, 120), language: String(record.language || '').slice(0, 10), status };
+  });
 }
 
 export async function listRegisteredTwilioWhatsAppSenders({ env = process.env, fetchImpl = globalThis.fetch } = {}) {
@@ -97,11 +92,6 @@ export async function listRegisteredTwilioWhatsAppSenders({ env = process.env, f
     .filter(Boolean);
 }
 
-function contentSidForKind(env, templateKind) {
-  const key = liveContentSidKeys[templateKind];
-  return key ? String(env[key] || '').trim() : '';
-}
-
 function templateVariables(appointmentAt, timeZone = 'America/Tijuana') {
   const date = new Date(appointmentAt || Date.now());
   if (Number.isNaN(date.getTime())) throw new TypeError('Invalid appointment date.');
@@ -119,24 +109,23 @@ export function createTwilioWhatsAppProvider({ env = process.env, fetchImpl = gl
     mode: 'twilio',
     simulated: false,
     get available() {
-      return env.TWILIO_WHATSAPP_ENABLED === 'true' && credentialsAvailable;
+      return credentialsAvailable;
     },
-    async sendTemplate({ sender, recipient, templateKind, context = {} } = {}) {
+    async sendTemplate({ sender, recipient, templateKind, contentSid, context = {} } = {}) {
       const accountSid = String(env.TWILIO_ACCOUNT_SID || '').trim();
       const authToken = String(env.TWILIO_AUTH_TOKEN || '').trim();
       const senderAddress = String(sender?.sender_key || '').replace(/^twilio:/, '').trim();
       const rawRecipient = String(recipient || '').trim();
       const to = rawRecipient.startsWith('whatsapp:') ? rawRecipient : `whatsapp:${rawRecipient}`;
-      const contentSid = contentSidForKind(env, templateKind);
 
-      if (env.TWILIO_WHATSAPP_ENABLED !== 'true' || !credentialsAvailable) {
-        return { status: 'failed', messageId: null, error: 'El envío de WhatsApp con Twilio no está habilitado o faltan credenciales.', simulated: false };
+      if (!credentialsAvailable) {
+        return { status: 'failed', messageId: null, error: 'Faltan las credenciales del servicio de WhatsApp.', simulated: false };
       }
       if (!/^\+[1-9]\d{7,14}$/.test(senderAddress) || !/^\+[1-9]\d{7,14}$/.test(to.replace(/^whatsapp:/, ''))) {
         return { status: 'failed', messageId: null, error: 'El remitente o destinatario no tiene un formato internacional válido.', simulated: false };
       }
       if (!contentSid || !contentSidPattern.test(contentSid)) {
-        return { status: 'failed', messageId: null, error: 'Falta el Content SID aprobado para esta plantilla de WhatsApp.', simulated: false };
+        return { status: 'failed', messageId: null, error: 'Selecciona una plantilla aprobada para este aviso.', simulated: false };
       }
 
       const form = new URLSearchParams({

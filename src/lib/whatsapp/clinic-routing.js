@@ -12,7 +12,7 @@ async function loadSenderBranchIds(client, clinicId, senderKey) {
 export async function loadClinicWhatsAppRoute(client, clinicId, branchId, templateKind) {
   const { data: settings, error: settingsError } = await client
     .from('clinic_whatsapp_configurations')
-    .select('clinic_id, provider_mode, allow_default_fallback, template_readiness')
+    .select('clinic_id, provider_mode, allow_default_fallback, template_readiness, template_content_sids')
     .eq('clinic_id', clinicId)
     .maybeSingle();
   if (settingsError) return { ok: false, reason: 'No se pudo cargar la configuración de WhatsApp de la clínica.' };
@@ -47,7 +47,10 @@ export async function loadClinicWhatsAppRoute(client, clinicId, branchId, templa
     : route;
   if (!selectedRoute.ok) return selectedRoute;
   if (!templateReadyForKind(settings, templateKind)) {
-    return { ok: false, reason: 'La plantilla aprobada para este tipo de aviso no está marcada como lista.' };
+    return { ok: false, reason: 'Este aviso automático no está activado.' };
+  }
+  if (!/^HX[0-9a-fA-F]{32}$/.test(String(settings.template_content_sids?.[templateKind] || ''))) {
+    return { ok: false, reason: 'No se seleccionó una plantilla para este aviso.' };
   }
   return { ok: true, ...selectedRoute, settings };
 }

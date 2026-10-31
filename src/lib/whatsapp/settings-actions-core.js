@@ -1,10 +1,10 @@
-import { getWhatsAppTemplateStatuses, listRegisteredTwilioWhatsAppSenders } from './twilio-whatsapp.server.js';
+import { listRegisteredTwilioWhatsAppSenders, listTwilioWhatsAppTemplates } from './twilio-whatsapp.server.js';
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const twilioSenderKeyPattern = /^twilio:\+[1-9]\d{7,14}$/;
 const templateKinds = ['confirmation_2d', 'reminder_1d', 'reminder_5h'];
 const defaultReadiness = Object.freeze({ confirmation_2d: false, reminder_1d: false, reminder_5h: false });
-const defaultTemplateStatuses = Object.freeze({ confirmation_2d: 'not_configured', reminder_1d: 'not_configured', reminder_5h: 'not_configured' });
+const contentSidPattern = /^HX[0-9a-fA-F]{32}$/;
 
 function configuredInboxSender(env) {
   const phoneNumber = String(env.TWILIO_WHATSAPP_SANDBOX_FROM || '').trim().replace(/^whatsapp:/i, '');
@@ -18,7 +18,7 @@ export function createWhatsAppSettingsActions({
   createServerClient,
   env = process.env,
   listWhatsAppSenders = listRegisteredTwilioWhatsAppSenders,
-  getTemplateStatuses = getWhatsAppTemplateStatuses,
+  getTemplates = listTwilioWhatsAppTemplates,
 } = {}) {
   async function authorizedAdmin(clinicId) {
     if (!uuidPattern.test(String(clinicId || ''))) return { error: 'Selecciona una clínica válida.' };
@@ -41,7 +41,7 @@ export function createWhatsAppSettingsActions({
       { data: branchAssignments, error: branchAssignmentsError },
     ] = await Promise.all([
       client.from('clinic_whatsapp_configurations')
-        .select('clinic_id, provider_mode, template_readiness, updated_at')
+        .select('clinic_id, provider_mode, template_readiness, template_content_sids, updated_at')
         .eq('clinic_id', clinicId).maybeSingle(),
       client.from('clinic_whatsapp_senders')
         .select('sender_key, display_label, branch_id, is_default, active')
@@ -68,6 +68,7 @@ export function createWhatsAppSettingsActions({
       configured: Boolean(config),
       settings: {
         templateReadiness: { ...defaultReadiness, ...(config?.template_readiness || {}) },
+        templateContentSids: config?.template_content_sids || {},
         providerMode: 'twilio',
       },
       senders: clinicSenders,
@@ -86,20 +87,20 @@ export function createWhatsAppSettingsActions({
   }
 
   async function loadAvailableSenders(clinicId) {
-    const templateStatuses = { ...defaultTemplateStatuses, ...await getTemplateStatuses({ env }) };
-    const availableTemplates = Object.fromEntries(templateKinds.map(kind => [kind, templateStatuses[kind] === 'approved']));
-    const deliveryEnabled = env.TWILIO_WHATSAPP_ENABLED === 'true' && env.WHATSAPP_AUTOMATION_ENABLED === 'true';
+    let templates = [];
+    const deliveryEnabled = /^AC[0-9a-fA-F]{32}$/.test(String(env.TWILIO_ACCOUNT_SID || '').trim()) && Boolean(String(env.TWILIO_AUTH_TOKEN || '').trim());
     const inboxSender = configuredInboxSender(env);
     try {
       const context = await authorizedAdmin(clinicId);
       if (context.error) return { ok: false, message: context.error };
-      const registeredSenders = await listWhatsAppSenders({ env });
+      const [registeredSenders, availableTemplates] = await Promise.all([listWhatsAppSenders({ env }), getTemplates({ env })]);
+      templates = availableTemplates;
       const senders = inboxSender && !registeredSenders.some(sender => sender.phoneNumber === inboxSender.phoneNumber)
         ? [{ ...inboxSender, displayLabel: 'Número conectado' }, ...registeredSenders]
         : registeredSenders;
-      return { ok: true, senders, availableTemplates, templateStatuses, deliveryEnabled, ...(inboxSender ? { inboxSender } : {}) };
+      return { ok: true, senders, templates, deliveryEnabled, ...(inboxSender ? { inboxSender } : {}) };
     } catch {
-      return { ok: false, message: 'No se pudieron consultar los números registrados. Verifica la conexión del servidor.', availableTemplates, templateStatuses, deliveryEnabled, ...(inboxSender ? { inboxSender } : {}) };
+      return { ok: false, message: 'No se pudieron consultar Twilio. Verifica las credenciales del servidor y vuelve a cargar.', templates, deliveryEnabled, ...(inboxSender ? { inboxSender } : {}) };
     }
   }
 
@@ -112,14 +113,19 @@ export function createWhatsAppSettingsActions({
       const senders = Array.isArray(input?.senders) ? input.senders : null;
       if (!senders || senders.length > 50) return { ok: false, message: 'La lista de remitentes no es válida.' };
       const readiness = input?.templateReadiness || {};
+      const templateContentSids = input?.templateContentSids || {};
       if (Object.keys(readiness).some(key => !templateKinds.includes(key))
         || templateKinds.some(key => typeof readiness[key] !== 'boolean')) {
         return { ok: false, message: 'El estado de las plantillas no es válido.' };
       }
-      const templateStatuses = { ...defaultTemplateStatuses, ...await getTemplateStatuses({ env }) };
-      const availableTemplates = Object.fromEntries(templateKinds.map(kind => [kind, templateStatuses[kind] === 'approved']));
-      if (templateKinds.some(kind => readiness[kind] && !availableTemplates[kind])) {
-        return { ok: false, message: 'Configura en el servidor la plantilla aprobada antes de activarla aquí.' };
+      if (Object.keys(templateContentSids).some(key => !templateKinds.includes(key))
+        || templateKinds.some(kind => templateContentSids[kind] != null && !contentSidPattern.test(String(templateContentSids[kind])))) {
+        return { ok: false, message: 'La selección de plantillas no es válida.' };
+      }
+      const availableTemplates = await getTemplates({ env });
+      const approvedSids = new Set(availableTemplates.filter(template => template.status === 'approved').map(template => template.sid));
+      if (templateKinds.some(kind => readiness[kind] && !approvedSids.has(templateContentSids[kind]))) {
+        return { ok: false, message: 'Selecciona una plantilla aprobada para cada aviso que quieras activar.' };
       }
       const normalizedSenders = senders.map(sender => ({
         ...sender,
@@ -158,12 +164,13 @@ export function createWhatsAppSettingsActions({
           return { ok: false, message: 'Solo puedes asignar números disponibles para WhatsApp. Actualiza la lista y vuelve a intentarlo.' };
         }
       }
-      const { data, error } = await context.client.rpc('save_clinic_whatsapp_settings_v2', {
+      const { data, error } = await context.client.rpc('save_clinic_whatsapp_settings_v3', {
         target_clinic_id: clinicId,
         target_provider_mode: providerMode,
         target_allow_default_fallback: false,
         target_template_readiness: readiness,
         target_senders: safeSenders,
+        target_template_content_sids: templateContentSids,
       });
       if (error || data !== true) return { ok: false, message: 'No se guardó la configuración. Verifica la sucursal y el número seleccionado.' };
       const saved = await readSettings(context.client, clinicId);
