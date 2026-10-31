@@ -6171,7 +6171,7 @@ revoke all on function public.apply_twilio_whatsapp_message_status(text, text, t
 grant execute on function public.apply_twilio_whatsapp_message_status(text, text, text, text) to service_role;
 -- <<< END 20261031063518_whatsapp_message_delivery_status
 
--- >>> BEGIN 20261031070000_custom_clinic_permissions
+-- >>> BEGIN 20261031074344_custom_clinic_permissions
 -- Per-member action permissions. Clinic content remains readable by every
 -- member; WhatsApp is the only module whose visibility is configurable.
 alter table public.clinic_memberships
@@ -6823,4 +6823,4 @@ drop trigger if exists prevent_clinic_admin_membership_changes on public.clinic_
 create trigger prevent_clinic_admin_membership_changes
 before update or delete on public.clinic_memberships
 for each row execute function private.prevent_clinic_admin_membership_changes();
--- <<< END 20261031070000_custom_clinic_permissions
+-- <<< END 20261031074344_custom_clinic_permissions

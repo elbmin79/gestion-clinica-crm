@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { PGlite } from '@electric-sql/pglite';
 
-const migrationUrl = new URL('../../../supabase/migrations/20261031070000_custom_clinic_permissions.sql', import.meta.url);
+const migrationUrl = new URL('../../../supabase/migrations/20261031074344_custom_clinic_permissions.sql', import.meta.url);
 const clinicTables = [
   'appointment_confirmation_requests','appointment_reminders','appointments','botox_treatment_records',
   'branches','businesses','clinic_availability_blocks','clinic_availability_settings','clinic_providers','provider_branches',
