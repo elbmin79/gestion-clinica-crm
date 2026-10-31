@@ -7,6 +7,17 @@ import { buildWhatsAppTimeline, formatWhatsAppMessageTime, formatWhatsAppThreadT
 import './whatsapp-inbox.css';
 
 function initials(name = '') { return String(name).trim().split(/\s+/).filter(Boolean).slice(0, 2).map(part => part[0]).join('').toUpperCase() || 'W'; }
+function latestConversationPreview(conversation) {
+  const message = Array.isArray(conversation.latest_message) ? conversation.latest_message[0] : conversation.latest_message;
+  if (!message) return 'Sin mensajes';
+  const mediaLabel = message.media_content_type?.startsWith('image/') ? 'Imagen'
+    : message.media_content_type?.startsWith('video/') ? 'Video'
+      : message.media_content_type?.startsWith('audio/') ? 'Audio'
+        : message.media_content_type ? 'Archivo' : '';
+  const body = String(message.body || '').replace(/\s+/g, ' ').trim();
+  const preview = body || mediaLabel || 'Mensaje sin texto';
+  return `${message.direction === 'outbound' ? 'Tú: ' : ''}${preview}`;
+}
 function readableMediaName(name = '') {
   const value = String(name || '').trim();
   if (!value || /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}\.(?:jpe?g|png|webp)$/i.test(value) || /^image-[\da-f]{6}\.(?:jpe?g|png|webp)$/i.test(value)) return 'Imagen compartida';
@@ -149,8 +160,12 @@ export default function WhatsAppInbox({ clinicId = '', sharedMode = false, role 
     const client = createClient();
     if (!client) { setStatus('error'); setError('La conexión con la clínica no está configurada.'); return; }
     const result = await client.from('clinic_whatsapp_conversations')
-      .select('id,contact_phone,contact_name,sender_phone,last_inbound_at,last_message_at,blocked_at')
-      .eq('clinic_id', clinicId).order('last_message_at', { ascending: false }).limit(100);
+      .select('id,contact_phone,contact_name,sender_phone,last_inbound_at,last_message_at,blocked_at,latest_message:clinic_whatsapp_messages(body,direction,media_content_type,created_at)')
+      .eq('clinic_id', clinicId)
+      .order('created_at', { ascending: false, referencedTable: 'latest_message' })
+      .limit(1, { referencedTable: 'latest_message' })
+      .order('last_message_at', { ascending: false })
+      .limit(100);
     if (result.error) { setStatus('error'); setError('No se pudieron cargar las conversaciones.'); return; }
     setConversations(result.data || []);
     setError('');
@@ -397,7 +412,7 @@ export default function WhatsAppInbox({ clinicId = '', sharedMode = false, role 
             {!collapsedSenders.has(group.sender) && group.items.map(item => <div className="whatsapp-thread-entry" key={item.id}>
               <button className={`whatsapp-thread-item${selected?.id === item.id ? ' is-selected' : ''}`} type="button" onClick={() => setSelectedId(item.id)}>
                 <span className="whatsapp-thread-avatar">{initials(item.contact_name || item.contact_phone)}</span>
-                <span className="whatsapp-thread-copy"><strong>{item.contact_name || item.contact_phone}{item.blocked_at && <span className="whatsapp-blocked-badge">Bloqueado</span>}</strong><span>{item.contact_phone}</span></span>
+                <span className="whatsapp-thread-copy"><strong>{item.contact_name || item.contact_phone}{item.blocked_at && <span className="whatsapp-blocked-badge">Bloqueado</span>}</strong><span title={latestConversationPreview(item)}>{latestConversationPreview(item)}</span></span>
                 <span className="whatsapp-thread-meta"><time>{formatWhatsAppThreadTime(item.last_message_at)}</time></span>
               </button>
               {renderConversationMenu(item, 'thread')}

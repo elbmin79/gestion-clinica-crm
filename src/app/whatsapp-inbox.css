@@ -169,6 +169,7 @@ html[data-theme="light"] .whatsapp-image-dialog-canvas{border-color:#b49dab;back
 .whatsapp-thread-entry .whatsapp-thread-item{width:100%;padding-right:48px}
 .whatsapp-thread-entry .whatsapp-thread-copy{min-width:0}
 .whatsapp-thread-entry .whatsapp-thread-copy strong{display:flex;align-items:center;gap:7px;min-width:0}
+.whatsapp-thread-entry .whatsapp-thread-meta{align-self:flex-start;padding-top:2px}
 .whatsapp-blocked-badge{padding:2px 6px;border:1px solid color-mix(in srgb,var(--muted) 35%,transparent);border-radius:999px;color:var(--muted);font-size:9px;font-weight:650;line-height:1.2}
 .whatsapp-icon-action{display:grid;place-items:center;width:36px;height:36px;flex:none;padding:0;border:1px solid transparent;border-radius:9px;background:transparent;color:var(--muted);cursor:pointer;transition:background 130ms ease,color 130ms ease,border-color 130ms ease}
 .whatsapp-icon-action:hover,.whatsapp-icon-action.is-active{border-color:var(--line);background:var(--canvas);color:var(--ink)}
