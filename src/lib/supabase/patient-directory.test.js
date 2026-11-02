@@ -6,6 +6,24 @@ function clientWithAuth() {
   return { auth: { getUser: async () => ({ data: { user: { id: 'user-id' } }, error: null }) } };
 }
 
+test('creates a patient without a primary professional when none is provided', async () => {
+  const client = clientWithAuth();
+  let inserted;
+  client.from = table => {
+    assert.equal(table, 'patients');
+    return { insert: row => {
+      inserted = row;
+      return { select: () => ({ single: async () => ({ data: { id: 'patient-id', record_number: 'PAC-123' }, error: null }) }) };
+    } };
+  };
+  const store = createPatientDirectoryStore({ clientFactory: () => client });
+  await store.create('clinic-id', {
+    name: 'Andrea García', email: '', phone: '', treatment: 'Por definir', branchId: 'branch-id',
+  });
+  assert.equal(inserted.primary_branch_id, 'branch-id');
+  assert.equal(inserted.primary_provider_id, null);
+});
+
 test('creates a clinical encounter against the patient and appointment database ids', async () => {
   const client = clientWithAuth();
   let inserted;

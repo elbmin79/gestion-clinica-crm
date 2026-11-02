@@ -18,6 +18,12 @@ export function usePatientDirectory(enabled) {
   const [reloadKey, setReloadKey] = useState(0);
 
   const refresh = useCallback(() => setReloadKey(value => value + 1), []);
+  const prependPatientOptimistically = useCallback(patient => {
+    setDirectory(current => ({
+      ...current,
+      patients: [patient, ...current.patients.filter(item => item.databaseId !== patient.databaseId)],
+    }));
+  }, []);
   const chooseClinic = useCallback((id) => {
     if (!memberships.some(membership => membership.clinicId === id)) return;
     // A notification link selects its clinic once. Explicit switching must not
@@ -128,5 +134,5 @@ export function usePatientDirectory(enabled) {
     return () => { cancelled = true; };
   }, [enabled, clinicId, reloadKey]);
 
-  return { ...directory, clinicId, memberships, role, permissions, timeZone, status, refresh, chooseClinic };
+  return { ...directory, clinicId, memberships, role, permissions, timeZone, status, refresh, prependPatientOptimistically, chooseClinic };
 }

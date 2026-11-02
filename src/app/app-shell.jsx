@@ -852,6 +852,59 @@ function App({ children }) {
   }), [workspaceAppointments, providerFilter, branchFilter, businessFilter, branches, providers, businesses]);
   const pendingDocs = workspacePatients.reduce((total, patient) => total + Number(patient.contract === 'Pendiente') + Number(patient.consent === 'Pendiente'), 0);
 
+  const createAppointmentPatient = async ({ name, email = '', phone = '', treatment = '', branchId = '' }) => {
+    const cleanedName = String(name || '').trim();
+    const cleanedEmail = String(email || '').trim();
+    const cleanedPhone = String(phone || '').trim();
+    const cleanedTreatment = String(treatment || '').trim() || 'Por definir';
+    const assignedBranchId = branchId === undefined ? (activeWorkspaceSelection.branchId || branches[0]?.id || '') : branchId;
+    const branch = branches.find(item => item.id === assignedBranchId);
+    if (!cleanedName) return null;
+    if (cleanedEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanedEmail)) {
+      notify('Revisa el formato del correo electrónico.');
+      return null;
+    }
+    const initials = cleanedName.split(/\s+/).slice(0, 2).map(part => part[0]).join('').toLocaleUpperCase('es-MX');
+    if (sharedMode) {
+      if (sharedDirectory.status !== 'ready' || !sharedDirectory.clinicId || !can('patients.create')) {
+        notify('No tienes permiso para crear pacientes o el directorio aún no está listo.');
+        return null;
+      }
+      try {
+        const saved = await createPatientDirectoryStore().create(sharedDirectory.clinicId, {
+          name: cleanedName, email: cleanedEmail, phone: cleanedPhone, treatment: cleanedTreatment, branchId: assignedBranchId,
+        });
+        const patient = {
+          id: saved.record_number, databaseId: saved.id, name: cleanedName, initials, treatment: cleanedTreatment,
+          email: cleanedEmail, phone: cleanedPhone, whatsappOptIn: false, whatsappOptInAt: null,
+          whatsappOptInSource: '', branch: branch?.name || 'Sin sucursal asignada', branchId: assignedBranchId,
+          clinician: 'Sin profesional asignado', providerId: '', status: 'Nuevo', contract: 'Por preparar',
+          contractType: '', contractTemplateTitle: '', contractContent: '', contractService: '', contractDiagnosisId: '',
+          contractRequestedAt: null, contractSignedAt: null, contractHistory: [], consent: 'Por preparar',
+          consentDocument: '', consentContentSnapshot: '', consentRequestedAt: null, consentSignedAt: null,
+          consentHistory: [], diagnosisAccepted: false, diagnosisId: '', diagnosisSummary: '', diagnosisHistory: [],
+          clinicalHistory: [], recordFiles: [], botoxTreatments: [], last: 'Recién agregado', tone: 'blue',
+        };
+        sharedDirectory.prependPatientOptimistically(patient);
+        notify('Paciente creado y seleccionado para la cita');
+        return patient;
+      } catch {
+        notify('No se pudo crear el paciente. Revisa los campos y tus permisos.');
+        return null;
+      }
+    }
+    const patient = {
+      id: `CN-${2482 + patients.length - initialPatients.length}`, name: cleanedName, initials,
+      email: cleanedEmail, phone: cleanedPhone, treatment: cleanedTreatment,
+      branch: branch?.name || 'Sin sucursal asignada', branchId: assignedBranchId,
+      clinician: 'Sin profesional asignado', providerId: '', last: 'Recién agregado', status: 'Nuevo',
+      contract: 'Por preparar', consent: 'Por preparar', tone: 'blue',
+    };
+    setPatients(current => [patient, ...current]);
+    notify('Paciente creado y seleccionado para la cita');
+    return patient;
+  };
+
   const addPatient = async (event) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
@@ -860,14 +913,12 @@ function App({ children }) {
     const phone = String(form.get('phone') || '').trim();
     const treatment = String(form.get('treatment') || 'Por definir').trim();
     const branchId = String(form.get('branchId') || '');
-    const providerId = String(form.get('providerId') || '');
     const branch = branches.find(item => item.id === branchId);
-    const provider = providers.find(item => item.id === providerId);
     if (!name) return;
     if (sharedMode) {
       if (sharedDirectory.status !== 'ready' || !sharedDirectory.clinicId) { notify('El directorio compartido no está listo. Actualiza la página e inténtalo de nuevo.'); return; }
       try {
-        await createPatientDirectoryStore().create(sharedDirectory.clinicId, { name, email, phone, treatment, branchId, providerId });
+        await createPatientDirectoryStore().create(sharedDirectory.clinicId, { name, email, phone, treatment, branchId });
         sharedDirectory.refresh();
         setModal(null); setQuery(''); setPage('patients');
         notify('Expediente guardado en el directorio compartido');
@@ -878,7 +929,7 @@ function App({ children }) {
     }
     const parts = name.split(/\s+/);
     const initials = parts.slice(0, 2).map(v => v[0]).join('').toUpperCase();
-    const p = { id: `CN-${2482 + patients.length - initialPatients.length}`, name, initials, email, phone, treatment, branch: branch?.name || 'Sin sucursal asignada', branchId, clinician: provider?.name || 'Sin profesional asignado', providerId, last: 'Recién agregado', status: 'Nuevo', contract: 'Por preparar', consent: 'Por preparar', tone: 'blue' };
+    const p = { id: `CN-${2482 + patients.length - initialPatients.length}`, name, initials, email, phone, treatment, branch: branch?.name || 'Sin sucursal asignada', branchId, clinician: 'Sin profesional asignado', providerId: '', last: 'Recién agregado', status: 'Nuevo', contract: 'Por preparar', consent: 'Por preparar', tone: 'blue' };
     setPatients(prev => [p, ...prev]); setModal(null); setQuery(''); setPage('patients'); notify('Paciente agregado al directorio');
   };
   const updatePatient = async (event) => {
@@ -1495,8 +1546,8 @@ function App({ children }) {
     {modal==='contract-prompt' && selectedPatient && <ContractPromptModal patient={selectedPatient} close={()=>setModal('patient')} onViewContract={()=>{setSelectedContractRecordId(latestDocumentRecord(selectedPatient,'contract')?.id || '');setModal('contract-view')}} onPrepareContract={()=>openContractPreparation(selectedPatient.id, 'patient')}/>}
     {modal==='contract-view' && selectedPatient && <ContractViewerModal sharedMode={sharedMode} patient={viewedContractPatient || selectedPatient} close={()=>setModal(modalReturn || null)} onPrint={()=>window.print()} onDiagnosis={()=>setModal('diagnosis')} onSign={()=>simulateSignature('contract')} onPrepare={()=>openContractPreparation(selectedPatient.id, modalReturn)}/>}
     {modal==='consent-view' && selectedPatient && <ConsentViewerModal sharedMode={sharedMode} patient={selectedPatient} document={selectedConsent} content={selectedConsentRecord?.contentSnapshot ?? ''} status={selectedConsentRecord?.status || selectedPatient.consent} signedAt={selectedConsentRecord?.signedAt || null} close={()=>setModal(modalReturn || null)} onPrint={()=>window.print()} onSign={()=>simulateSignature('consent')}/>}
-    {modal==='new-patient' && <Modal title="Agregar paciente" subtitle="Crea un expediente para dar seguimiento a la atención." close={()=>setModal(null)}><form onSubmit={addPatient} className="form-stack"><label>Nombre completo<input name="name" autoFocus placeholder="Ej. Andrea García" required/></label><div className="form-grid"><label>Correo electrónico<input name="email" type="email" placeholder="correo@ejemplo.com"/></label><label>Teléfono<input name="phone" placeholder="Teléfono de contacto"/></label></div><label>Tratamiento o servicio<input name="treatment" placeholder="Por definir"/></label><div className="form-grid"><label>Sucursal<select name="branchId" defaultValue={activeWorkspaceSelection.branchId || workspaceBranches.find(item=>item.active)?.id || ''}><option value="">Sin asignar</option>{workspaceBranches.filter(item=>item.active).map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label>Profesional<select name="providerId" defaultValue={workspaceProviders.find(item=>item.active)?.id||''}><option value="">Sin asignar</option>{workspaceProviders.filter(item=>item.active).map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</select></label></div><div className="form-note"><ShieldCheck size={15}/> {sharedMode?"Se guardará en el directorio compartido del consultorio.":"Prototipo de demostración: no ingreses datos reales de pacientes."}</div><div className="modal-actions"><button type="button" className="button secondary" onClick={()=>setModal(null)}>Cancelar</button><button className="button primary" type="submit"><Plus size={16}/> Crear expediente</button></div></form></Modal>}
-    {modal==='edit-patient' && selectedPatient && <Modal title="Editar expediente" subtitle={`${selectedPatient.id} · Actualiza sus datos de contacto y atención.`} close={()=>setModal('patient')}><form onSubmit={updatePatient} className="form-stack"><input type="hidden" name="id" value={selectedPatient.id}/><label>Nombre completo<input name="name" defaultValue={selectedPatient.name} autoFocus required/></label><div className="form-grid"><label>Correo electrónico<input name="email" type="email" defaultValue={selectedPatient.email||''} placeholder="correo@ejemplo.com"/></label><label>Teléfono<input name="phone" defaultValue={selectedPatient.phone||''} placeholder="Teléfono de contacto"/></label></div><label>Tratamiento o servicio<input name="treatment" defaultValue={selectedPatient.treatment||''} placeholder="Por definir"/></label><div className="form-grid"><label>Sucursal<select name="branchId" defaultValue={workspaceBranches.find(item=>item.name===selectedPatient.branch)?.id||selectedPatient.branchId||''}><option value="">Sin asignar</option>{workspaceBranches.filter(item=>item.active).map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label>Profesional<select name="providerId" defaultValue={workspaceProviders.find(item=>item.name===selectedPatient.clinician)?.id||selectedPatient.providerId||''}><option value="">Sin asignar</option>{workspaceProviders.filter(item=>item.active).map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</select></label></div><label>Estado<select name="status" defaultValue={selectedPatient.status}><option>Activo</option><option>Seguimiento</option><option>Nuevo</option><option>Inactivo</option></select></label><label className="whatsapp-opt-in"><input type="checkbox" name="whatsappOptIn" defaultChecked={Boolean(selectedPatient.whatsappOptIn)}/> Autoriza avisos de citas por WhatsApp</label><label>Origen de la autorización<select name="whatsappOptInSource" defaultValue={selectedPatient.whatsappOptInSource||''}><option value="">Seleccionar si autoriza…</option><option value="written">Consentimiento escrito</option><option value="verbal">Autorización verbal</option><option value="electronic">Consentimiento electrónico</option></select></label><div className="form-note"><ShieldCheck size={15}/> Registra solo una autorización ya otorgada por el paciente. Esto no envía mensajes.</div><div className="form-note"><ShieldCheck size={15}/> {sharedMode?"Cambios guardados en el directorio compartido.":"Datos guardados solo en este navegador de demostración."}</div><div className="modal-actions"><button type="button" className="button secondary" onClick={()=>setModal('patient')}>Cancelar</button><button className="button primary" type="submit"><Check size={15}/> Guardar cambios</button></div></form></Modal>}    {modal==='new-appointment' && <NewAppointmentModal serviceCatalog={serviceCatalog} sharedMode={sharedMode} close={()=>setModal(null)} onSubmit={createAppointment} defaultDate={appointmentDefaults.date} defaultTime={appointmentDefaults.time} defaultPatientId={appointmentDefaults.patientId} defaultProviderId={appointmentDefaults.providerId} defaultBusinessId={activeWorkspaceSelection.businessId} defaultBranchId={activeWorkspaceSelection.branchId} patients={workspacePatients} businesses={workspaceBusinesses} branches={workspaceBranches} providers={workspaceProviders} appointments={workspaceAppointments}/>}
+    {modal==='new-patient' && <Modal title="Agregar paciente" subtitle="Crea el expediente; el profesional se elige en cada cita." close={()=>setModal(null)}><form onSubmit={addPatient} className="form-stack"><label>Nombre completo<input name="name" autoFocus placeholder="Ej. Andrea García" required/></label><div className="form-grid"><label>Correo electrónico<input name="email" type="email" placeholder="correo@ejemplo.com"/></label><label>Teléfono<input name="phone" placeholder="Teléfono de contacto"/></label></div><label>Tratamiento o servicio<input name="treatment" placeholder="Por definir"/></label><label>Sucursal<select name="branchId" defaultValue={activeWorkspaceSelection.branchId || workspaceBranches.find(item=>item.active)?.id || ''}><option value="">Sin asignar</option>{workspaceBranches.filter(item=>item.active).map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</select></label><div className="form-note"><ShieldCheck size={15}/> {sharedMode?"Se guardará en el directorio compartido del consultorio.":"Prototipo de demostración: no ingreses datos reales de pacientes."}</div><div className="modal-actions"><button type="button" className="button secondary" onClick={()=>setModal(null)}>Cancelar</button><button className="button primary" type="submit"><Plus size={16}/> Crear expediente</button></div></form></Modal>}
+    {modal==='edit-patient' && selectedPatient && <Modal title="Editar expediente" subtitle={`${selectedPatient.id} · Actualiza sus datos de contacto y atención.`} close={()=>setModal('patient')}><form onSubmit={updatePatient} className="form-stack"><input type="hidden" name="id" value={selectedPatient.id}/><label>Nombre completo<input name="name" defaultValue={selectedPatient.name} autoFocus required/></label><div className="form-grid"><label>Correo electrónico<input name="email" type="email" defaultValue={selectedPatient.email||''} placeholder="correo@ejemplo.com"/></label><label>Teléfono<input name="phone" defaultValue={selectedPatient.phone||''} placeholder="Teléfono de contacto"/></label></div><label>Tratamiento o servicio<input name="treatment" defaultValue={selectedPatient.treatment||''} placeholder="Por definir"/></label><div className="form-grid"><label>Sucursal<select name="branchId" defaultValue={workspaceBranches.find(item=>item.name===selectedPatient.branch)?.id||selectedPatient.branchId||''}><option value="">Sin asignar</option>{workspaceBranches.filter(item=>item.active).map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label>Profesional de referencia<select name="providerId" defaultValue={workspaceProviders.find(item=>item.name===selectedPatient.clinician)?.id||selectedPatient.providerId||''}><option value="">Sin asignar</option>{workspaceProviders.filter(item=>item.active).map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</select></label></div><div className="form-note"><ShieldCheck size={15}/> Este profesional solo se sugiere al agendar; cada cita puede tener otro.</div><label>Estado<select name="status" defaultValue={selectedPatient.status}><option>Activo</option><option>Seguimiento</option><option>Nuevo</option><option>Inactivo</option></select></label><label className="whatsapp-opt-in"><input type="checkbox" name="whatsappOptIn" defaultChecked={Boolean(selectedPatient.whatsappOptIn)}/> Autoriza avisos de citas por WhatsApp</label><label>Origen de la autorización<select name="whatsappOptInSource" defaultValue={selectedPatient.whatsappOptInSource||''}><option value="">Seleccionar si autoriza…</option><option value="written">Consentimiento escrito</option><option value="verbal">Autorización verbal</option><option value="electronic">Consentimiento electrónico</option></select></label><div className="form-note"><ShieldCheck size={15}/> Registra solo una autorización ya otorgada por el paciente. Esto no envía mensajes.</div><div className="form-note"><ShieldCheck size={15}/> {sharedMode?"Cambios guardados en el directorio compartido.":"Datos guardados solo en este navegador de demostración."}</div><div className="modal-actions"><button type="button" className="button secondary" onClick={()=>setModal('patient')}>Cancelar</button><button className="button primary" type="submit"><Check size={15}/> Guardar cambios</button></div></form></Modal>}    {modal==='new-appointment' && <NewAppointmentModal serviceCatalog={serviceCatalog} sharedMode={sharedMode} canCreatePatient={can('patients.create')} onCreatePatient={createAppointmentPatient} close={()=>setModal(null)} onSubmit={createAppointment} defaultDate={appointmentDefaults.date} defaultTime={appointmentDefaults.time} defaultPatientId={appointmentDefaults.patientId} defaultProviderId={appointmentDefaults.providerId} defaultBusinessId={activeWorkspaceSelection.businessId} defaultBranchId={activeWorkspaceSelection.branchId} patients={workspacePatients} businesses={workspaceBusinesses} branches={workspaceBranches} providers={workspaceProviders} appointments={workspaceAppointments}/>}
     {modal==='new-business' && <Modal title="Agregar negocio" subtitle="Crea un negocio para organizar sus sucursales y agenda." close={()=>setModal(null)}><form className="form-stack" onSubmit={createBusiness}><label>Nombre del negocio<input name="name" placeholder={sharedMode?'Nombre del negocio':'Nombre de demostración'} required autoFocus/></label><div className="form-note"><ShieldCheck size={15}/> {sharedMode?'Se guardará en el catálogo compartido.':'Solo se guarda en este navegador de demostración.'}</div><div className="modal-actions"><button type="button" className="button secondary" onClick={()=>setModal(null)}>Cancelar</button><button className="button primary"><Plus size={15}/> Agregar negocio</button></div></form></Modal>}
     {modal==='new-branch' && <Modal title="Agregar sucursal" subtitle="Asigna la nueva ubicación a uno de tus negocios." close={()=>setModal(null)}><form className="form-stack" onSubmit={createBranch}><label>Negocio<select name="businessId" required defaultValue=""><option value="" disabled>Seleccionar negocio…</option>{businesses.filter(item=>item.active).map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label>Nombre de sucursal<input name="name" placeholder={sharedMode?'Nombre de sucursal':'Nombre de demostración'} required/></label><label>Dirección<input name="address" placeholder={sharedMode?'Dirección de la sucursal':'Dirección de demostración'}/></label><label>Teléfono<input name="phone" placeholder="686 308 6854"/></label><label>Horario de atención<input name="hours" placeholder="Lunes a sábados, 9:00 a.m. a 7:00 p.m."/></label><div className="form-note"><ShieldCheck size={15}/> {sharedMode?'Se guardará en el catálogo compartido.':'Solo se guarda en este navegador de demostración.'}</div><div className="modal-actions"><button type="button" className="button secondary" onClick={()=>setModal(null)}>Cancelar</button><button className="button primary" type="submit" disabled={!businesses.some(item=>item.active)}><Plus size={15}/> Agregar sucursal</button></div></form></Modal>}
     {modal==='edit-branch' && selectedBranchRecord && <Modal title="Editar sucursal" subtitle={`${businesses.find(item=>item.id===selectedBranchRecord.businessId)?.name||'Negocio'} · La sucursal seguirá asociada a este negocio.`} close={()=>{setModal(null);setSelectedBranchRecord(null)}}><form className="form-stack" onSubmit={updateBranch}><label>Nombre de sucursal<input name="name" defaultValue={selectedBranchRecord.name} required autoFocus/></label><label>Dirección<input name="address" defaultValue={selectedBranchRecord.address||''} placeholder="Dirección de la sucursal"/></label><label>Teléfono<input name="phone" defaultValue={selectedBranchRecord.phone||''} placeholder="686 308 6854"/></label><label>Horario de atención<input name="hours" defaultValue={selectedBranchRecord.hours||''} placeholder="Lunes a sábados, 9:00 a.m. a 7:00 p.m."/></label><div className="form-note"><ShieldCheck size={15}/> {sharedMode?'El cambio se guarda en el catálogo compartido.':'El cambio se guarda en este navegador de demostración.'}</div><div className="modal-actions"><button type="button" className="button secondary" onClick={()=>{setModal(null);setSelectedBranchRecord(null)}}>Cancelar</button><button className="button primary"><Check size={15}/> Guardar cambios</button></div></form></Modal>}
@@ -2059,7 +2110,7 @@ function AppointmentModal({appointment,payments,businesses,branches,providers,se
     </form>
   </Modal>;
 }
-function NewAppointmentModal({serviceCatalog=[],close,onSubmit,defaultDate,defaultTime,defaultPatientId='',defaultProviderId='',defaultBusinessId='',defaultBranchId='',patients,businesses,branches,providers,appointments=[],sharedMode=false}) {
+function NewAppointmentModal({serviceCatalog=[],close,onSubmit,onCreatePatient,canCreatePatient=true,defaultDate,defaultTime,defaultPatientId='',defaultProviderId='',defaultBusinessId='',defaultBranchId='',patients,businesses,branches,providers,appointments=[],sharedMode=false}) {
   const [time,setTime]=useState(defaultTime);
   const [durationMinutes,setDurationMinutes]=useState('45');
   const [service,setService]=useState('');
@@ -2082,6 +2133,30 @@ function NewAppointmentModal({serviceCatalog=[],close,onSubmit,defaultDate,defau
   const branchesForBusiness=activeBranches.filter(item=>item.businessId===businessId);
   const initialBranchId=branchesForBusiness.some(item=>item.id===defaultBranchId)?defaultBranchId:branchesForBusiness.some(item=>item.id===preferredBranch?.id)?preferredBranch.id:branchesForBusiness[0]?.id||'';
   const [branchId,setBranchId]=useState(initialBranchId);
+  const [quickPatientOpen,setQuickPatientOpen]=useState(false);
+  const [quickPatientName,setQuickPatientName]=useState('');
+  const [quickPatientEmail,setQuickPatientEmail]=useState('');
+  const [quickPatientPhone,setQuickPatientPhone]=useState('');
+  const [quickPatientTreatment,setQuickPatientTreatment]=useState('');
+  const [quickPatientBranchId,setQuickPatientBranchId]=useState(initialBranchId);
+  const [quickPatientSaving,setQuickPatientSaving]=useState(false);
+  const [quickCreatedPatients,setQuickCreatedPatients]=useState([]);
+  const patientsForAppointment=useMemo(()=>[
+    ...quickCreatedPatients,
+    ...patients.filter(patient=>!quickCreatedPatients.some(created=>created.id===patient.id)),
+  ],[patients,quickCreatedPatients]);
+  const createAndSelectPatient=async()=>{
+    if(quickPatientSaving||!quickPatientName.trim()) return;
+    setQuickPatientSaving(true);
+    try {
+      const patient=await onCreatePatient({name:quickPatientName,email:quickPatientEmail,phone:quickPatientPhone,treatment:quickPatientTreatment,branchId:quickPatientBranchId});
+      if(!patient) return;
+      setQuickCreatedPatients(current=>[patient,...current.filter(item=>item.id!==patient.id)]);
+      setPatientId(patient.id);
+      setQuickPatientOpen(false);
+      setQuickPatientName('');setQuickPatientEmail('');setQuickPatientPhone('');setQuickPatientTreatment('');
+    } finally { setQuickPatientSaving(false); }
+  };
   const servicePresetsByName=new Map();
   appointments.slice().sort((a,b)=>`${b.date||''} ${b.time||''}`.localeCompare(`${a.date||''} ${a.time||''}`)).forEach(appointment=>{
     const appointmentBranch=branches.find(item=>item.id===appointment.branchId||item.name===appointment.branch);
@@ -2121,8 +2196,8 @@ function NewAppointmentModal({serviceCatalog=[],close,onSubmit,defaultDate,defau
     <form onSubmit={onSubmit} className="form-stack">
       <input type="hidden" name="serviceId" value={serviceId}/>
       <input type="hidden" name="serviceIds" value={JSON.stringify(serviceIds)}/>
-      <label>Paciente<SearchablePatientSelect patients={patients} name="patientId" value={patientId} onChange={setPatientId}/></label>
-      {patients.length===0&&<div className="form-note"><UsersRound size={15}/> Agrega primero el expediente del paciente desde Pacientes.</div>}
+      <div className="appointment-patient-field"><label>Paciente<SearchablePatientSelect patients={patientsForAppointment} name="patientId" value={patientId} onChange={setPatientId}/></label>{canCreatePatient&&<button type="button" className="button outline compact appointment-add-patient" onClick={()=>{if(!quickPatientOpen)setQuickPatientBranchId(branchId);setQuickPatientOpen(open=>!open)}} aria-expanded={quickPatientOpen}><Plus size={14}/>{quickPatientOpen?'Cerrar':'Nuevo paciente'}</button>}</div>
+      {quickPatientOpen&&<section className="appointment-quick-patient" aria-label="Crear paciente para esta cita"><div className="appointment-quick-patient-heading"><strong>Nuevo expediente</strong><span>Se agregará a esta cita al guardarlo.</span></div><label>Nombre completo<input autoFocus value={quickPatientName} onChange={event=>setQuickPatientName(event.target.value)} placeholder="Ej. Andrea García" maxLength="160"/></label><div className="form-grid"><label>Correo electrónico<input type="text" inputMode="email" value={quickPatientEmail} onChange={event=>setQuickPatientEmail(event.target.value)} placeholder="correo@ejemplo.com" maxLength="254"/></label><label>Teléfono<input type="tel" value={quickPatientPhone} onChange={event=>setQuickPatientPhone(event.target.value)} placeholder="Teléfono de contacto" maxLength="40"/></label></div><details className="appointment-quick-patient-more"><summary>Agregar tratamiento y sucursal</summary><div className="appointment-quick-patient-details"><label>Tratamiento o servicio<input value={quickPatientTreatment} onChange={event=>setQuickPatientTreatment(event.target.value)} placeholder="Por definir" maxLength="160"/></label><label>Sucursal<select value={quickPatientBranchId} onChange={event=>setQuickPatientBranchId(event.target.value)}><option value="">Sin asignar</option>{activeBranches.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</select></label></div></details><div className="appointment-quick-patient-actions"><button type="button" className="button secondary compact" onClick={()=>setQuickPatientOpen(false)}>Cancelar</button><button type="button" className="button primary compact" onClick={createAndSelectPatient} disabled={!quickPatientName.trim()||quickPatientSaving}><Plus size={14}/>{quickPatientSaving?'Guardando…':'Crear y seleccionar'}</button></div></section>}
       <div className="form-grid"><label>Fecha<input name="date" type="date" defaultValue={defaultDate} required/></label><label>Hora<input name="time" type="time" value={time} onChange={event=>setTime(event.target.value)} min="06:00" max={latestAppointmentStart(durationMinutes)} step="900" required/></label></div>
       <AppointmentServicePicker services={serviceOptions} selectedIds={serviceIds} onChange={next=>{setServiceIds(next);setServiceId(next[0]||'');setService(next.map(id=>serviceCatalog.find(option=>option.id===id)?.name).filter(Boolean).join(' + '));const selected=next.map(id=>serviceCatalog.find(option=>option.id===id));if(selected.length&&selected.every(option=>option?.durationMin))updateDuration(String(selected.reduce((total,option)=>total+Number(option.durationMax||option.durationMin),0)));}}/>
       {serviceIds.length===0&&<><label>Servicio manual<input name="service" value={service} onChange={event=>setService(event.target.value)} onBlur={event=>applyServicePreset(event.target.value)} list="clinic-service-new-suggestions" placeholder="Captura un servicio manual" maxLength="120" required/></label><datalist id="clinic-service-new-suggestions">{[...new Set(['Consulta de valoración','Limpieza facial','Tratamiento facial','Seguimiento',...servicePresets.map(appointment=>appointment.service),...branchServices.map(item=>item.name)].filter(Boolean))].map(name=><option key={name} value={name}/>)}</datalist></>}
@@ -2360,6 +2435,10 @@ function SearchablePatientSelect({patients,defaultValue='',name='patient',value,
   const selectedId=value??localSelectedId;
   const setSelectedId=id=>{setLocalSelectedId(id);onChange?.(id)};
   const [query,setQuery]=useState(initialPatient?.name||'');
+  useEffect(()=>{
+    const selected=patients.find(patient=>String(patient.id)===String(selectedId));
+    if(selected) setQuery(selected.name);
+  },[selectedId,patients]);
   const [open,setOpen]=useState(false);
   const [activeIndex,setActiveIndex]=useState(0);
   const inputRef=useRef(null);
