@@ -48,6 +48,10 @@ export async function setWhatsAppConversationBlocked(clinicId: string, conversat
   });
 }
 
+export async function deleteWhatsAppConversation(clinicId: string, conversationId: string) {
+  return request<{ ok: true }>(clinicId, undefined, { action: 'delete-conversation', conversationId });
+}
+
 export async function sendWhatsAppAttachment(clinicId: string, conversationId: string, body: string, asset: DocumentPickerAsset) {
   const baseUrl = mobileApiBaseUrl();
   if (!baseUrl) throw new Error('Configura EXPO_PUBLIC_CRM_API_URL para conectar con el CRM.');

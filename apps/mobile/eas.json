@@ -8,6 +8,12 @@
         "EXPO_PUBLIC_CRM_API_URL": "https://gestion-clinica-crm.vercel.app"
       }
     },
+    "development-emulator": {
+      "extends": "development",
+      "android": {
+        "gradleCommand": ":app:assembleDebug -PreactNativeArchitectures=x86_64"
+      }
+    },
     "preview": {
       "distribution": "internal",
       "env": {

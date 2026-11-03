@@ -62,6 +62,7 @@ function Navigation() {
         <Stack.Screen name="payments" options={{ presentation: 'card' }} />
         <Stack.Screen name="google-calendar" options={{ presentation: 'card' }} />
         <Stack.Screen name="whatsapp-settings" options={{ presentation: 'card' }} />
+        <Stack.Screen name="whatsapp/[conversationId]" options={{ presentation: 'card' }} />
         <Stack.Screen name="notification-settings" options={{ presentation: 'card' }} />
         <Stack.Screen name="notifications" options={{ presentation: 'card' }} />
         <Stack.Screen name="reminders" options={{ presentation: 'card' }} />

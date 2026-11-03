@@ -440,6 +440,41 @@ export async function loadClinicDocumentTemplates(clinic: ClinicMembership) {
   return (result.data || []).map(row => ({ id: row.id, kind: row.kind === 'contract' ? 'contract' as const : 'consent' as const, title: row.title, type: row.category || '', content: row.content || '', version: `v${row.version}` }));
 }
 
+export type ClinicConsentDocument = {
+  id: string;
+  patientId: string;
+  title: string;
+  status: 'Pendiente' | 'Firmado' | 'Cancelado' | 'Reemplazado';
+  requestedAt: string | null;
+  signedAt: string | null;
+  contentSnapshot: string;
+  service: string;
+};
+
+export async function loadClinicConsentDocuments(clinic: ClinicMembership): Promise<ClinicConsentDocument[]> {
+  const result = await getClient().from('patient_documents')
+    .select('id, patient_id, title, status, requested_at, signed_at, content_snapshot, service')
+    .eq('clinic_id', clinic.clinicId).eq('kind', 'consent').order('requested_at', { ascending: false }).limit(500);
+  errorMessage(result.error, 'No se pudieron cargar los consentimientos.');
+  const statuses: Record<string, ClinicConsentDocument['status']> = { pending: 'Pendiente', signed: 'Firmado', cancelled: 'Cancelado', replaced: 'Reemplazado' };
+  return (result.data || []).map(row => ({
+    id: row.id,
+    patientId: row.patient_id,
+    title: row.title,
+    status: statuses[row.status] || 'Pendiente',
+    requestedAt: row.requested_at,
+    signedAt: row.signed_at,
+    contentSnapshot: row.content_snapshot || '',
+    service: row.service || '',
+  }));
+}
+
+export async function createClinicDocumentTemplate(clinic: ClinicMembership, input: { title: string; type: string; content: string }) {
+  if (!hasClinicPermission(clinic.role, clinic.permissions, 'documents.manage_templates')) throw new Error('Tu cuenta no tiene permiso para administrar formatos.');
+  if (!input.title.trim() || !input.content.trim()) throw new Error('Completa el nombre y el texto aprobado del formato.');
+  return createPatientDirectoryStore().createTemplate(clinic.clinicId, 'consent', input);
+}
+
 export async function prepareClinicPatientDocument(clinic: ClinicMembership, patient: { databaseId: string; treatment: string }, kind: 'consent' | 'contract', template: { id: string }, service = '') {
   if (!hasClinicPermission(clinic.role, clinic.permissions, 'documents.create')) throw new Error('Tu cuenta no tiene permiso para preparar documentos clínicos.');
   return createPatientDirectoryStore().createPatientDocument(clinic.clinicId, patient, { kind, template, service: kind === 'contract' ? service.trim() || patient.treatment : '' });

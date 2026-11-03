@@ -45,7 +45,7 @@
     "extra": {
       "supabaseUrl": "https://smxzwnmgwbqxhglgqjff.supabase.co",
       "supabasePublishableKey": "sb_publishable_6VeJIFfyB-ba2AJ9OA2WsA_eY6oOFp6",
-      "crmApiUrl": "",
+      "crmApiUrl": "https://gestion-clinica-crm.vercel.app",
       "router": {
         "asyncRoutes": {
           "web": true

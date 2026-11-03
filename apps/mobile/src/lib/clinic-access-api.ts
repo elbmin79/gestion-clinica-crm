@@ -42,12 +42,12 @@ export type ClinicAccessData = {
 };
 
 export function mobileApiBaseUrl() {
-  const configured = (process.env.EXPO_PUBLIC_CRM_API_URL || Constants.expoConfig?.extra?.crmApiUrl || '').trim();
-  if (configured) return configured.replace(/\/+$/, '');
-  if (!__DEV__) return '';
-  if (Platform.OS === 'web' && typeof window !== 'undefined') return `${window.location.protocol}//${window.location.hostname}:3000`;
-  const host = Constants.expoConfig?.hostUri?.split('/')[0]?.split(':')[0];
-  return host ? `http://${host}:3000` : '';
+  const configured = (
+    process.env.EXPO_PUBLIC_CRM_API_URL
+    || Constants.expoConfig?.extra?.crmApiUrl
+    || 'https://gestion-clinica-crm.vercel.app'
+  ).trim();
+  return configured.replace(/\/+$/, '');
 }
 
 export async function getMobileAccessToken() {

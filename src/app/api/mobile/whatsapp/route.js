@@ -118,6 +118,39 @@ export async function POST(request) {
     if (result.error) return json(request, { error: result.error }, result.status);
     return json(request, { ok: true, blockedAt: result.blockedAt });
   }
+  if (payload?.action === 'delete-conversation') {
+    if (!/^[\da-f-]{36}$/i.test(conversationId)) return json(request, { error: 'No se encontró la conversación.' }, 404);
+    const context = await authorize(request, clinicId, 'whatsapp.manage');
+    if (context.error) return json(request, { error: context.error }, context.status);
+    const { data: conversation, error: conversationError } = await context.service.from('clinic_whatsapp_conversations')
+      .select('id').eq('clinic_id', clinicId).eq('id', conversationId).maybeSingle();
+    if (conversationError) return json(request, { error: 'No se pudo cargar la conversación.' }, 503);
+    if (!conversation) return json(request, { error: 'No se encontró la conversación.' }, 404);
+    const paths = [];
+    const messageSids = [];
+    for (let offset = 0; ; offset += 1000) {
+      const { data, error } = await context.service.from('clinic_whatsapp_messages').select('media_object_path,twilio_message_sid')
+        .eq('clinic_id', clinicId).eq('conversation_id', conversationId).range(offset, offset + 999);
+      if (error) return json(request, { error: 'No se pudieron preparar los archivos de la conversación para eliminar.' }, 503);
+      paths.push(...(data || []).map(item => item.media_object_path).filter(Boolean));
+      messageSids.push(...(data || []).map(item => item.twilio_message_sid).filter(Boolean));
+      if ((data || []).length < 1000) break;
+    }
+    for (let offset = 0; offset < paths.length; offset += 1000) {
+      const { error } = await context.service.storage.from(WHATSAPP_MEDIA_BUCKET).remove(paths.slice(offset, offset + 1000));
+      if (error) return json(request, { error: 'No se pudieron eliminar todos los archivos. La conversación sigue disponible.' }, 503);
+    }
+    for (let offset = 0; offset < messageSids.length; offset += 1000) {
+      const { error } = await context.service.from('clinic_whatsapp_message_status_events').delete()
+        .in('twilio_message_sid', messageSids.slice(offset, offset + 1000));
+      if (error) return json(request, { error: 'No se pudieron eliminar los estados guardados. La conversación sigue disponible.' }, 503);
+    }
+    const { data: deleted, error: deleteError } = await context.service.from('clinic_whatsapp_conversations').delete()
+      .eq('clinic_id', clinicId).eq('id', conversationId).select('id').maybeSingle();
+    if (deleteError) return json(request, { error: 'No se pudo eliminar la conversación.' }, 503);
+    if (!deleted) return json(request, { error: 'No se encontró la conversación.' }, 404);
+    return json(request, { ok: true });
+  }
   if (payload?.action === 'prepare-media-upload') {
     const contentType = String(payload?.contentType || '').split(';')[0].trim().toLowerCase();
     const size = Number(payload?.size);
