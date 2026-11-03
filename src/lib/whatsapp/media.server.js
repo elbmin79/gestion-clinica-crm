@@ -64,5 +64,6 @@ export function isWhatsAppMediaPath(path, clinicId, conversationId) {
   const prefix = `${clinicId}/${conversationId}/`;
   return typeof path === 'string'
     && path.startsWith(prefix)
-    && /^[0-9a-f-]{36}\.(?:jpg|png|webp|mp4|ogg|mp3|m4a|3gp)$/i.test(path.slice(prefix.length));
+    // Outgoing uploads use UUID filenames; inbound Twilio media uses the message SID.
+    && /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|(?:SM|MM)[0-9a-f]{32})\.(?:jpg|png|webp|mp4|ogg|mp3|m4a|3gp)$/i.test(path.slice(prefix.length));
 }
