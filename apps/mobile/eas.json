@@ -15,6 +15,12 @@
         "EXPO_PUBLIC_CRM_API_URL": "https://gestion-clinica-crm.vercel.app"
       }
     },
+    "ios-simulator": {
+      "extends": "preview",
+      "ios": {
+        "simulator": true
+      }
+    },
     "production": {
       "env": {
         "CRM_NATIVE_BUILD": "1",

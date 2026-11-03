@@ -41,6 +41,20 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
-    }
+    },
+    "extra": {
+      "supabaseUrl": "https://smxzwnmgwbqxhglgqjff.supabase.co",
+      "supabasePublishableKey": "sb_publishable_6VeJIFfyB-ba2AJ9OA2WsA_eY6oOFp6",
+      "crmApiUrl": "",
+      "router": {
+        "asyncRoutes": {
+          "web": true
+        }
+      },
+      "eas": {
+        "projectId": "66120581-b4c4-4a20-82d1-df1ed7a6cc17"
+      }
+    },
+    "owner": "mkz-solutions"
   }
 }
