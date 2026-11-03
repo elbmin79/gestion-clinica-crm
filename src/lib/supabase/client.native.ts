@@ -9,29 +9,29 @@ const MAX_CHUNKS = 12;
 function createSecureStorage() {
   return {
     async getItem(key: string) {
-      const manifest = await SecureStore.getItemAsync(`${key}:manifest`);
+      const manifest = await SecureStore.getItemAsync(`${key}.manifest`);
       if (!manifest) return SecureStore.getItemAsync(key);
       const count = Number(manifest);
       if (!Number.isInteger(count) || count < 1 || count > MAX_CHUNKS) return null;
-      const parts = await Promise.all(Array.from({ length: count }, (_, index) => SecureStore.getItemAsync(`${key}:chunk:${index}`)));
+      const parts = await Promise.all(Array.from({ length: count }, (_, index) => SecureStore.getItemAsync(`${key}.chunk.${index}`)));
       if (parts.some(part => part === null)) return null;
       return parts.join('');
     },
     async setItem(key: string, value: string) {
       const chunks = value.match(new RegExp(`[\\s\\S]{1,${CHUNK_SIZE}}`, 'g')) || [''];
       if (chunks.length > MAX_CHUNKS) throw new Error('La sesión excede el espacio seguro disponible en este dispositivo.');
-      const prior = Number(await SecureStore.getItemAsync(`${key}:manifest`) || 0);
-      await Promise.all(chunks.map((chunk, index) => SecureStore.setItemAsync(`${key}:chunk:${index}`, chunk)));
-      await SecureStore.setItemAsync(`${key}:manifest`, String(chunks.length));
+      const prior = Number(await SecureStore.getItemAsync(`${key}.manifest`) || 0);
+      await Promise.all(chunks.map((chunk, index) => SecureStore.setItemAsync(`${key}.chunk.${index}`, chunk)));
+      await SecureStore.setItemAsync(`${key}.manifest`, String(chunks.length));
       await SecureStore.deleteItemAsync(key);
-      await Promise.all(Array.from({ length: Math.max(0, prior - chunks.length) }, (_, offset) => SecureStore.deleteItemAsync(`${key}:chunk:${chunks.length + offset}`)));
+      await Promise.all(Array.from({ length: Math.max(0, prior - chunks.length) }, (_, offset) => SecureStore.deleteItemAsync(`${key}.chunk.${chunks.length + offset}`)));
     },
     async removeItem(key: string) {
-      const count = Number(await SecureStore.getItemAsync(`${key}:manifest`) || 0);
+      const count = Number(await SecureStore.getItemAsync(`${key}.manifest`) || 0);
       await Promise.all([
         SecureStore.deleteItemAsync(key),
-        SecureStore.deleteItemAsync(`${key}:manifest`),
-        ...Array.from({ length: Math.min(MAX_CHUNKS, count) }, (_, index) => SecureStore.deleteItemAsync(`${key}:chunk:${index}`)),
+        SecureStore.deleteItemAsync(`${key}.manifest`),
+        ...Array.from({ length: Math.min(MAX_CHUNKS, count) }, (_, index) => SecureStore.deleteItemAsync(`${key}.chunk.${index}`)),
       ]);
     },
   };
