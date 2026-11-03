@@ -1,18 +1,12 @@
 import 'server-only';
 
-import { createCipheriv, createDecipheriv, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import { createClient } from './supabase/server.js';
 import { createServiceClient } from './supabase/service-client.js';
+export { GOOGLE_CALENDAR_SCOPES, createGoogleOAuthAuthorizationUrl, signGoogleCalendarState, verifyGoogleCalendarState } from './google-calendar-oauth-state.js';
 
 export const GOOGLE_CALENDAR_CALLBACK_PATH = '/api/integrations/google-calendar/callback';
 export const GOOGLE_CALENDAR_STATE_COOKIE = 'clinic_google_calendar_oauth_state';
-export const GOOGLE_CALENDAR_SCOPES = [
-  'openid',
-  'email',
-  'https://www.googleapis.com/auth/calendar.events',
-  'https://www.googleapis.com/auth/calendar.calendarlist.readonly',
-];
-
 export function googleCalendarConfig() {
   const clientId = process.env.GOOGLE_CLIENT_ID?.trim();
   const clientSecret = process.env.GOOGLE_CLIENT_SECRET?.trim();
@@ -53,22 +47,6 @@ export function decryptGoogleRefreshToken(value) {
   ]).toString('utf8');
 }
 
-export function signGoogleCalendarState(payload, clientSecret) {
-  const encoded = Buffer.from(JSON.stringify(payload)).toString('base64url');
-  const signature = createHmac('sha256', clientSecret).update(encoded).digest('base64url');
-  return `${encoded}.${signature}`;
-}
-
-export function verifyGoogleCalendarState(value, clientSecret) {
-  const [encoded, signature, extra] = String(value || '').split('.');
-  if (!encoded || !signature || extra) return null;
-  const expected = createHmac('sha256', clientSecret).update(encoded).digest();
-  let supplied;
-  try { supplied = Buffer.from(signature, 'base64url'); } catch { return null; }
-  if (expected.length !== supplied.length || !timingSafeEqual(expected, supplied)) return null;
-  try { return JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8')); } catch { return null; }
-}
-
 export async function requireClinicAccess(clinicId, allowedRoles = ['admin']) {
   const supabase = await createClient();
   if (!supabase) return { error: 'La conexión de la clínica no está disponible.', status: 503 };
@@ -87,20 +65,6 @@ export async function requireClinicAccess(clinicId, allowedRoles = ['admin']) {
 
 export function requireClinicAdmin(clinicId) {
   return requireClinicAccess(clinicId, ['admin']);
-}
-
-export function createGoogleOAuthAuthorizationUrl({ clinicId, userId, nonce, clientSecret, clientId, redirectUri }) {
-  const state = signGoogleCalendarState({ clinicId, userId, nonce, exp: Date.now() + 10 * 60 * 1000 }, clientSecret);
-  const url = new URL('https://accounts.google.com/o/oauth2/v2/auth');
-  url.searchParams.set('client_id', clientId);
-  url.searchParams.set('redirect_uri', redirectUri);
-  url.searchParams.set('response_type', 'code');
-  url.searchParams.set('scope', GOOGLE_CALENDAR_SCOPES.join(' '));
-  url.searchParams.set('access_type', 'offline');
-  url.searchParams.set('prompt', 'consent select_account');
-  url.searchParams.set('include_granted_scopes', 'true');
-  url.searchParams.set('state', state);
-  return { url, state };
 }
 
 export async function exchangeGoogleAuthorizationCode(code, { clientId, clientSecret, redirectUri }) {

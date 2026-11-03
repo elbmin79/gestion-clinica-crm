@@ -1,0 +1,14 @@
+{
+  "name": "@elixir-clinic/crm-core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.js",
+    "./permissions": "./src/permissions.js",
+    "./workspace": "./src/workspace.js",
+    "./agenda-colors": "./src/agenda-colors.js",
+    "./clinic-services": "./src/clinic-services.js",
+    "./clinic-time": "./src/clinic-time.js"
+  }
+}

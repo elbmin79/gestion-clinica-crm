@@ -1,7 +1,7 @@
-import { invitationCallbackUrl, invitationErrorMessage, validateInvitationInput } from './clinic-invitations.js';
+import { invitationCallbackUrl, invitationErrorMessage, nativeInvitationCallbackUrl, validateInvitationInput } from './clinic-invitations.js';
 
 // Dependency injection keeps email behavior testable without sending real email.
-export async function deliverClinicInvitation({ input, context, origin }) {
+export async function deliverClinicInvitation({ input, context, origin, native = false }) {
   const validated = validateInvitationInput(input);
   if (validated.error) return { ok: false, message: validated.error };
   if (context.error) return { ok: false, message: context.error };
@@ -13,7 +13,7 @@ export async function deliverClinicInvitation({ input, context, origin }) {
     p_role: validated.role, p_permissions: validated.permissions,
   });
   if (error || !invitation) return { ok: false, message: invitationErrorMessage(error) };
-  const redirectTo = invitationCallbackUrl(origin, invitation.id);
+  const redirectTo = native ? nativeInvitationCallbackUrl(invitation.id) : invitationCallbackUrl(origin, invitation.id);
   let sendError;
   try {
     // Existing accounts keep their password. Unconfirmed/new accounts use an invite.

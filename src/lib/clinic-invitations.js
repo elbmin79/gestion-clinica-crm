@@ -23,6 +23,13 @@ export function invitationCallbackUrl(origin, invitationId) {
   return url.toString();
 }
 
+export function nativeInvitationCallbackUrl(invitationId) {
+  if (!invitationIdPattern.test(invitationId)) throw new Error('invalid_invitation');
+  const url = new URL('elixirclinic://auth/callback');
+  url.searchParams.set('next', `/accept-invite?id=${invitationId}`);
+  return url.toString();
+}
+
 export function invitationErrorMessage(error) {
   const message = error?.message || '';
   if (error?.status === 429 || /rate_limit/.test(message)) return 'Espera un minuto antes de reenviar. Si continúa, revisa el límite de correos de la clínica.';

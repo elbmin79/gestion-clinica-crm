@@ -1,6 +1,6 @@
 import 'server-only';
 import {createServiceClient} from './supabase/service-client';
-import {agendaSecret,issueBookingChallenge,verifyBookingChallenge,normalizePublicRequest,visitorRateKey,contactRateKey,readBookingBody,slugPattern,uuidPattern} from './public-agenda-security';
+import {agendaSecret,issueBookingChallenge,verifyBookingChallenge,normalizePublicRequest,visitorRateKey,contactRateKey,readBookingBody,slugPattern,uuidPattern,publicAgendaAllowedOrigin,publicAgendaRequestOriginAllowed} from './public-agenda-security';
 
 const reply=(body,status=200)=>Response.json(body,{status,headers:{'Cache-Control':'no-store','X-Robots-Tag':'noindex'}});
 function service(){const client=createServiceClient();if(!client)throw new Error('not configured');return client;}
@@ -27,7 +27,7 @@ export async function publicAgendaRequest(request,slug){
       }
       return reply({...catalog,challenge:issueBookingChallenge(slug,secret)});
     }
-    if(request.headers.get('origin')!==new URL(request.url).origin)return reply({error:'Solicitud no permitida.'},403);
+    if(!publicAgendaRequestOriginAllowed(request))return reply({error:'Solicitud no permitida.'},403);
     let body;try{body=await readBookingBody(request);}catch(error){return reply({error:error.message},error.status||400);}
     if(!body || typeof body!=='object'||Array.isArray(body))return reply({error:'Solicitud inválida.'},400);
     if(body.website)return reply({error:'No se pudo validar la solicitud.'},400);

@@ -1,5 +1,5 @@
 import { createClient } from './client.js';
-import { clinicDateTimeToIso } from './clinic-agenda.js';
+import { clinicDateTimeToIso } from '@elixir-clinic/crm-core/clinic-time';
 
 function throwDatabaseError(result, fallback) {
   if (!result.error) return;

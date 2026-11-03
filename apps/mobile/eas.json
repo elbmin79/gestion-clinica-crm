@@ -1,0 +1,28 @@
+{
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "env": {
+        "CRM_NATIVE_BUILD": "1",
+        "EXPO_PUBLIC_CRM_API_URL": "https://gestion-clinica-crm.vercel.app"
+      }
+    },
+    "preview": {
+      "distribution": "internal",
+      "env": {
+        "CRM_NATIVE_BUILD": "1",
+        "EXPO_PUBLIC_CRM_API_URL": "https://gestion-clinica-crm.vercel.app"
+      }
+    },
+    "production": {
+      "env": {
+        "CRM_NATIVE_BUILD": "1",
+        "EXPO_PUBLIC_CRM_API_URL": "https://gestion-clinica-crm.vercel.app"
+      }
+    }
+  },
+  "submit": {
+    "production": {}
+  }
+}

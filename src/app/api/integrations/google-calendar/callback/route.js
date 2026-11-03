@@ -27,35 +27,53 @@ function clearStateCookie(response) {
   return response;
 }
 
+function mobileCallback(result) {
+  const url = new URL('elixirclinic://google-calendar');
+  url.searchParams.set('googleCalendar', result);
+  return NextResponse.redirect(url);
+}
+
 export async function GET(request) {
   const config = googleCalendarConfig();
   if (!config) return NextResponse.json({ error: 'Google Calendar todavía no está configurado en el servidor.' }, { status: 503 });
   const query = request.nextUrl.searchParams;
-  if (query.has('error')) return clearStateCookie(NextResponse.redirect(googleCalendarSettingsUrl(request.url, 'cancelled')));
-
   const code = query.get('code');
   const stateValue = query.get('state');
   const cookieStore = await cookies();
   const cookieState = cookieStore.get(GOOGLE_CALENDAR_STATE_COOKIE)?.value;
-  if (!code || !stateValue || !cookieState || stateValue !== cookieState) {
+  const configState = stateValue ? verifyGoogleCalendarState(stateValue, config.clientSecret) : null;
+  const isMobileFlow = configState?.mobile === true;
+  if (query.has('error')) {
+    const response = isMobileFlow ? mobileCallback('cancelled') : NextResponse.redirect(googleCalendarSettingsUrl(request.url, 'cancelled'));
+    return clearStateCookie(response);
+  }
+  if (!code || !stateValue || (!isMobileFlow && (!cookieState || stateValue !== cookieState))) {
     return clearStateCookie(NextResponse.json({ error: 'La respuesta de Google no coincide con la solicitud iniciada.' }, { status: 400 }));
   }
 
-  const state = verifyGoogleCalendarState(stateValue, config.clientSecret);
+  const state = configState;
   if (!state?.clinicId || !state?.userId || !state?.nonce || state.exp < Date.now()) {
     return clearStateCookie(NextResponse.json({ error: 'La solicitud de autorización venció. Vuelve a conectar Google Calendar.' }, { status: 400 }));
   }
 
-  const access = await requireClinicAccess(state.clinicId, ['admin', 'clinician', 'receptionist', 'billing']);
-  if (access.error || access.user.id !== state.userId) {
-    return clearStateCookie(NextResponse.redirect(googleCalendarSettingsUrl(request.url, 'unauthorized')));
+  const service = getGoogleServiceClient();
+  if (isMobileFlow) {
+    const { data: membership, error: membershipError } = await service.from('clinic_memberships').select('role')
+      .eq('clinic_id', state.clinicId).eq('user_id', state.userId).maybeSingle();
+    if (membershipError || !['admin', 'clinician', 'receptionist', 'billing'].includes(membership?.role)) {
+      return clearStateCookie(mobileCallback('unauthorized'));
+    }
+  } else {
+    const access = await requireClinicAccess(state.clinicId, ['admin', 'clinician', 'receptionist', 'billing']);
+    if (access.error || access.user.id !== state.userId) {
+      return clearStateCookie(NextResponse.redirect(googleCalendarSettingsUrl(request.url, 'unauthorized')));
+    }
   }
 
-  const service = getGoogleServiceClient();
   try {
     const token = await exchangeGoogleAuthorizationCode(code, config);
     const account = await getGoogleAccount(token.access_token);
-    const current = await getUserGoogleCalendarConnection(service, state.clinicId, access.user.id);
+    const current = await getUserGoogleCalendarConnection(service, state.clinicId, state.userId);
 
     let encryptedRefreshToken;
     if (token.refresh_token) encryptedRefreshToken = encryptGoogleRefreshToken(token.refresh_token);
@@ -73,7 +91,7 @@ export async function GET(request) {
       google_email: account.email,
       calendar_id: current?.google_email?.toLowerCase() === account.email.toLowerCase() ? current.calendar_id : 'primary',
       refresh_token_ciphertext: encryptedRefreshToken,
-      connected_by: access.user.id,
+      connected_by: state.userId,
       connected_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
@@ -84,13 +102,13 @@ export async function GET(request) {
 
     const { error: queueError } = await service.rpc('queue_google_calendar_user_initial_sync', {
       target_clinic_id: state.clinicId,
-      target_user_id: access.user.id,
+      target_user_id: state.userId,
     });
     if (queueError) console.error('Google Calendar initial provider sync could not be queued:', queueError.message);
 
-    return clearStateCookie(NextResponse.redirect(googleCalendarSettingsUrl(request.url, 'connected')));
+    return clearStateCookie(isMobileFlow ? mobileCallback('connected') : NextResponse.redirect(googleCalendarSettingsUrl(request.url, 'connected')));
   } catch (error) {
-    const response = NextResponse.redirect(googleCalendarSettingsUrl(request.url, 'error'));
+    const response = isMobileFlow ? mobileCallback('error') : NextResponse.redirect(googleCalendarSettingsUrl(request.url, 'error'));
     response.cookies.set(GOOGLE_CALENDAR_STATE_COOKIE, '', { maxAge: 0, path: '/api/integrations/google-calendar' });
     // Do not put provider errors, authorization codes, or tokens into the redirect URL.
     console.error('Google Calendar OAuth callback failed:', error instanceof Error ? error.message : 'Unknown error');

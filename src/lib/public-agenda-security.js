@@ -2,6 +2,20 @@ import {createHash,createHmac,randomUUID,timingSafeEqual} from 'node:crypto';
 
 export const uuidPattern=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export const slugPattern=/^[a-z0-9][a-z0-9-]{2,59}$/;
+export function publicAgendaAllowedOrigin(request,env=process.env){
+  const origin=request.headers.get('origin');if(!origin)return null;
+  let normalized;try{normalized=new URL(origin).origin;}catch{return null;}
+  if(normalized!==origin)return null;
+  if(origin===new URL(request.url).origin)return origin;
+  const allowed=(env.PUBLIC_BOOKING_ALLOWED_ORIGINS||'').split(',').map(item=>item.trim()).filter(Boolean);
+  if(env.NODE_ENV!=='production')allowed.push('http://localhost:8081','http://127.0.0.1:8081');
+  return allowed.includes(origin)?origin:null;
+}
+export function publicAgendaRequestOriginAllowed(request,env=process.env){
+  // Native clients omit Origin. This endpoint uses no browser session or cookies;
+  // browsers that do send Origin must match the CRM or an approved Expo origin.
+  return !request.headers.get('origin')||Boolean(publicAgendaAllowedOrigin(request,env));
+}
 export async function readBookingBody(request,limit=8192){
   const invalid=(message,status)=>Object.assign(new Error(message),{status});
   if(Number(request.headers.get('content-length')||0)>limit)throw invalid('Solicitud demasiado grande.',413);

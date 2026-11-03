@@ -8,7 +8,7 @@ async function tick(){
     const response=await fetch(url,{method:'POST',headers:{authorization:`Bearer ${process.env.CRON_SECRET}`},signal:AbortSignal.timeout(55000)});
     if(!response.ok){console.error(`Push worker: dispatch unavailable (${response.status}).`);return;}
     const {counts}=await response.json();
-    if(Object.values(counts || {}).some(Boolean))console.log('Push worker:',counts);
+    if(Object.values(counts || {}).some(value=>typeof value==='number'?Boolean(value):Object.values(value || {}).some(Boolean)))console.log('Push worker:',counts);
   }catch{console.error('Push worker: cannot reach CRM dispatch endpoint.');}
 }
 console.log(`Push worker for ${url.origin}: ${process.argv.includes('--once')?'one delivery pass':'polling every 60 seconds'}.`);

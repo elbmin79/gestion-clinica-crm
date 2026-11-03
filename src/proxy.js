@@ -10,6 +10,10 @@ export async function proxy(request) {
   const isAuthCallbackRoute = pathname === '/auth/callback';
   const isReminderDispatchRoute = pathname === '/api/reminders/dispatch';
   const isTwilioWhatsAppWebhookRoute = pathname === '/api/webhooks/twilio/whatsapp';
+  const isMobileApiRoute = pathname === '/api/mobile/clinic-access' || pathname === '/api/mobile/clinic-invitation' || pathname === '/api/mobile/whatsapp' || pathname === '/api/mobile/whatsapp-settings' || pathname === '/api/mobile/notifications' || pathname === '/api/mobile/public-agenda-status' || pathname === '/api/mobile/google-calendar' || pathname === '/api/whatsapp/messages';
+  // Native CRM APIs authenticate their own bearer token and clinic permission.
+  // Let their CORS preflights and requests reach the route handlers.
+  if (isMobileApiRoute) return NextResponse.next({ request });
   // Twilio has no CRM session cookie. The route validates Twilio's request
   // signature itself, so let the signed webhook reach its handler directly.
   if (isTwilioWhatsAppWebhookRoute) return NextResponse.next({ request });

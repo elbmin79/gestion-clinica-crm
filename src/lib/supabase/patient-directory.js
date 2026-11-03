@@ -62,26 +62,29 @@ function mapDocument(row) {
   };
 }
 
-async function fetchDirectory(client, clinicId, role) {
+async function fetchDirectory(client, clinicId, role, patientId = '') {
   const canReadDiagnoses = true; // All clinic members may read the full patient record.
+  const filterPatient = query => patientId ? query.eq('patient_id', patientId) : query;
   const [patientResult, businessResult, branchResult, providerResult, assignmentResult, diagnosisResult, documentResult, activityResult, templateResult, encounterResult, fileResult, botoxResult] = await Promise.all([
-    client.from('patients').select('id, record_number, full_name, email, phone, service_summary, status, primary_branch_id, primary_provider_id, appointment_whatsapp_opt_in, appointment_whatsapp_opt_in_at, appointment_whatsapp_opt_in_source, created_at, updated_at').eq('clinic_id', clinicId).order('created_at', { ascending: false }),
+    patientId
+      ? client.from('patients').select('id, record_number, full_name, email, phone, service_summary, status, primary_branch_id, primary_provider_id, appointment_whatsapp_opt_in, appointment_whatsapp_opt_in_at, appointment_whatsapp_opt_in_source, created_at, updated_at').eq('clinic_id', clinicId).eq('id', patientId).order('created_at', { ascending: false })
+      : client.from('patients').select('id, record_number, full_name, email, phone, service_summary, status, primary_branch_id, primary_provider_id, appointment_whatsapp_opt_in, appointment_whatsapp_opt_in_at, appointment_whatsapp_opt_in_source, created_at, updated_at').eq('clinic_id', clinicId).order('created_at', { ascending: false }),
     client.from('businesses').select('id, name, active').eq('clinic_id', clinicId).order('name'),
     client.from('branches').select('id, business_id, name, address, phone, hours, active').eq('clinic_id', clinicId).order('name'),
     client.from('clinic_providers').select('id, user_id, name, role_title, active').eq('clinic_id', clinicId).or(visibleProviderFilter).order('name'),
     client.from('provider_branches').select('provider_id, branch_id, agenda_color, agenda_service_colors').eq('clinic_id', clinicId),
     canReadDiagnoses
-      ? client.from('patient_diagnoses').select('id, patient_id, summary, status, accepted_at, accepted_by, created_at').eq('clinic_id', clinicId).order('created_at', { ascending: false })
+      ? filterPatient(client.from('patient_diagnoses').select('id, patient_id, summary, status, accepted_at, accepted_by, created_at').eq('clinic_id', clinicId).order('created_at', { ascending: false }))
       : Promise.resolve({ data: [], error: null }),
-    client.from('patient_documents').select('id, patient_id, diagnosis_id, kind, title, service, template_version, content_snapshot, status, requested_at, signed_at, created_by, signed_by').eq('clinic_id', clinicId).order('requested_at', { ascending: false }),
-    client.from('patient_activities').select('id, patient_id, activity_type, note, created_at, author_id').eq('clinic_id', clinicId).order('created_at', { ascending: false }),
+    filterPatient(client.from('patient_documents').select('id, patient_id, diagnosis_id, kind, title, service, template_version, content_snapshot, status, requested_at, signed_at, created_by, signed_by').eq('clinic_id', clinicId).order('requested_at', { ascending: false })),
+    filterPatient(client.from('patient_activities').select('id, patient_id, activity_type, note, created_at, author_id').eq('clinic_id', clinicId).order('created_at', { ascending: false })),
     client.from('document_templates').select('id, kind, title, category, version, content, active, created_at').eq('clinic_id', clinicId).eq('active', true).order('created_at', { ascending: false }),
     canReadDiagnoses
-      ? client.from('patient_encounters').select('id, patient_id, appointment_id, occurred_at, chief_complaint, history, examination, assessment, plan, created_at').eq('clinic_id', clinicId).order('occurred_at', { ascending: false })
+      ? filterPatient(client.from('patient_encounters').select('id, patient_id, appointment_id, occurred_at, chief_complaint, history, examination, assessment, plan, created_at').eq('clinic_id', clinicId).order('occurred_at', { ascending: false }))
       : Promise.resolve({ data: [], error: null }),
-    client.from('patient_document_files').select('id, patient_id, kind, title, signed_at, storage_path, mime_type, byte_size, created_at').eq('clinic_id', clinicId).order('created_at', { ascending: false }),
+    filterPatient(client.from('patient_document_files').select('id, patient_id, kind, title, signed_at, storage_path, mime_type, byte_size, created_at').eq('clinic_id', clinicId).order('created_at', { ascending: false })),
     canReadDiagnoses
-      ? client.from('botox_treatment_records').select('id, patient_id, appointment_id, clinician_id, performed_at, product, lot_number, expiration_date, treatment_areas, total_units, follow_up, consent_document_id, consent_file_id, created_at').eq('clinic_id', clinicId).order('performed_at', { ascending: false })
+      ? filterPatient(client.from('botox_treatment_records').select('id, patient_id, appointment_id, clinician_id, performed_at, product, lot_number, expiration_date, treatment_areas, total_units, follow_up, consent_document_id, consent_file_id, created_at').eq('clinic_id', clinicId).order('performed_at', { ascending: false }))
       : Promise.resolve({ data: [], error: null }),
   ]);
 
@@ -264,6 +267,14 @@ export function createPatientDirectoryStore({ clientFactory = createClient } = {
       return fetchDirectory(client, clinicId, role);
     },
 
+    async loadPatient(clinicId, role, patientId) {
+      const client = clientFactory();
+      if (!client) throw new Error('La conexión con Supabase no está configurada.');
+      const directory = await fetchDirectory(client, clinicId, role, patientId);
+      const patient = directory.patients[0];
+      return patient ? { ...patient, activities: directory.activities.filter(activity => activity.patientId === patient.id) } : null;
+    },
+
     async create(clinicId, input) {
       const client = clientFactory();
       if (!client) throw new Error('La conexión con Supabase no está configurada.');
@@ -360,7 +371,7 @@ export function createPatientDirectoryStore({ clientFactory = createClient } = {
       const id = crypto.randomUUID();
       const extension = input.file.type === 'application/pdf' ? 'pdf' : input.file.type === 'image/png' ? 'png' : 'jpg';
       const path = `${clinicId}/${patient.databaseId}/${id}.${extension}`;
-      const upload = await client.storage.from('patient-records').upload(path, input.file, { contentType: input.file.type, upsert: false });
+      const upload = await client.storage.from('patient-records').upload(path, input.body || input.file, { contentType: input.file.type, upsert: false });
       resultError(upload, 'No se pudo subir el archivo privado del expediente.');
       const user = await client.auth.getUser();
       if (user.error || !user.data.user) {

@@ -5,6 +5,7 @@ import {PGlite} from '@electric-sql/pglite';
 import {runInNewContext} from 'node:vm';
 import {validPushSubscription} from './push-validation.js';
 import {dispatchStaffPush,authorizedPushDispatch} from './push-dispatch.js';
+import {dispatchNativeStaffPush,nativeNotificationRoute,validExpoPushToken} from './native-push-dispatch.js';
 import {notificationPreferencesForRole} from './staff-notifications.js';
 
 const subscription={endpoint:'https://fcm.googleapis.com/fcm/send/test-endpoint',keys:{p256dh:'A'.repeat(87),auth:'A'.repeat(22)}};
@@ -38,6 +39,33 @@ test('push subscriptions reject local addresses, credentials, arbitrary hosts an
   assert.equal(authorizedPushDispatch(new Request('http://localhost',{headers:{authorization:'Bearer secret'}}),'secret'),true);
   assert.equal(authorizedPushDispatch(new Request('http://localhost'),''),false);
 });
+test('native push accepts Expo tokens and creates privacy-safe routes for each CRM notice',()=>{
+ const token='ExponentPushToken[AbCdEfGhIjKlMnOpQrStUv]';
+ assert.equal(validExpoPushToken(token),true);
+ assert.equal(validExpoPushToken('https://exp.host/--/api/v2/push/send'),false);
+ assert.equal(validExpoPushToken('ExpoPushToken[short]'),false);
+ assert.equal(nativeNotificationRoute({kind:'whatsapp_message'}),'/whatsapp');
+ assert.equal(nativeNotificationRoute({kind:'new_appointment',appointment_id:'abc'}),'/appointment/abc');
+ assert.equal(nativeNotificationRoute({message:'Nueva solicitud de cita',booking_request_id:'request'}),'/public-agenda');
+ assert.equal(nativeNotificationRoute({kind:'test'}),'/(tabs)/agenda');
+});
+test('native dispatcher rechecks eligibility and sends only generic CRM notice content',async()=>{
+ const token='ExponentPushToken[AbCdEfGhIjKlMnOpQrStUv]';let payload;const calls=[];
+ const row={delivery_id:'delivery',token:'lease',subscription_id:'sub',expo_push_token:token,platform:'ios',message:'Nueva cita registrada',kind:'new_appointment',clinic_id:'clinic',appointment_id:'appointment'};
+ const client={rpc:async(name,args)=>{calls.push({name,args});if(name==='claim_staff_native_push')return {data:[row]};if(name==='staff_native_push_is_eligible')return {data:true};return {data:true};},from:()=>({delete:()=>({eq:async()=>({error:null})})})};
+ const result=await dispatchNativeStaffPush(client,async(target,value)=>{assert.equal(target,token);payload=value;});
+ assert.equal(result.sent,1);assert.equal(payload.title,'CRM clínico');assert.equal(payload.body,'Nueva cita registrada');assert.deepEqual(payload.data,{route:'/appointment/appointment'});assert.equal('patientName' in payload.data,false);assert.equal(calls.at(-1).args.target_state,'sent');
+});
+test('native dispatcher skips invalid tokens and retries provider failures through the leased queue',async()=>{
+ for(const scenario of ['invalid','retry','expired']){
+  const calls=[];let sent=0;const row={delivery_id:'delivery',token:'lease',subscription_id:'sub',expo_push_token:scenario==='invalid'?'invalid':'ExpoPushToken[AbCdEfGhIjKlMnOpQrStUv]',platform:'android',message:'Prueba de notificaciones',kind:'test'};
+  const client={rpc:async(name,args)=>{calls.push({name,args});if(name==='claim_staff_native_push')return {data:[row]};if(name==='staff_native_push_is_eligible')return {data:true};return {data:true};},from:()=>({delete:()=>({eq:async()=>({error:null})})})};
+  const result=await dispatchNativeStaffPush(client,async()=>{sent++;if(scenario==='retry')throw {statusCode:503};if(scenario==='expired')throw {statusCode:410};});
+  if(scenario==='invalid'){assert.equal(sent,0);assert.equal(result.skipped,1);assert.equal(calls.at(-1).args.target_state,'skipped');}
+  if(scenario==='retry'){assert.equal(sent,1);assert.equal(result.pending,1);assert.equal(calls.at(-1).args.target_state,'pending');}
+  if(scenario==='expired'){assert.equal(result.skipped,1);assert.equal(calls.at(-1).name,'staff_native_push_is_eligible');}
+ }
+});
 test('dispatcher rechecks eligibility, retries temporary failures, removes expired endpoints and sends no patient content',async()=>{
   for(const scenario of ['sent','skipped','retry','expired','checkError']){
     const calls=[];let sent=0;let payload;
@@ -56,6 +84,7 @@ test('PostgreSQL staff alerts enforce recipients, preferences, clinic isolation,
  const foundation=await readFile(new URL('../../supabase/migrations/20261028221430_202610260001_clinic_crm.sql',import.meta.url),'utf8');
  const migration=await readFile(new URL('../../supabase/migrations/20261030194825_team_push_notifications.sql',import.meta.url),'utf8');
  const permissionMigration=await readFile(new URL('../../supabase/migrations/20261031082243_permissions_and_settings_scopes.sql',import.meta.url),'utf8');
+ const nativePushMigration=await readFile(new URL('../../supabase/migrations/20261103003952_native_push_notifications.sql',import.meta.url),'utf8');
  await db.exec(`create role anon;create role authenticated;create role service_role bypassrls;create schema auth;create schema private;grant usage on schema private to authenticated,service_role;
  create table auth.users(id uuid primary key);
  create function auth.uid() returns uuid language sql stable as $$select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid$$;
@@ -67,6 +96,7 @@ test('PostgreSQL staff alerts enforce recipients, preferences, clinic isolation,
  alter table public.staff_notifications drop constraint staff_notifications_message_check;
  alter table public.staff_notifications add constraint staff_notifications_message_check check(message in ('Nueva cita registrada','Cita cancelada','Horario o asignación de cita actualizado','Prueba de notificaciones','Nueva solicitud de cita'));`);
  await db.exec(permissionMigration.slice(permissionMigration.indexOf('create or replace function private.capture_staff_appointment_alert')));
+ await db.exec(nativePushMigration);
  await db.exec('create trigger public_booking_request_notice after insert on public.public_booking_requests for each row execute function private.notify_public_booking_request();');
  const c='10000000-0000-0000-0000-000000000001',other='10000000-0000-0000-0000-000000000002';
  const a='20000000-0000-0000-0000-000000000001',r='20000000-0000-0000-0000-000000000002',p='20000000-0000-0000-0000-000000000003',b='20000000-0000-0000-0000-000000000004',x='20000000-0000-0000-0000-000000000005';
@@ -75,11 +105,16 @@ test('PostgreSQL staff alerts enforce recipients, preferences, clinic isolation,
  insert into public.clinic_memberships(clinic_id,user_id,role) values('${c}','${a}','admin'),('${c}','${r}','receptionist'),('${c}','${p}','clinician'),('${c}','${b}','billing'),('${other}','${x}','admin');
  insert into public.clinic_providers(id,clinic_id,user_id,name) values('${provider}','${c}','${p}','Doctor'),('${nextProvider}','${c}',null,'Other doctor');
  insert into public.staff_push_subscriptions(clinic_id,user_id,endpoint,p256dh,auth) values('${c}','${r}','${subscription.endpoint}','${subscription.keys.p256dh}','${subscription.keys.auth}');
+ insert into public.staff_native_push_subscriptions(clinic_id,user_id,expo_push_token,platform) values('${c}','${r}','ExponentPushToken[AbCdEfGhIjKlMnOpQrStUv]','ios');
  select set_config('request.jwt.claim.sub','${a}',false);`);
  const appointment=(await db.query(`insert into public.appointments(clinic_id,provider_id,starts_at,ends_at) values($1,$2,'2026-11-01T16:00Z','2026-11-01T17:00Z') returning id`,[c,provider])).rows[0].id;
  assert.deepEqual((await db.query('select user_id from public.staff_notifications order by user_id')).rows.map(v=>v.user_id),[r,p]);
  assert.equal((await db.query('select count(*)::int n from public.staff_notifications where user_id=$1',[b])).rows[0].n,0,'billing default does not opt into appointment alerts');
  assert.equal((await db.query('select count(*)::int n from private.staff_push_deliveries')).rows[0].n,1);
+ const nativeClaim=(await db.query('select * from public.claim_staff_native_push(20)')).rows[0];
+ assert.equal(nativeClaim.platform,'ios');assert.equal(nativeClaim.message,'Nueva cita registrada');
+ assert.equal((await db.query('select public.staff_native_push_is_eligible($1,$2) ok',[nativeClaim.delivery_id,nativeClaim.token])).rows[0].ok,true);
+ await db.query('select public.settle_staff_native_push($1,$2,$3,$4)',[nativeClaim.delivery_id,nativeClaim.token,'sent',null]);
  await db.query('update public.appointments set service=$1 where id=$2',['Sensitive patient service',appointment]);
  assert.equal((await db.query('select count(*)::int n from public.staff_notifications')).rows[0].n,2);
  await db.query('update public.appointments set provider_id=$1 where id=$2',[nextProvider,appointment]);
@@ -108,6 +143,7 @@ test('PostgreSQL staff alerts enforce recipients, preferences, clinic isolation,
  assert.equal((await db.query("select count(*)::int n from private.staff_push_deliveries where state='failed'")).rows[0].n,2);
  await db.exec(`delete from public.clinic_memberships where clinic_id='${c}' and user_id='${r}'`);
  assert.equal((await db.query('select count(*)::int n from public.staff_push_subscriptions')).rows[0].n,0,'revoked membership removes subscriptions and queued deliveries');
+ assert.equal((await db.query('select count(*)::int n from public.staff_native_push_subscriptions')).rows[0].n,0,'revoked membership removes native tokens');
  await db.exec(`select set_config('request.jwt.claim.sub','${a}',false);
  insert into public.staff_notification_preferences(clinic_id,user_id,include_self,push_enabled) values('${c}','${a}',true,false);
  insert into public.staff_notification_preferences(clinic_id,user_id,new_appointment) values('${c}','${p}',false);`);

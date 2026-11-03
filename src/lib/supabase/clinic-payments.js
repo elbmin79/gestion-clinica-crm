@@ -1,4 +1,5 @@
-import { createClient } from './client';
+import { createClient } from './client.js';
+import { fetchAllPages } from './paged-query.js';
 
 const directionToDatabase = { Ingreso: 'income', Reembolso: 'refund' };
 const directionToUi = { income: 'Ingreso', refund: 'Reembolso' };
@@ -34,13 +35,27 @@ export function createClinicPaymentsStore() {
       const now = new Date();
       const from = new Date(now); from.setFullYear(from.getFullYear() - 1);
       const to = new Date(now); to.setFullYear(to.getFullYear() + 1);
+      const historySnapshot = new Date().toISOString();
+      const paymentRowsPromise = fetchAllPages(({ from: pageFrom, to: pageTo, includeCount }) => client.from('payments')
+        .select('id, patient_id, appointment_id, direction, amount, method, transaction_date, note, created_at', includeCount ? { count: 'exact' } : undefined)
+        .eq('clinic_id', clinicId)
+        .lte('created_at', historySnapshot)
+        .order('transaction_date', { ascending: false })
+        .order('created_at', { ascending: false })
+        .order('id', { ascending: false })
+        .range(pageFrom, pageTo))
+        .catch(cause => {
+          const error = new Error('No se pudo cargar el historial de pagos.');
+          error.code = cause?.code;
+          error.cause = cause;
+          throw error;
+        });
       const [patientResult, paymentResult] = await Promise.all([
         client.rpc('get_finance_patients', { target_clinic_id: clinicId }),
-        client.from('payments').select('id, patient_id, appointment_id, direction, amount, method, transaction_date, note, created_at').eq('clinic_id', clinicId).order('transaction_date', { ascending: false }).order('created_at', { ascending: false }),
+        paymentRowsPromise,
       ]);
       fail(patientResult, 'No se pudo cargar el directorio financiero.');
-      fail(paymentResult, 'No se pudo cargar el historial de pagos.');
-      const paymentRows = paymentResult.data || [];
+      const paymentRows = paymentResult;
       const appointmentIds = [...new Set(paymentRows.map(row => row.appointment_id).filter(Boolean))];
       const appointmentResult = await client.rpc('get_finance_appointments', {
         target_clinic_id: clinicId,

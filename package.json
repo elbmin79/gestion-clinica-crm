@@ -3,6 +3,10 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
     "dev": "next dev --hostname 127.0.0.1",
     "clinic:setup": "node scripts/prepare-clinic-setup.mjs",

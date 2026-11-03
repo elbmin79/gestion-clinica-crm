@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {issueBookingChallenge,verifyBookingChallenge,normalizePublicRequest,visitorRateKey,contactRateKey,readBookingBody} from './public-agenda-security.js';
+import {issueBookingChallenge,verifyBookingChallenge,normalizePublicRequest,visitorRateKey,contactRateKey,readBookingBody,publicAgendaAllowedOrigin,publicAgendaRequestOriginAllowed} from './public-agenda-security.js';
 const secret='test-secret-at-least-thirty-two-characters';
 const now=2000000000000;
 test('public request body limits apply to streamed bytes without trusting content-length',async()=>{
@@ -30,4 +30,15 @@ test('rate keys hide addresses and contacts and only trust operator-configured p
  const request=new Request('https://crm.test',{headers:{'x-forwarded-for':'spoofed','x-real-ip':'127.0.0.1'}});
  const a=visitorRateKey(request,'read:clinic',secret,{}),b=visitorRateKey(request,'read:clinic',secret,{PUBLIC_BOOKING_IP_HEADER:'x-real-ip'});
  assert.equal(a.length,64);assert.notEqual(a,b);assert.equal(contactRateKey('clinic','+526640000001',secret).length,64);
+});
+test('public agenda accepts only same-origin or explicitly configured mobile web origins',()=>{
+ const request=(origin,url='https://crm.test/api/public-agenda/demo')=>new Request(url,{headers:origin?{origin}:{}});
+ assert.equal(publicAgendaAllowedOrigin(request('https://crm.test')),'https://crm.test');
+ assert.equal(publicAgendaAllowedOrigin(request('http://localhost:8081'),{NODE_ENV:'development'}),'http://localhost:8081');
+ assert.equal(publicAgendaAllowedOrigin(request('https://mobile.test'),{NODE_ENV:'production',PUBLIC_BOOKING_ALLOWED_ORIGINS:'https://mobile.test'}),'https://mobile.test');
+ assert.equal(publicAgendaAllowedOrigin(request('https://other.test'),{NODE_ENV:'production',PUBLIC_BOOKING_ALLOWED_ORIGINS:'https://mobile.test'}),null);
+ assert.equal(publicAgendaAllowedOrigin(request('http://localhost:8081/path'),{NODE_ENV:'development'}),null);
+ assert.equal(publicAgendaAllowedOrigin(request(null)),null);
+ assert.equal(publicAgendaRequestOriginAllowed(request(null)),true);
+ assert.equal(publicAgendaRequestOriginAllowed(request('https://other.test'),{NODE_ENV:'production'}),false);
 });

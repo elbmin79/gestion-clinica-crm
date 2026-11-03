@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { authLinkDestination, invitationCallbackUrl, validateInvitationInput } from './clinic-invitations.js';
+import { authLinkDestination, invitationCallbackUrl, nativeInvitationCallbackUrl, validateInvitationInput } from './clinic-invitations.js';
 import { deliverClinicInvitation } from './clinic-invitation-delivery.js';
 import { permissionsForPreset } from './clinic-permissions.js';
 
@@ -17,6 +17,12 @@ test('invitation input validates email, role and permissions and normalizes emai
   assert.equal(url.pathname, '/auth/callback');
   assert.equal(url.searchParams.get('next'), `/accept-invite?id=${invitationId}`);
   assert.throws(() => invitationCallbackUrl('http://evil.example', invitationId));
+  const nativeUrl = new URL(nativeInvitationCallbackUrl(invitationId));
+  assert.equal(nativeUrl.protocol, 'elixirclinic:');
+  assert.equal(nativeUrl.host, 'auth');
+  assert.equal(nativeUrl.pathname, '/callback');
+  assert.equal(nativeUrl.searchParams.get('next'), `/accept-invite?id=${invitationId}`);
+  assert.throws(() => nativeInvitationCallbackUrl('not-an-id'));
 });
 
 test('invite and recovery links always lead to password setup or their invitation', () => {
@@ -50,6 +56,18 @@ test('new account invitation sends one email with onboarding redirect and never 
   assert.equal(new URL(call[2].redirectTo).searchParams.get('next'), `/accept-invite?id=${invitationId}`);
   assert.deepEqual(context.calls.at(-1), ['update',{ delivery_status: 'sent' }]);
   assert.equal(context.calls.some(([name]) => name === 'accept_clinic_invitation'), false);
+});
+
+test('mobile invitation emails use the native callback deep link', async () => {
+  const context = fakeContext();
+  const result = await deliverClinicInvitation({ input, context, origin: 'https://clinic.example', native: true });
+  assert.equal(result.ok, true);
+  const call = context.calls.find(([name]) => name === 'invite');
+  const callback = new URL(call[2].redirectTo);
+  assert.equal(callback.protocol, 'elixirclinic:');
+  assert.equal(callback.host, 'auth');
+  assert.equal(callback.pathname, '/callback');
+  assert.equal(callback.searchParams.get('next'), `/accept-invite?id=${invitationId}`);
 });
 
 test('existing confirmed account receives one sign-in email without replacing its password', async () => {

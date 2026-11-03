@@ -1,4 +1,7 @@
 import { createClient } from './client.js';
+import { agendaQueryRange, clinicDateTimeToIso, datePartsInZone, timePartsInZone } from '@elixir-clinic/crm-core/clinic-time';
+
+export { agendaQueryRange, clinicDateTimeToIso } from '@elixir-clinic/crm-core/clinic-time';
 
 const statusToDatabase = {
   'Por confirmar': 'pending',
@@ -8,69 +11,6 @@ const statusToDatabase = {
 };
 
 const statusToUi = Object.fromEntries(Object.entries(statusToDatabase).map(([ui, database]) => [database, ui]));
-
-function datePartsInZone(date, timeZone) {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).formatToParts(date);
-  const values = Object.fromEntries(parts.map(part => [part.type, part.value]));
-  return `${values.year}-${values.month}-${values.day}`;
-}
-
-function timePartsInZone(date, timeZone) {
-  const parts = new Intl.DateTimeFormat('en-GB', {
-    timeZone,
-    hour: '2-digit',
-    minute: '2-digit',
-    hourCycle: 'h23',
-  }).formatToParts(date);
-  const values = Object.fromEntries(parts.map(part => [part.type, part.value]));
-  return `${values.hour}:${values.minute}`;
-}
-
-export function clinicDateTimeToIso(date, time, timeZone) {
-  const [year, month, day] = date.split('-').map(Number);
-  const [hour, minute] = time.split(':').map(Number);
-  const desiredUtc = Date.UTC(year, month - 1, day, hour, minute, 0);
-  let candidate = desiredUtc;
-  for (let iteration = 0; iteration < 3; iteration += 1) {
-    const observedDate = datePartsInZone(new Date(candidate), timeZone);
-    const observedTime = timePartsInZone(new Date(candidate), timeZone);
-    const [observedYear, observedMonth, observedDay] = observedDate.split('-').map(Number);
-    const [observedHour, observedMinute] = observedTime.split(':').map(Number);
-    const observedUtc = Date.UTC(observedYear, observedMonth - 1, observedDay, observedHour, observedMinute, 0);
-    const difference = desiredUtc - observedUtc;
-    candidate += difference;
-    if (difference === 0) break;
-  }
-  return new Date(candidate).toISOString();
-}
-
-function rangeFor(date, period, timeZone) {
-  const selected = new Date(`${date}T12:00:00`);
-  let start = new Date(selected.getFullYear(), selected.getMonth(), selected.getDate(), 12);
-  let end = new Date(start);
-  if (period === 'Semana') {
-    const offsetFromMonday = (start.getDay() + 6) % 7;
-    start.setDate(start.getDate() - offsetFromMonday);
-    end = new Date(start); end.setDate(end.getDate() + 7);
-  } else if (period === 'Mes') {
-    start = new Date(selected.getFullYear(), selected.getMonth(), 1, 12);
-    end = new Date(selected.getFullYear(), selected.getMonth() + 1, 1, 12);
-  } else if (period === 'Año') {
-    start = new Date(selected.getFullYear(), 0, 1, 12);
-    end = new Date(selected.getFullYear() + 1, 0, 1, 12);
-  } else {
-    end.setDate(end.getDate() + 1);
-  }
-  return {
-    from: clinicDateTimeToIso(datePartsInZone(start, timeZone), '00:00', timeZone),
-    to: clinicDateTimeToIso(datePartsInZone(end, timeZone), '00:00', timeZone),
-  };
-}
 
 function durationLabel(start, end) {
   const minutes = Math.round((new Date(end).getTime() - new Date(start).getTime()) / 60000);
@@ -121,7 +61,7 @@ function throwDatabaseError(result, label) {
 }
 
 function notifyGoogleCalendarSync(clinicId) {
-  if (typeof window === 'undefined') return;
+  if (typeof window === 'undefined' || typeof document === 'undefined') return;
   void fetch('/api/integrations/google-calendar/sync', {
     method: 'POST',
     credentials: 'same-origin',
@@ -129,12 +69,6 @@ function notifyGoogleCalendarSync(clinicId) {
     body: JSON.stringify({ clinicId }),
     keepalive: true,
   }).catch(() => {});
-}
-
-export function agendaQueryRange(date, period, timeZone, listEnd) {
-  const range = rangeFor(date, period, timeZone);
-  if (period === 'Lista' && listEnd >= date) range.to = rangeFor(listEnd, 'Día', timeZone).to;
-  return range;
 }
 
 export function createClinicAgendaStore({ clientFactory = createClient } = {}) {
@@ -162,7 +96,7 @@ export function createClinicAgendaStore({ clientFactory = createClient } = {}) {
     },
 
     async create(clinicId, input, timeZone) {
-      const client = createClient();
+      const client = clientFactory();
       if (!client) throw new Error('La conexión con Supabase no está configurada.');
       const startsAt = clinicDateTimeToIso(input.date, input.time, timeZone);
       const result = await client.from('appointments').insert({
@@ -189,7 +123,7 @@ export function createClinicAgendaStore({ clientFactory = createClient } = {}) {
     },
 
     async update(clinicId, appointment, input, timeZone) {
-      const client = createClient();
+      const client = clientFactory();
       if (!client) throw new Error('La conexión con Supabase no está configurada.');
       const startsAt = clinicDateTimeToIso(input.date, input.time, timeZone);
       const durationMinutes = input.durationMinutes || Number.parseInt(appointment.duration, 10) || 45;
