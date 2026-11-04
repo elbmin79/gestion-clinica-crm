@@ -33,6 +33,7 @@ import ProfessionalEditor, { useProfessionalAccounts } from './professional-edit
 import NotificationCenter, { useNotificationFeed } from './notification-center';
 import PushSettings from './push-settings';
 import MobileInstallLink from './mobile-install-link';
+import MobileInstallReminder from './mobile-install-reminder';
 import PublicAgendaSettings from './public-agenda-settings';
 import { addDemoAppointmentAlert, unlinkPushOnSignOut } from '../lib/staff-notifications';
 import {
@@ -1559,6 +1560,7 @@ function App({ children }) {
     {modal==='new-contract-template' && <Modal title="Crear formato de contrato" subtitle="Agrega el texto oficial que proporcione y valide la clínica." close={closeContractTemplateCreation}><form className="form-stack" onSubmit={createContractTemplate}><label>Nombre del formato<input name="title" placeholder="Ej. Prestación de servicios" required autoFocus/></label><label>Tipo<select name="type"><option>Prestación de servicios</option><option>Plan de tratamiento</option><option>Otro</option></select></label><label>Contenido del contrato<textarea name="content" rows="10" placeholder="Pega el texto oficial revisado por la clínica." required/></label><div className="form-note"><ShieldCheck size={15}/> {sharedMode?'El formato se comparte con el equipo clínico y queda versionado.':'Se guarda localmente. La plantilla no añade ni valida cláusulas legales.'}</div><div className="modal-actions"><button type="button" className="button secondary" onClick={closeContractTemplateCreation}>Cancelar</button><button className="button primary" disabled={!can('documents.manage_templates')}><FilePlus2 size={15}/> Guardar formato</button></div></form></Modal>}
     {modal==='new-contract' && <NewContractModal sharedMode={sharedMode} canPrepare={can('documents.create')} close={closeContractPreparation} onSubmit={prepareContract} onReviewDiagnosis={patientId=>{const patient=patients.find(item=>item.id===patientId);if(patient){setSelectedPatient(patient);setModalReturn('new-contract');setModal('diagnosis')}}} onAddTemplate={()=>openContractTemplateCreation('new-contract')} patients={patients} templates={contractTemplatesForPage} defaultPatientId={contractDefaults.patientId} canManageTemplates={can('documents.manage_templates')}/>}
     {toast&&<div className="toast"><CheckCircle2 size={17}/>{toast}<button onClick={()=>setToast('')} aria-label="Cerrar"><X size={15}/></button></div>}
+    {userProfile.userId && <MobileInstallReminder />}
     {children}
   </div>;
 }
