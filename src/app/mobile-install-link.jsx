@@ -46,7 +46,7 @@ export default function MobileInstallLink() {
         {qr ? <>
           <img className="mobile-install-code" src={qr} width="240" height="240" alt="Código QR para instalar Elixir Clinic" />
           <div className="mobile-install-mark" aria-hidden="true">
-            <Image src="/elixirclinic-logo.png" alt="" width={42} height={35} />
+            <Image src="/elixirclinic-app-icon.webp" alt="" width={42} height={42} unoptimized />
           </div>
         </>
           : <span>{qrFailed ? 'Usa el enlace de abajo.' : 'Preparando código…'}</span>}
