@@ -8,7 +8,7 @@ test('publishes each platform’s own installer and build number', () => {
     CRM_ANDROID_BUILD: '12',
     CRM_IOS_INSTALL_URL: 'https://testflight.apple.com/join/example',
     CRM_IOS_BUILD: '9',
-  }), {
+  }, {}), {
     android: { url: 'https://downloads.example.org/elixir.apk', build: 12 },
     ios: { url: 'https://testflight.apple.com/join/example', build: 9 },
   });
@@ -16,7 +16,7 @@ test('publishes each platform’s own installer and build number', () => {
 
 test('suppresses update prompts when no safe installer is configured', () => {
   for (const url of [undefined, 'http://example.org/app.apk', 'https://user:pass@example.org/app.apk', 'javascript:alert(1)']) {
-    assert.deepEqual(getMobileReleases({ CRM_ANDROID_APK_URL: url, CRM_ANDROID_BUILD: '12' }), {
+    assert.deepEqual(getMobileReleases({ CRM_ANDROID_APK_URL: url, CRM_ANDROID_BUILD: '12' }, {}), {
       android: null,
       ios: null,
     });
@@ -28,7 +28,16 @@ test('allows first installs without advertising an invalid build number', () => 
     const { android } = getMobileReleases({
       CRM_ANDROID_APK_URL: 'https://downloads.example.org/elixir.apk',
       CRM_ANDROID_BUILD: build,
-    });
+    }, {});
     assert.deepEqual(android, { url: 'https://downloads.example.org/elixir.apk', build: null });
   }
+});
+
+test('uses the published release when no environment override is configured', () => {
+  const published = { android: { url: 'https://downloads.example.org/staff.apk', build: 2 } };
+  assert.deepEqual(getMobileReleases({}, published), { ...published, ios: null });
+  assert.deepEqual(getMobileReleases({
+    CRM_ANDROID_APK_URL: 'https://downloads.example.org/replacement.apk',
+    CRM_ANDROID_BUILD: '3',
+  }, published).android, { url: 'https://downloads.example.org/replacement.apk', build: 3 });
 });
