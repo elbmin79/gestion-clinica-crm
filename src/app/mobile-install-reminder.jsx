@@ -12,6 +12,7 @@ export default function MobileInstallReminder() {
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
+    if (navigator.standalone || window.matchMedia('(display-mode: standalone)').matches) return;
     try {
       if (sessionStorage.getItem(dismissalKey)) return;
     } catch {

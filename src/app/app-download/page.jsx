@@ -1,4 +1,5 @@
 import { headers } from 'next/headers';
+import Link from 'next/link';
 import { getMobileReleases } from '@/lib/mobile-release';
 
 export const metadata = { title: 'Instalar Elixir Clinic' };
@@ -23,7 +24,15 @@ export default async function AppDownloadPage() {
           const release = releases[platform];
           return <section key={platform}>
             <h2>{label}</h2>
-            {release ? <>
+            {platform === 'ios' && !release ? <>
+              <p>Agrega el CRM a la pantalla de inicio desde Safari.</p>
+              <ol>
+                <li>Abre el CRM en Safari.</li>
+                <li>Toca <strong>Compartir</strong> y elige <strong>Agregar a pantalla de inicio</strong>.</li>
+                <li>Si aparece <strong>Abrir como app web</strong>, actívalo y toca <strong>Agregar</strong>.</li>
+              </ol>
+              <Link className="button primary" href="/">Abrir CRM</Link>
+            </> : release ? <>
               <a className="button primary" href={release.url}>{action}</a>
               <p>{help}</p>
             </> : <p>La descarga todavía no está disponible.</p>}

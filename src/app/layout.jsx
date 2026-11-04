@@ -5,6 +5,7 @@ import RouteShell from "./route-shell";
 
 export const metadata = {
   title: "CRM clínico",
+  icons: { apple: "/elixirclinic-web-icon-192.png" },
   description:
     "Espacio de trabajo clínico para pacientes, documentos y agenda.",
 };

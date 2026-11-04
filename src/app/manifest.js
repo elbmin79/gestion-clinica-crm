@@ -1,1 +1,15 @@
-export default function manifest(){return {name:'CRM clínico',short_name:'CRM',start_url:'/',display:'standalone',background_color:'#f6f7f8',theme_color:'#376a57',icons:[{src:'/push-icon-192.png',sizes:'192x192',type:'image/png'},{src:'/push-icon-512.png',sizes:'512x512',type:'image/png'}]};}
+export default function manifest() {
+  return {
+    name: 'Elixir Clinic',
+    short_name: 'Elixir Clinic',
+    start_url: '/',
+    display: 'standalone',
+    background_color: '#f7f0f4',
+    theme_color: '#241c25',
+    icons: [192, 512].map(size => ({
+      src: `/elixirclinic-web-icon-${size}.png`,
+      sizes: `${size}x${size}`,
+      type: 'image/png',
+    })),
+  };
+}
