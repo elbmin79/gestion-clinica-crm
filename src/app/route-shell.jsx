@@ -16,7 +16,7 @@ export default function RouteShell({children}){
     setCheckedPath(pathname);
   }, [pathname]);
   // Auth and public booking must never mount the CRM's data hooks or shell.
-  const standalone = pathname.startsWith('/reservar/') || ['/login','/forgot-password','/update-password','/auth/callback','/accept-invite','/setup'].includes(pathname);
+  const standalone = pathname.startsWith('/reservar/') || ['/app-download','/login','/forgot-password','/update-password','/auth/callback','/accept-invite','/setup'].includes(pathname);
   if (standalone) return <>{children}</>;
   if (checkedPath !== pathname) return null;
   return <App>{children}</App>;

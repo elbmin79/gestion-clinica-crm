@@ -3,8 +3,9 @@ import { NextResponse } from 'next/server';
 import { getSupabaseConfig } from './lib/supabase/config';
 
 export async function proxy(request) {
-  const config = getSupabaseConfig();
   const pathname = request.nextUrl.pathname;
+  if (pathname === '/app-download' || pathname === '/api/mobile/release') return NextResponse.next({ request });
+  const config = getSupabaseConfig();
   const isLoginRoute = pathname === '/login';
   const isForgotPasswordRoute = pathname === '/forgot-password';
   const isAuthCallbackRoute = pathname === '/auth/callback';

@@ -1,0 +1,83 @@
+.modal.mobile-install-modal {
+  width: min(550px, 100%);
+  padding: clamp(18px, 5vw, 30px);
+  padding-bottom: clamp(18px, 4vw, 24px);
+  border-radius: 22px;
+  background: var(--paper);
+  border-color: var(--line);
+}
+
+.mobile-install-modal .modal-heading { gap: 12px; margin-bottom: 22px; }
+.mobile-install-modal .modal-heading h2 { font-size: clamp(22px, 5vw, 28px); color: var(--ink); }
+.mobile-install-modal .modal-heading p { line-height: 1.5; }
+
+.mobile-install-scan {
+  display: grid;
+  grid-template-columns: minmax(0, 240px) minmax(0, 1fr);
+  align-items: center;
+  gap: clamp(16px, 5vw, 28px);
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--green-soft) 56%, var(--paper));
+}
+
+.mobile-install-qr {
+  position: relative;
+  display: grid;
+  place-items: center;
+  aspect-ratio: 1;
+  width: min(100%, 240px);
+  overflow: hidden;
+  border-radius: 12px;
+  background: #fff;
+  color: #443740;
+  text-align: center;
+  font-size: 13px;
+}
+
+.mobile-install-code { display: block; width: 100%; height: auto; image-rendering: pixelated; }
+.mobile-install-mark {
+  position: absolute;
+  inset: 50% auto auto 50%;
+  transform: translate(-50%, -50%);
+  display: grid;
+  place-items: center;
+  width: 21%;
+  aspect-ratio: 1;
+  border-radius: 24%;
+  background: #fff;
+}
+.mobile-install-mark img { width: 84%; height: auto; }
+.mobile-install-guide { display: grid; justify-items: start; gap: 6px; }
+.mobile-install-guide svg { color: var(--green); margin-bottom: 6px; }
+.mobile-install-guide strong { color: var(--ink); font-size: 17px; line-height: 1.25; }
+.mobile-install-guide span { color: var(--muted); font-size: 13px; line-height: 1.45; }
+
+.mobile-install-share { margin-top: 12px; }
+.mobile-install-share-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0 8px; font-size: 13px; }
+.mobile-install-share-heading label { color: var(--ink); font-weight: 700; }
+.mobile-install-share-heading a { display: inline-flex; align-items: center; gap: 4px; min-height: 44px; color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
+.mobile-install-controls { display: grid; grid-template-columns: minmax(0, 1fr) 144px; gap: 8px; }
+.mobile-install-controls input {
+  min-width: 0;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--canvas);
+  color: var(--ink);
+  font-size: 13px;
+  text-overflow: ellipsis;
+}
+.mobile-install-controls .button { min-height: 44px; justify-content: center; padding-inline: 10px; border-radius: 9px; white-space: nowrap; }
+.mobile-install-status { display: block; color: var(--muted); font-size: 13px; }
+.mobile-install-status:not(:empty) { margin-top: 8px; }
+.mobile-install :focus-visible { outline: 2px solid var(--green); outline-offset: 3px; }
+
+@media (max-width: 500px) {
+  .mobile-install-scan { grid-template-columns: minmax(0, 1fr); justify-items: center; gap: 12px; }
+  .mobile-install-guide { justify-items: center; text-align: center; }
+  .mobile-install-guide svg { display: none; }
+  .mobile-install-controls { grid-template-columns: minmax(0, 1fr); }
+}
