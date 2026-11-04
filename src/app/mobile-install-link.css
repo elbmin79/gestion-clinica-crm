@@ -45,10 +45,11 @@
   place-items: center;
   width: 21%;
   aspect-ratio: 1;
+  overflow: hidden;
   border-radius: 24%;
   background: #fff;
 }
-.mobile-install-mark img { width: 84%; height: auto; }
+.mobile-install-mark img { position: absolute; width: 112%; max-width: none; height: auto; }
 .mobile-install-guide { display: grid; justify-items: start; gap: 6px; }
 .mobile-install-guide svg { color: var(--green); margin-bottom: 6px; }
 .mobile-install-guide strong { color: var(--ink); font-size: 17px; line-height: 1.25; }
