@@ -1,5 +1,5 @@
 import * as SplashScreen from 'expo-splash-screen';
-import { Stack, useRouter } from 'expo-router';
+import { DarkTheme, DefaultTheme, Stack, ThemeProvider, useRouter } from 'expo-router';
 import { useFonts } from 'expo-font';
 import { useEffect } from 'react';
 import * as Notifications from 'expo-notifications';
@@ -11,6 +11,7 @@ import { AuthProvider, useAuth } from '@/providers/auth-provider';
 import { ClinicWorkspaceProvider } from '@/providers/clinic-workspace-provider';
 import { CrmThemeProvider, useCrmTheme } from '@/providers/crm-theme-provider';
 import { nativeNotificationRoute } from '@/lib/native-push';
+import { useReleaseUpdates } from '@/lib/release-updates';
 
 void SplashScreen.preventAutoHideAsync();
 if (Platform.OS === 'ios' || Platform.OS === 'android') Notifications.setNotificationHandler({
@@ -27,7 +28,8 @@ function Navigation() {
     'Nunito-ExtraBold': require('../../assets/fonts/Nunito-ExtraBold.ttf'),
   });
   const { loading } = useAuth();
-  const { theme, ready: themeReady } = useCrmTheme();
+  const { theme, palette, ready: themeReady } = useCrmTheme();
+  useReleaseUpdates(!loading && themeReady && fontsLoaded);
   useEffect(() => {
     if (Platform.OS !== 'ios' && Platform.OS !== 'android') return;
     let handled = '';
@@ -46,8 +48,13 @@ function Navigation() {
     if (!loading && themeReady && fontsLoaded) void SplashScreen.hideAsync();
   }, [fontsLoaded, loading, themeReady]);
   if (loading || !themeReady || !fontsLoaded) return null;
+  const baseTheme = theme === 'dark' ? DarkTheme : DefaultTheme;
+  const navigationTheme = {
+    ...baseTheme,
+    colors: { ...baseTheme.colors, background: palette.background, card: palette.background },
+  };
   return (
-    <>
+    <ThemeProvider value={navigationTheme}>
       <StatusBar style={theme === 'dark' ? 'light' : 'dark'} />
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="index" />
@@ -67,12 +74,15 @@ function Navigation() {
         <Stack.Screen name="notifications" options={{ presentation: 'card' }} />
         <Stack.Screen name="reminders" options={{ presentation: 'card' }} />
         <Stack.Screen name="team" options={{ presentation: 'card' }} />
-        <Stack.Screen name="profile" options={{ presentation: 'card' }} />
+        <Stack.Screen name="profile" options={{
+          presentation: 'card',
+          animation: Platform.OS === 'android' ? 'ios_from_right' : 'slide_from_right',
+        }} />
         <Stack.Screen name="public-agenda" options={{ presentation: 'card' }} />
         <Stack.Screen name="reservar/[slug]" options={{ presentation: 'card' }} />
         <Stack.Screen name="(tabs)" />
       </Stack>
-    </>
+    </ThemeProvider>
   );
 }
 

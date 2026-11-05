@@ -2,6 +2,7 @@
 node_modules/
 dist/
 .playwright-mcp/
+/.codex-attachments/
 .rea-brave-profile/
 .rea-edge-profile/
 .env*

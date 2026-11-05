@@ -1,28 +1,29 @@
+import { ThemeToggle } from '@/components/theme-toggle';
+import { Image } from 'expo-image';
 import { Redirect } from 'expo-router';
 import { useState } from 'react';
 import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { CrmText as Text, CrmTextInput as TextInput } from '@/components/crm-text';
 
-import { useCrmColorScheme as useColorScheme } from '@/providers/crm-theme-provider';
+import { useCrmTheme } from '@/providers/crm-theme-provider';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { Colors } from '@/constants/theme';
 import { useCrmRouter } from '@/lib/use-crm-router';
 import { useAuth } from '@/providers/auth-provider';
 import { useClinicWorkspace } from '@/providers/clinic-workspace-provider';
 
-function Brand({ color }: { color: string }) {
-  return (
-    <View style={styles.brandRow}>
-      <View style={[styles.brandMark, { backgroundColor: color }]}><Text style={styles.brandLetter}>E</Text></View>
-      <View><Text style={styles.brandName}>elixir</Text><Text style={styles.brandSub}>CLINIC</Text></View>
-    </View>
-  );
+const brandLogos = {
+  light: require('../../../../public/elixirclinic-logo.png'),
+  dark: require('../../../../public/elixirclinic-logo-dark.png'),
+};
+
+function Brand({ dark }: { dark: boolean }) {
+  return <Image source={dark ? brandLogos.dark : brandLogos.light} contentFit="contain"
+    accessibilityLabel="Elixir Clinic" accessible style={styles.brandLogo} />;
 }
 
 export default function IndexScreen() {
-  const scheme = useColorScheme();
-  const palette = Colors[scheme === 'dark' ? 'dark' : 'light'];
+  const { theme: scheme, palette, toggleTheme } = useCrmTheme();
   const router = useCrmRouter();
   const { session, loading: authLoading, configured, signIn, signOut } = useAuth();
   const { memberships, clinic, loading: workspaceLoading, error: workspaceError, chooseClinic, refresh } = useClinicWorkspace();
@@ -40,7 +41,7 @@ export default function IndexScreen() {
     return (
       <SafeAreaView style={[styles.page, { backgroundColor: palette.background }]}>
         <ScrollView contentContainerStyle={styles.selectPage}>
-          <Brand color={palette.primary} />
+          <Brand dark={scheme === 'dark'} />
           <Text style={[styles.heading, { color: palette.text }]}>Elige tu clínica</Text>
           <Text style={[styles.body, { color: palette.textSecondary }]}>Selecciona el espacio al que quieres entrar.</Text>
           <View style={styles.membershipList}>
@@ -62,7 +63,7 @@ export default function IndexScreen() {
     return (
       <SafeAreaView style={[styles.page, { backgroundColor: palette.background }]}>
         <View style={styles.selectPage}>
-          <Brand color={palette.primary} />
+          <Brand dark={scheme === 'dark'} />
           <Text style={[styles.heading, { color: palette.text }]}>No hay una clínica asignada</Text>
           <Text style={[styles.body, { color: palette.textSecondary }]}>{workspaceError || 'Pide a una persona administradora que te invite al equipo de la clínica.'}</Text>
           {!!workspaceError && <Pressable onPress={refresh}><Text style={[styles.textButton, { color: palette.primary }]}>Intentar de nuevo</Text></Pressable>}
@@ -83,10 +84,11 @@ export default function IndexScreen() {
     <SafeAreaView style={[styles.page, { backgroundColor: palette.background }]}>
       <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ScrollView contentContainerStyle={styles.loginPage} keyboardShouldPersistTaps="handled">
-          <Brand color={palette.primary} />
+          <ThemeToggle dark={scheme === 'dark'} onPress={toggleTheme} />
+          <Brand dark={scheme === 'dark'} />
           <View style={styles.loginIntro}>
-            <Text style={[styles.heading, { color: palette.text }]}>Tu clínica, en un solo lugar.</Text>
-            <Text style={[styles.body, { color: palette.textSecondary }]}>Inicia sesión para ver la agenda y los expedientes de tu equipo.</Text>
+            <Text style={[styles.heading, { color: palette.text }]}>Inicia sesión</Text>
+            <Text style={[styles.body, { color: palette.textSecondary }]}>Ingresa tus credenciales para continuar.</Text>
           </View>
           <View style={styles.form}>
             {!configured && <View style={[styles.message, { backgroundColor: palette.primarySoft }]}><Text style={[styles.messageText, { color: palette.text }]}>Falta configurar la conexión de la clínica para esta app.</Text></View>}
@@ -97,7 +99,7 @@ export default function IndexScreen() {
             <TextInput value={password} onChangeText={setPassword} placeholder="Tu contraseña" placeholderTextColor={palette.textSecondary} autoCapitalize="none" autoComplete="current-password" textContentType="password" secureTextEntry returnKeyType="go" onSubmitEditing={() => void submit()} accessibilityLabel="Contraseña" style={[styles.input, { backgroundColor: palette.backgroundElement, borderColor: palette.line, color: palette.text }]} />
             <Pressable accessibilityRole="button" onPress={() => router.push('/forgot-password')} style={styles.forgot}><Text style={[styles.textButton, { color: palette.primary }]}>¿Olvidaste tu contraseña?</Text></Pressable>
             <Pressable accessibilityRole="button" disabled={!configured || busy || !email.trim() || !password} onPress={() => void submit()} style={({ pressed }) => [styles.primaryButton, { backgroundColor: palette.primary, opacity: !configured || busy || !email.trim() || !password ? 0.55 : pressed ? 0.82 : 1 }]}>
-              {busy ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.primaryButtonText}>Iniciar sesión</Text>}
+              {busy ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.primaryButtonText}>Entrar a Elixir Clinic</Text>}
             </Pressable>
           </View>
           <Text style={[styles.footer, { color: palette.textSecondary }]}>Acceso seguro al espacio de trabajo de tu clínica.</Text>
@@ -113,11 +115,7 @@ const styles = StyleSheet.create({
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   loginPage: { flexGrow: 1, width: '100%', maxWidth: 520, alignSelf: 'center', paddingHorizontal: 26, paddingTop: 30, paddingBottom: 26 },
   selectPage: { flexGrow: 1, width: '100%', maxWidth: 520, alignSelf: 'center', paddingHorizontal: 26, paddingTop: 30, gap: 18 },
-  brandRow: { flexDirection: 'row', alignItems: 'center', gap: 11, marginBottom: 58 },
-  brandMark: { width: 42, height: 42, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
-  brandLetter: { color: '#FFFFFF', fontSize: 23, fontWeight: '800' },
-  brandName: { color: '#253C34', fontSize: 24, fontWeight: '800', letterSpacing: -0.8, lineHeight: 26 },
-  brandSub: { color: '#96A09C', fontSize: 9, fontWeight: '800', letterSpacing: 2.2 },
+  brandLogo: { width: 180, height: 150, alignSelf: 'center', marginBottom: 20 },
   loginIntro: { gap: 9, marginBottom: 31 },
   heading: { fontSize: 30, lineHeight: 36, fontWeight: '700', letterSpacing: -0.7 },
   body: { fontSize: 16, lineHeight: 23 },

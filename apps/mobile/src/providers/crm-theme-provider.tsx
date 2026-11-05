@@ -1,6 +1,6 @@
 import * as SecureStore from 'expo-secure-store';
 import type { PropsWithChildren } from 'react';
-import { Platform } from 'react-native';
+import { Platform, useColorScheme } from 'react-native';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 
 import { Colors, type AppPalette } from '@/constants/theme';
@@ -11,7 +11,9 @@ const ThemeContext = createContext<ThemeValue | null>(null);
 const THEME_KEY = 'crm-theme-v1';
 
 export function CrmThemeProvider({ children }: PropsWithChildren) {
-  const [theme, setThemeState] = useState<CrmTheme>('light');
+  const systemTheme = useColorScheme();
+  const [preferredTheme, setThemeState] = useState<CrmTheme | null>(null);
+  const theme = preferredTheme ?? (systemTheme === 'dark' ? 'dark' : 'light');
   const [ready, setReady] = useState(false);
 
   useEffect(() => {

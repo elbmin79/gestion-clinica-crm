@@ -20,8 +20,18 @@ import { hasClinicPermission } from '@elixir-clinic/crm-core/permissions';
 import { isWhatsAppReplyWindowOpen } from '../../../../src/lib/whatsapp/reply-window.js';
 import { deleteWhatsAppConversation, loadWhatsAppInbox, loadWhatsAppMediaUrl, sendWhatsAppAttachment, sendWhatsAppText, setWhatsAppConversationBlocked, type WhatsAppConversation, type WhatsAppMessage } from '@/lib/whatsapp-api';
 
+// Light conversation colors from the web WhatsApp inbox.
+const lightConversation = {
+  canvas: '#e7dbe3', surface: '#fff9fc', divider: '#b9a4b1',
+  inbound: '#f9f0f4', inboundBorder: '#b8a1ae',
+  outbound: '#d7adbf', outboundBorder: '#ad8296',
+  text: '#342832', secondary: '#62525d', outboundSecondary: '#51404c',
+  accent: '#8e526e', read: '#2376aa', failed: '#ac493f',
+};
+
 export default function WhatsAppScreen() {
-  const palette = Colors[useCrmColorScheme()];
+  const theme = useCrmColorScheme();
+  const palette = Colors[theme];
   const { width: viewportWidth, height: viewportHeight } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const router = useRouter();
@@ -202,21 +212,21 @@ export default function WhatsAppScreen() {
   if (!session || !clinic) return <Redirect href="/" />;
   if (!canView) return <Redirect href="/(tabs)/more" />;
 
-  return <SafeAreaView edges={['top', 'bottom']} style={[styles.page, { backgroundColor: palette.background }]}>
+  return <SafeAreaView edges={['top', 'bottom']} style={[styles.page, { backgroundColor: selected && theme === 'light' ? lightConversation.canvas : palette.background }]}>
     <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <View style={[styles.content, selected ? styles.threadContent : null]}>
         {selected ? <>
-          <View style={[styles.threadHeader, { borderBottomColor: palette.line }]}>
+          <View style={[styles.threadHeader, theme === 'light' ? { backgroundColor: lightConversation.surface, borderBottomColor: lightConversation.divider } : { borderBottomColor: palette.line }]}>
             <Pressable accessibilityRole="button" accessibilityLabel="Volver a conversaciones" onPress={() => router.back()} style={styles.backButton}><SymbolView name={{ ios: 'arrow.left', android: 'arrow_back', web: 'arrow_back' }} tintColor={palette.text} size={21} /></Pressable>
             <View style={styles.threadHeading}><Text numberOfLines={1} style={[styles.title, { color: palette.text }]}>{selected.contact_name || selected.contact_phone}</Text><Text numberOfLines={1} style={[styles.subtitle, { color: palette.textSecondary }]}>{selected.contact_name ? selected.contact_phone : 'WhatsApp'}</Text></View>
             {canManage ? <Pressable accessibilityRole="button" accessibilityLabel="Acciones de la conversación" accessibilityState={{ expanded: actionsOpen }} onPress={() => setActionsOpen(true)} style={styles.headerAction}><SymbolView name={{ ios: 'ellipsis', android: 'more_vert', web: 'more_vert' }} tintColor={palette.text} size={23} /></Pressable> : null}
           </View>
           {idleNoticeVisible ? <View accessibilityRole="alert" style={[styles.idleNotice, { backgroundColor: palette.backgroundElement }]}><View style={styles.idleNoticeCopy}><Text style={[styles.idleNoticeTitle, { color: palette.text }]}>{selected.blocked_at ? 'Contacto bloqueado' : windowOpen ? `Puedes responder hasta ${formatTime(new Date(Date.parse(selected.last_inbound_at!) + 24 * 60 * 60 * 1000).toISOString())}` : 'Ventana de respuesta cerrada'}</Text><Text style={[styles.idleNoticeBody, { color: palette.textSecondary }]}>{selected.blocked_at ? 'No puedes enviar mensajes desde la clínica.' : windowOpen ? 'Ha pasado más de 1 hora desde el último mensaje. La ventana de WhatsApp sigue abierta.' : 'Para responder, espera a que el contacto envíe un nuevo mensaje.'}</Text></View><Pressable accessibilityRole="button" accessibilityLabel="Cerrar aviso de WhatsApp" onPress={() => setIdleNoticeVisible(false)} style={styles.idleNoticeClose}><SymbolView name={{ ios: 'xmark', android: 'close', web: 'close' }} tintColor={palette.textSecondary} size={16} /></Pressable></View> : null}
           <ScrollView ref={historyRef} style={styles.history} contentContainerStyle={styles.messageList} keyboardShouldPersistTaps="handled">
-            {messages.length ? messages.map(message => <MessageBubble key={message.id} message={message} clinicId={clinic.clinicId} conversationId={selected.id} palette={palette} downloadingMedia={downloadingMedia} onDownloadMedia={(uri, filename, mimeType) => void downloadMediaFile(uri, filename, mimeType)} onExpandImage={(uri, filename, mimeType, origin) => { imageTransitionProgress.setValue(0); setExpandedImage({ uri, filename, mimeType, origin }); }} />) : loading ? <View style={styles.emptyHistory}><ActivityIndicator color={palette.primary} /><Text style={[styles.emptyCopy, { color: palette.textSecondary }]}>Cargando mensajes…</Text></View> : <View style={styles.emptyHistory}><Text style={[styles.emptyCopy, { color: palette.textSecondary }]}>Esta conversación aún no tiene mensajes guardados.</Text></View>}
+            {messages.length ? messages.map(message => <MessageBubble key={message.id} message={message} clinicId={clinic.clinicId} conversationId={selected.id} palette={theme === 'light' ? lightMessagePalette : palette} light={theme === 'light'} downloadingMedia={downloadingMedia} onDownloadMedia={(uri, filename, mimeType) => void downloadMediaFile(uri, filename, mimeType)} onExpandImage={(uri, filename, mimeType, origin) => { imageTransitionProgress.setValue(0); setExpandedImage({ uri, filename, mimeType, origin }); }} />) : loading ? <View style={styles.emptyHistory}><ActivityIndicator color={palette.primary} /><Text style={[styles.emptyCopy, { color: palette.textSecondary }]}>Cargando mensajes…</Text></View> : <View style={styles.emptyHistory}><Text style={[styles.emptyCopy, { color: palette.textSecondary }]}>Esta conversación aún no tiene mensajes guardados.</Text></View>}
           </ScrollView>
           {error ? <Text accessibilityRole="alert" style={[styles.error, { color: palette.danger }]}>{error}</Text> : notice ? <Text accessibilityRole="status" style={[styles.notice, { color: palette.primary }]}>{notice}</Text> : null}
-          {canReply && windowOpen && !selected.blocked_at ? (writing ? <View style={styles.composer}>
+          {canReply && windowOpen && !selected.blocked_at ? (writing ? <View style={[styles.composer, theme === 'light' && { backgroundColor: lightConversation.surface, borderTopColor: lightConversation.divider }]}>
             {attachment ? <View style={[styles.attachmentChip, { backgroundColor: palette.primarySoft }]}><SymbolView name={{ ios: 'paperclip', android: 'attach_file', web: 'attach_file' }} tintColor={palette.primary} size={15} /><View style={styles.attachmentCopy}><Text numberOfLines={1} style={[styles.attachmentName, { color: palette.text }]}>{attachment.name}</Text><Text style={[styles.attachmentSize, { color: palette.textSecondary }]}>{formatFileSize(attachment.size)}</Text></View><Pressable accessibilityRole="button" accessibilityLabel="Quitar archivo adjunto" onPress={() => setAttachment(null)} style={styles.removeAttachment}><SymbolView name={{ ios: 'xmark', android: 'close', web: 'close' }} tintColor={palette.textSecondary} size={16} /></Pressable></View> : null}
             <View style={styles.composerRow}>
               <Pressable accessibilityRole="button" accessibilityLabel="Adjuntar imagen, video o audio" disabled={sending} onPress={() => void pickAttachment()} style={[styles.attachButton, { opacity: sending ? 0.48 : 1 }]}><SymbolView name={{ ios: 'paperclip', android: 'attach_file', web: 'attach_file' }} tintColor={palette.textSecondary} size={21} /></Pressable>
@@ -277,7 +287,7 @@ export default function WhatsAppScreen() {
             opacity: imageTransitionProgress.interpolate({ inputRange: [0, 0.88, 0.99, 1], outputRange: [1, 1, 0, 0] }),
           }]}>
             <View style={{ height: insets.top }} />
-            <View style={[styles.threadHeader, { borderBottomColor: palette.line }]}>
+            <View style={[styles.threadHeader, theme === 'light' ? { backgroundColor: lightConversation.surface, borderBottomColor: lightConversation.divider } : { borderBottomColor: palette.line }]}>
               <View style={styles.backButton}><SymbolView name={{ ios: 'arrow.left', android: 'arrow_back', web: 'arrow_back' }} tintColor={palette.text} size={21} /></View>
               <View style={styles.threadHeading}><Text numberOfLines={1} style={[styles.title, { color: palette.text }]}>{selected?.contact_name || selected?.contact_phone}</Text><Text numberOfLines={1} style={[styles.subtitle, { color: palette.textSecondary }]}>{selected?.contact_name ? selected.contact_phone : 'WhatsApp'}</Text></View>
               {canManage ? <View style={styles.headerAction}><SymbolView name={{ ios: 'ellipsis', android: 'more_vert', web: 'more_vert' }} tintColor={palette.text} size={23} /></View> : null}
@@ -296,7 +306,7 @@ export default function WhatsAppScreen() {
   </SafeAreaView>;
 }
 
-function ConversationRow({ conversation, palette, onPress }: { conversation: WhatsAppConversation; palette: (typeof Colors)[keyof typeof Colors]; onPress: () => void }) {
+function ConversationRow({ conversation, palette, onPress }: { conversation: WhatsAppConversation; palette: Record<keyof typeof Colors.light, string>; onPress: () => void }) {
   const latest = Array.isArray(conversation.latest_message) ? conversation.latest_message[0] : conversation.latest_message;
   const preview = latest?.body?.trim() || mediaLabel(latest?.media_content_type) || 'Sin mensajes';
   return <Pressable accessibilityRole="button" accessibilityLabel={`Abrir conversación con ${conversation.contact_name || conversation.contact_phone}`} onPress={onPress} style={({ pressed }) => [styles.conversationRow, { backgroundColor: pressed ? palette.backgroundSelected : palette.backgroundElement, borderColor: palette.line }]}>
@@ -308,19 +318,30 @@ function ConversationRow({ conversation, palette, onPress }: { conversation: Wha
 
 type ImageFrame = { x: number; y: number; width: number; height: number };
 
-function MessageBubble({ message, clinicId, conversationId, palette, onExpandImage, onDownloadMedia, downloadingMedia }: { message: WhatsAppMessage; clinicId: string; conversationId: string; palette: (typeof Colors)[keyof typeof Colors]; onExpandImage: (uri: string, filename: string, mimeType: string, origin: ImageFrame) => void; onDownloadMedia: (uri: string, filename: string, mimeType: string) => void; downloadingMedia: boolean }) {
+const lightMessagePalette = {
+  ...Colors.light, text: lightConversation.text, textSecondary: lightConversation.secondary,
+  primary: lightConversation.accent, danger: lightConversation.failed, line: lightConversation.inboundBorder,
+};
+
+function MessageBubble({ message, clinicId, conversationId, palette, light, onExpandImage, onDownloadMedia, downloadingMedia }: { light: boolean; message: WhatsAppMessage; clinicId: string; conversationId: string; palette: Record<keyof typeof Colors.light, string>; onExpandImage: (uri: string, filename: string, mimeType: string, origin: ImageFrame) => void; onDownloadMedia: (uri: string, filename: string, mimeType: string) => void; downloadingMedia: boolean }) {
   const outgoing = message.direction === 'outbound';
   const hasBody = Boolean(message.body?.trim());
   const delivery = outgoing ? deliveryMark(message.delivery_status) : null;
+  const metadataColor = light && outgoing ? lightConversation.outboundSecondary : palette.textSecondary;
+  const readColor = light ? lightConversation.read : palette.primary;
   return <View style={[styles.messageRow, outgoing ? styles.outgoingRow : styles.incomingRow]}>
-    <View style={[styles.bubble, message.media_content_type?.startsWith('audio/') ? styles.audioBubble : null, { backgroundColor: outgoing ? palette.primarySoft : palette.backgroundElement }]}>
+    <View style={[styles.bubble, message.media_content_type?.startsWith('audio/') ? styles.audioBubble : null, light ? {
+      backgroundColor: outgoing ? lightConversation.outbound : lightConversation.inbound,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: outgoing ? lightConversation.outboundBorder : lightConversation.inboundBorder,
+    } : { backgroundColor: outgoing ? palette.primarySoft : palette.backgroundElement }]}>
       {message.media_content_type ? <MediaAttachment message={message} clinicId={clinicId} conversationId={conversationId} palette={palette} outgoing={outgoing} onExpandImage={onExpandImage} onDownloadMedia={onDownloadMedia} downloading={downloadingMedia} /> : null}
-      {hasBody ? <Text style={[styles.messageBody, { color: palette.text }]}>{message.body}<Text style={[styles.inlineMessageMeta, { color: palette.textSecondary }]}>  {formatTime(message.created_at)}{delivery ? <Text style={[styles.deliveryMarkText, { color: delivery.color === 'danger' ? palette.danger : delivery.color === 'read' ? palette.primary : palette.textSecondary }]}>  {delivery.mark}</Text> : null}</Text></Text> : <View style={styles.messageFooter}><Text style={[styles.messageTime, { color: palette.textSecondary }]}>{formatTime(message.created_at)}</Text>{delivery ? <Text style={[styles.deliveryMarkText, { color: delivery.color === 'danger' ? palette.danger : delivery.color === 'read' ? palette.primary : palette.textSecondary }]}>{delivery.mark}</Text> : null}</View>}
+      {hasBody ? <Text style={[styles.messageBody, { color: palette.text }]}>{message.body}<Text style={[styles.inlineMessageMeta, { color: metadataColor }]}>  {formatTime(message.created_at)}{delivery ? <Text style={[styles.deliveryMarkText, { color: delivery.color === 'danger' ? palette.danger : delivery.color === 'read' ? readColor : metadataColor }]}>  {delivery.mark}</Text> : null}</Text></Text> : <View style={styles.messageFooter}><Text style={[styles.messageTime, { color: metadataColor }]}>{formatTime(message.created_at)}</Text>{delivery ? <Text style={[styles.deliveryMarkText, { color: delivery.color === 'danger' ? palette.danger : delivery.color === 'read' ? readColor : metadataColor }]}>{delivery.mark}</Text> : null}</View>}
     </View>
   </View>;
 }
 
-function MediaAttachment({ message, clinicId, conversationId, palette, outgoing, onExpandImage, onDownloadMedia, downloading }: { message: WhatsAppMessage; clinicId: string; conversationId: string; palette: (typeof Colors)[keyof typeof Colors]; outgoing: boolean; onExpandImage: (uri: string, filename: string, mimeType: string, origin: ImageFrame) => void; onDownloadMedia: (uri: string, filename: string, mimeType: string) => void; downloading: boolean }) {
+function MediaAttachment({ message, clinicId, conversationId, palette, outgoing, onExpandImage, onDownloadMedia, downloading }: { message: WhatsAppMessage; clinicId: string; conversationId: string; palette: Record<keyof typeof Colors.light, string>; outgoing: boolean; onExpandImage: (uri: string, filename: string, mimeType: string, origin: ImageFrame) => void; onDownloadMedia: (uri: string, filename: string, mimeType: string) => void; downloading: boolean }) {
   const type = message.media_content_type || '';
   const isImage = type.startsWith('image/');
   const isAudio = type.startsWith('audio/');
@@ -379,7 +400,7 @@ function MediaAttachment({ message, clinicId, conversationId, palette, outgoing,
   return isAudio ? <AudioAttachmentPlayer uri={mediaUrl} palette={palette} onRetry={retry} onDownload={() => onDownloadMedia(mediaUrl, message.media_filename || 'audio', type)} downloading={downloading} /> : <VideoAttachmentPlayer uri={mediaUrl} palette={palette} onRetry={retry} />;
 }
 
-function AudioAttachmentPlayer({ uri, palette, onRetry, onDownload, downloading }: { uri: string; palette: (typeof Colors)[keyof typeof Colors]; onRetry: () => void; onDownload: () => void; downloading: boolean }) {
+function AudioAttachmentPlayer({ uri, palette, onRetry, onDownload, downloading }: { uri: string; palette: Record<keyof typeof Colors.light, string>; onRetry: () => void; onDownload: () => void; downloading: boolean }) {
   const player = useAudioPlayer(uri, { updateInterval: 500 });
   const status = useAudioPlayerStatus(player);
   const progress = status.duration > 0 ? Math.min(100, (status.currentTime / status.duration) * 100) : 0;
@@ -405,14 +426,14 @@ function AudioAttachmentPlayer({ uri, palette, onRetry, onDownload, downloading 
   </View>;
 }
 
-function VideoAttachmentPlayer({ uri, palette, onRetry }: { uri: string; palette: (typeof Colors)[keyof typeof Colors]; onRetry: () => void }) {
+function VideoAttachmentPlayer({ uri, palette, onRetry }: { uri: string; palette: Record<keyof typeof Colors.light, string>; onRetry: () => void }) {
   const player = useVideoPlayer(uri);
   const { status } = useEvent(player, 'statusChange', { status: player.status });
   if (status === 'error') return <MediaRetry label="No se pudo reproducir este video." onRetry={onRetry} palette={palette} />;
   return <VideoView accessibilityLabel="Video compartido por WhatsApp" contentFit="contain" nativeControls playsInline player={player} style={[styles.mediaVideo, { backgroundColor: palette.backgroundElement }]} />;
 }
 
-function MediaRetry({ label, onRetry, palette }: { label: string; onRetry: () => void; palette: (typeof Colors)[keyof typeof Colors] }) {
+function MediaRetry({ label, onRetry, palette }: { label: string; onRetry: () => void; palette: Record<keyof typeof Colors.light, string> }) {
   return <View style={styles.mediaFailure}><Text style={[styles.mediaLabel, { color: palette.danger }]}>{label}</Text><Pressable accessibilityRole="button" onPress={onRetry} style={[styles.mediaRetry, { backgroundColor: palette.primarySoft }]}><Text style={[styles.mediaRetryText, { color: palette.primary }]}>Cargar de nuevo</Text></Pressable></View>;
 }
 

@@ -1,4 +1,5 @@
 {
+  "cli": { "appVersionSource": "remote" },
   "build": {
     "development": {
       "developmentClient": true,
@@ -16,6 +17,8 @@
     },
     "preview": {
       "distribution": "internal",
+      "channel": "preview",
+      "environment": "preview",
       "env": {
         "CRM_NATIVE_BUILD": "1",
         "EXPO_PUBLIC_CRM_API_URL": "https://gestion-clinica-crm.vercel.app"
@@ -27,7 +30,16 @@
         "simulator": true
       }
     },
+    "testflight": {
+      "extends": "production",
+      "channel": "preview",
+      "environment": "preview"
+    },
     "production": {
+      "channel": "production",
+      "environment": "production",
+      "autoIncrement": true,
+      "android": { "buildType": "apk" },
       "env": {
         "CRM_NATIVE_BUILD": "1",
         "EXPO_PUBLIC_CRM_API_URL": "https://gestion-clinica-crm.vercel.app"

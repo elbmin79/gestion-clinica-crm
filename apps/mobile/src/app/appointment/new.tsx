@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, View, type LayoutChangeEvent } from 'react-native';
 import { CrmText as Text, CrmTextInput as TextInput } from '@/components/crm-text';
 
 import { useCrmColorScheme as useColorScheme } from '@/providers/crm-theme-provider';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import Animated, { Easing, FadeInUp, FadeOutUp, ReduceMotion, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { AppointmentServicePicker } from '@/components/appointment-service-picker';
 import { AppointmentReminderPreview } from '@/components/appointment-reminder-preview';
 import { Redirect, useLocalSearchParams } from 'expo-router';
@@ -17,6 +18,14 @@ import { datePartsInZone } from '@elixir-clinic/crm-core/clinic-time';
 import { hasClinicPermission } from '@elixir-clinic/crm-core/permissions';
 
 const emptyCatalog: AppointmentCatalog = { businesses: [], branches: [], providers: [], services: [] };
+const patientResultsEntrance = FadeInUp.withInitialValues({ opacity: 0, transform: [{ translateY: 6 }] })
+  .duration(200)
+  .easing(Easing.out(Easing.cubic))
+  .reduceMotion(ReduceMotion.System);
+const patientResultsExit = FadeOutUp.withTargetValues({ opacity: 0, transform: [{ translateY: -6 }] })
+  .duration(140)
+  .easing(Easing.in(Easing.quad))
+  .reduceMotion(ReduceMotion.System);
 
 export default function NewAppointmentScreen() {
   const router = useCrmRouter();
@@ -43,12 +52,9 @@ export default function NewAppointmentScreen() {
   const [modality, setModality] = useState<'Presencial' | 'Virtual'>('Presencial');
   const [patientSearch, setPatientSearch] = useState('');
   const [creatingPatient, setCreatingPatient] = useState(false);
-  const [morePatientFields, setMorePatientFields] = useState(false);
   const [patientName, setPatientName] = useState('');
   const [patientEmail, setPatientEmail] = useState('');
   const [patientPhone, setPatientPhone] = useState('');
-  const [patientTreatment, setPatientTreatment] = useState('');
-  const [patientBranchId, setPatientBranchId] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -87,7 +93,12 @@ export default function NewAppointmentScreen() {
   });
   const selectedPatient = patients.find(item => item.id === patientId);
   const eligibleServices = catalog.services.filter(item => !item.branchIds?.length || item.branchIds.includes(branchId)).filter(item => !item.providerIds?.length || item.providerIds.includes(providerId));
-  const filteredPatients = useMemo(() => patients.filter(item => `${item.name} ${item.recordNumber}`.toLocaleLowerCase('es-MX').includes(patientSearch.toLocaleLowerCase('es-MX'))).slice(0, 24), [patients, patientSearch]);
+  const patientQuery = patientSearch.trim().toLocaleLowerCase('es-MX');
+  const filteredPatients = useMemo(() => patientQuery.length < 2 ? [] : patients.filter(item => `${item.name} ${item.recordNumber}`.toLocaleLowerCase('es-MX').includes(patientQuery)).slice(0, 24), [patients, patientQuery]);
+  const hasPatientResults = filteredPatients.length > 0;
+  const resultsPanel = useSlidingPanel(hasPatientResults);
+  const createPanel = useSlidingPanel(creatingPatient);
+
   const selectedServices = serviceIds.map(id => catalog.services.find(item => item.id === id)).filter((item): item is NonNullable<typeof item> => Boolean(item));
   const selectedService = selectedServices[0];
   const eligibleServiceIds = eligibleServices.map(item => item.id).filter((id): id is string => Boolean(id));
@@ -115,10 +126,10 @@ export default function NewAppointmentScreen() {
     setSaving(true); setError('');
     try {
       if (patientEmail.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(patientEmail.trim())) throw new Error('Revisa el correo electrónico del paciente.');
-      const saved = await createClinicPatient(clinic, { name: patientName.trim(), email: patientEmail.trim(), phone: patientPhone.trim(), treatment: patientTreatment.trim(), branchId: patientBranchId || branchId });
-      const newPatient: PatientListItem = { id: saved.id, databaseId: saved.id, recordNumber: saved.record_number, name: patientName.trim(), service: patientTreatment.trim() || 'Por definir', status: 'Nuevo' };
+      const saved = await createClinicPatient(clinic, { name: patientName.trim(), email: patientEmail.trim(), phone: patientPhone.trim(), treatment: '', branchId: '' });
+      const newPatient: PatientListItem = { id: saved.id, databaseId: saved.id, recordNumber: saved.record_number, name: patientName.trim(), service: 'Por definir', status: 'Nuevo' };
       setPatients(current => [newPatient, ...current.filter(item => item.id !== newPatient.id)]);
-      setPatientId(newPatient.id); setPatientSearch(''); setPatientName(''); setPatientEmail(''); setPatientPhone(''); setPatientTreatment(''); setCreatingPatient(false); setMorePatientFields(false);
+      setPatientId(newPatient.id); setPatientSearch(''); setPatientName(''); setPatientEmail(''); setPatientPhone(''); setCreatingPatient(false);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'No se pudo crear el expediente.');
     } finally { setSaving(false); }
@@ -178,18 +189,43 @@ export default function NewAppointmentScreen() {
           <View style={styles.header}><Pressable accessibilityRole="button" accessibilityLabel="Volver" onPress={() => router.back()} style={styles.back}><Text style={[styles.backText, { color: palette.primary }]}>‹</Text></Pressable><View style={styles.headerTitle}><Text style={[styles.title, { color: palette.text }]}>Nueva cita</Text><Text style={[styles.subtitle, { color: palette.textSecondary }]}>{clinic?.name || 'Agenda de la clínica'}</Text></View></View>
           {loading ? <View style={styles.loading}><ActivityIndicator color={palette.primary} /><Text style={[styles.help, { color: palette.textSecondary }]}>Cargando directorio y horarios…</Text></View> : <>
             <Section title="Paciente" palette={palette}>
-              <TextInput accessibilityLabel="Buscar paciente" value={patientSearch} onChangeText={setPatientSearch} placeholder="Buscar por nombre o expediente" placeholderTextColor={palette.textSecondary} style={[styles.input, fieldStyle(palette)]} />
-              <View style={styles.patientList}>{filteredPatients.map(patient => <Option key={patient.id} selected={patientId === patient.id} label={patient.name} detail={`${patient.recordNumber} · ${patient.service}`} onPress={() => { setPatientId(patient.id); setCreatingPatient(false); }} palette={palette} />)}</View>
-              {canCreatePatient && <Pressable accessibilityRole="button" onPress={() => { setCreatingPatient(value => !value); setPatientName(''); setError(''); }} style={[styles.secondaryButton, { borderColor: palette.line }]}><Text style={[styles.secondaryButtonText, { color: palette.primary }]}>{creatingPatient ? 'Cerrar nuevo expediente' : '＋  Crear paciente aquí'}</Text></Pressable>}
-              {creatingPatient && <View style={[styles.quickCreate, { backgroundColor: palette.background, borderColor: palette.line }]}><Text style={[styles.quickTitle, { color: palette.text }]}>Expediente nuevo</Text><Text style={[styles.help, { color: palette.textSecondary }]}>La cita se conservará y seleccionaremos el expediente al guardarlo.</Text>
+              <View>
+                <TextInput accessibilityLabel="Buscar paciente" value={patientSearch} onChangeText={setPatientSearch} placeholder="Buscar por nombre o expediente" placeholderTextColor={palette.textSecondary} style={[styles.input, fieldStyle(palette)]} />
+                <Animated.View collapsable={false} style={[styles.patientResultsViewport, resultsPanel.animatedStyle]}>
+                  {hasPatientResults && (
+                    <Animated.View entering={patientResultsEntrance} exiting={patientResultsExit}
+                      onLayout={resultsPanel.onLayout}
+                      style={styles.patientList}>
+                    {filteredPatients.map(patient => (
+                      <Pressable key={patient.id} accessibilityRole="button" accessibilityState={{ selected: patientId === patient.id }}
+                        onPress={() => { setPatientId(patient.id); setPatientSearch(''); setCreatingPatient(false); }}
+                        style={({ pressed }) => [styles.patientResult, { borderColor: palette.line, backgroundColor: palette.background, opacity: pressed ? 0.75 : 1 }]}>
+                        <Text style={[styles.optionText, { color: palette.text }]}>{patient.name}</Text>
+                        <Text style={[styles.optionDetail, { color: palette.textSecondary }]}>{patient.recordNumber}</Text>
+                      </Pressable>
+                    ))}
+                    </Animated.View>
+                  )}
+                </Animated.View>
+              </View>
+              {selectedPatient && patientQuery.length < 2 && (
+                <Text style={[styles.label, { color: palette.text }]}>Paciente seleccionado · {selectedPatient.name}</Text>
+              )}
+              {patientQuery.length >= 2 && !hasPatientResults && (
+                <Text accessibilityLiveRegion="polite" style={[styles.help, { color: palette.textSecondary }]}>No se encontraron pacientes.</Text>
+              )}
+              <View>
+                {canCreatePatient && <Pressable accessibilityRole="button" onPress={() => { setCreatingPatient(value => !value); setPatientName(''); setError(''); }} style={[styles.secondaryButton, { borderColor: palette.line }]}><Text style={[styles.secondaryButtonText, { color: palette.primary }]}>{creatingPatient ? 'Cerrar nuevo expediente' : '＋  Crear paciente aquí'}</Text></Pressable>}
+                <Animated.View collapsable={false} style={[styles.patientResultsViewport, createPanel.animatedStyle]}>
+                  {creatingPatient && <Animated.View entering={patientResultsEntrance} exiting={patientResultsExit} onLayout={createPanel.onLayout} style={styles.patientList}><View style={[styles.quickCreate, { backgroundColor: palette.background, borderColor: palette.line }]}><Text style={[styles.quickTitle, { color: palette.text }]}>Expediente nuevo</Text><Text style={[styles.help, { color: palette.textSecondary }]}>La cita se conservará y seleccionaremos el expediente al guardarlo.</Text>
                 <Field label="Nombre completo" value={patientName} onChangeText={setPatientName} placeholder="Ej. Andrea García" palette={palette} />
                 <View style={styles.twoCol}><Field label="Correo (opcional)" value={patientEmail} onChangeText={setPatientEmail} placeholder="correo@ejemplo.com" keyboardType="email-address" palette={palette} /><Field label="Teléfono (opcional)" value={patientPhone} onChangeText={setPatientPhone} placeholder="Teléfono" keyboardType="phone-pad" palette={palette} /></View>
-                <Pressable accessibilityRole="button" onPress={() => setMorePatientFields(value => !value)} style={styles.expand}><Text style={[styles.expandText, { color: palette.primary }]}>{morePatientFields ? '− Ocultar datos adicionales' : '＋ Tratamiento y sucursal (opcional)'}</Text></Pressable>
-                {morePatientFields && <><Field label="Tratamiento o servicio" value={patientTreatment} onChangeText={setPatientTreatment} placeholder="Por definir" palette={palette} /><ChoiceField title="Sucursal del expediente" items={catalog.branches} value={patientBranchId || branchId} onChange={setPatientBranchId} palette={palette} /></>}
                 <Pressable accessibilityRole="button" disabled={saving || !patientName.trim()} onPress={() => void savePatient()} style={[styles.primaryButton, { backgroundColor: palette.primary, opacity: saving || !patientName.trim() ? 0.5 : 1 }]}>{saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryText}>Crear y seleccionar paciente</Text>}</Pressable>
-              </View>}
+                  </View></Animated.View>}
+                </Animated.View>
+              </View>
             </Section>
-            <Section title="Horario" palette={palette}><View style={styles.twoCol}><Field label="Fecha · AAAA-MM-DD" value={date} onChangeText={setDate} placeholder="2026-11-02" keyboardType="numbers-and-punctuation" palette={palette} /><Field label="Hora · 24 horas" value={time} onChangeText={setTime} placeholder="09:00" keyboardType="numbers-and-punctuation" palette={palette} /></View><View style={styles.twoCol}><Field label="Duración · minutos" value={duration} onChangeText={setDuration} placeholder="45" keyboardType="number-pad" palette={palette} /><View style={styles.choiceField}><Text style={[styles.label, { color: palette.text }]}>Modalidad</Text><ChoiceField title="Modalidad" items={[{ id: 'Presencial', name: 'Presencial' }, { id: 'Virtual', name: 'Virtual' }]} value={modality} onChange={value => setModality(value as 'Presencial' | 'Virtual')} palette={palette} compact /></View></View></Section>
+            <Section title="Horario" palette={palette}><View style={styles.twoCol}><Field label="Fecha · AAAA-MM-DD" value={date} onChangeText={setDate} placeholder="2026-11-02" keyboardType="numbers-and-punctuation" palette={palette} /><Field label="Hora · 24 horas" value={time} onChangeText={setTime} placeholder="09:00" keyboardType="numbers-and-punctuation" palette={palette} /></View><View style={styles.twoCol}><Field label="Duración · minutos" value={duration} onChangeText={setDuration} placeholder="45" keyboardType="number-pad" palette={palette} /><ChoiceField title="Modalidad" items={[{ id: 'Presencial', name: 'Presencial' }, { id: 'Virtual', name: 'Virtual' }]} value={modality} onChange={value => setModality(value as 'Presencial' | 'Virtual')} palette={palette} fixed /></View></Section>
             <Section title="Atención" palette={palette}><ChoiceField title="Negocio" items={catalog.businesses} value={businessId} onChange={value => { setBusinessId(value); setBranchId(''); setProviderId(''); }} palette={palette} /><ChoiceField title="Sucursal" items={eligibleBranches} value={branchId} onChange={value => setBranchId(value)} palette={palette} /><ChoiceField title="Profesional" items={eligibleProviders} value={providerId} onChange={value => setProviderId(value)} palette={palette} /><AppointmentServicePicker services={catalog.services} eligibleIds={eligibleServiceIds} selectedIds={serviceIds} onChange={changeServices} palette={palette} />{!serviceIds.length ? <Field label="Servicio manual" value={manualService} onChangeText={setManualService} placeholder="Si no aparece en el catálogo" palette={palette} /> : null}{!eligibleServices.length && <Text style={[styles.help, { color: palette.textSecondary }]}>No hay servicios configurados para esta sucursal y profesional.</Text>}</Section>
             <Section title="Anticipo" palette={palette}><Field label="Monto requerido · MXN" value={deposit} onChangeText={setDeposit} placeholder="Ej. 500" keyboardType="decimal-pad" palette={palette} /><Text style={[styles.help, { color: palette.textSecondary }]}>El CRM requiere registrar el anticipo en Pagos antes de confirmar la cita.</Text></Section>
             <AppointmentReminderPreview status="Por confirmar" palette={palette} />
@@ -212,18 +248,50 @@ function Field({ label, value, onChangeText, placeholder, keyboardType, palette 
   return <View style={styles.field}><Text style={[styles.label, { color: palette.text }]}>{label}</Text><TextInput accessibilityLabel={label} value={value} onChangeText={onChangeText} placeholder={placeholder} placeholderTextColor={palette.textSecondary} keyboardType={keyboardType} autoCapitalize={keyboardType === 'email-address' ? 'none' : 'sentences'} style={[styles.input, fieldStyle(palette)]} /></View>;
 }
 
-function ChoiceField({ title, items, value, onChange, palette, compact = false }: { title: string; items: { id: string; name: string }[]; value: string; onChange: (value: string) => void; palette: (typeof Colors)[keyof typeof Colors]; compact?: boolean }) {
-  return <View style={[styles.field, compact && styles.compactChoice]}><Text style={[styles.label, { color: palette.text }]}>{title}</Text>{items.length ? <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.choices}>{items.map(item => <Option key={item.id} selected={value === item.id} label={item.name} onPress={() => onChange(item.id)} palette={palette} />)}</ScrollView> : <Text style={[styles.help, { color: palette.textSecondary }]}>No hay opciones disponibles.</Text>}</View>;
+function ChoiceField({ title, items, value, onChange, palette, fixed = false }: { title: string; items: { id: string; name: string }[]; value: string; onChange: (value: string) => void; palette: (typeof Colors)[keyof typeof Colors]; fixed?: boolean }) {
+  const options = items.map(item => (
+    <Option key={item.id} selected={value === item.id} label={item.name}
+      onPress={() => onChange(item.id)} palette={palette} fixed={fixed} />
+  ));
+  return (
+    <View style={[styles.field, fixed && styles.fixedField]}>
+      <Text style={[styles.label, { color: palette.text }]}>{title}</Text>
+      {!items.length ? <Text style={[styles.help, { color: palette.textSecondary }]}>No hay opciones disponibles.</Text>
+        : fixed ? <View style={styles.twoCol}>{options}</View>
+        : <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.choices}>{options}</ScrollView>}
+    </View>
+  );
 }
 
-function Option({ selected, label, detail, onPress, palette }: { selected: boolean; label: string; detail?: string; onPress: () => void; palette: (typeof Colors)[keyof typeof Colors] }) {
-  return <Pressable accessibilityRole="button" accessibilityState={{ selected }} onPress={onPress} style={({ pressed }) => [styles.option, { backgroundColor: selected ? palette.primarySoft : palette.background, borderColor: selected ? palette.primary : palette.line, opacity: pressed ? 0.75 : 1 }]}><Text numberOfLines={1} style={[styles.optionText, { color: selected ? palette.primary : palette.text }]}>{label}</Text>{detail ? <Text numberOfLines={1} style={[styles.optionDetail, { color: palette.textSecondary }]}>{detail}</Text> : null}</Pressable>;
+function useSlidingPanel(open: boolean) {
+  const height = useSharedValue(0);
+  const animatedStyle = useAnimatedStyle(() => ({ height: height.value }));
+
+  useEffect(() => {
+    if (!open) {
+      height.value = withTiming(0, {
+        duration: 200, easing: Easing.out(Easing.cubic), reduceMotion: ReduceMotion.System,
+      });
+    }
+  }, [open, height]);
+  return {
+    animatedStyle,
+    onLayout: (event: LayoutChangeEvent) => {
+      height.value = withTiming(event.nativeEvent.layout.height, {
+        duration: 200, easing: Easing.out(Easing.cubic), reduceMotion: ReduceMotion.System,
+      });
+    },
+  };
+}
+
+function Option({ selected, label, detail, onPress, palette, fixed = false }: { fixed?: boolean; selected: boolean; label: string; detail?: string; onPress: () => void; palette: (typeof Colors)[keyof typeof Colors] }) {
+  return <Pressable accessibilityRole="button" accessibilityState={{ selected }} onPress={onPress} style={({ pressed }) => [styles.option, fixed && styles.fixedOption, { backgroundColor: selected ? palette.primarySoft : palette.background, borderColor: selected ? palette.primary : palette.line, opacity: pressed ? 0.75 : 1 }]}><Text numberOfLines={fixed ? undefined : 1} style={[styles.optionText, fixed && styles.fixedOptionText, { color: selected ? palette.primary : palette.text }]}>{label}</Text>{detail ? <Text numberOfLines={1} style={[styles.optionDetail, { color: palette.textSecondary }]}>{detail}</Text> : null}</Pressable>;
 }
 
 const styles = StyleSheet.create({
   page: { flex: 1 }, flex: { flex: 1 }, content: { width: '100%', maxWidth: 760, alignSelf: 'center', paddingHorizontal: 20, paddingTop: 8, paddingBottom: 22, gap: 13 },
   header: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 2 }, back: { width: 42, height: 44, alignItems: 'center', justifyContent: 'center' }, backText: { fontSize: 34, lineHeight: 38 }, headerTitle: { flex: 1 }, title: { fontSize: 27, lineHeight: 33, fontWeight: '700', letterSpacing: -0.5 }, subtitle: { fontSize: 13, marginTop: 2 },
-  section: { borderRadius: 17, borderWidth: 1, padding: 15, gap: 12 }, sectionTitle: { fontSize: 17, fontWeight: '700', marginBottom: 1 }, field: { flex: 1, gap: 7 }, label: { fontSize: 13, fontWeight: '600' }, input: { minHeight: 48, borderWidth: 1, borderRadius: 12, paddingHorizontal: 13, fontSize: 15 }, twoCol: { flexDirection: 'row', gap: 10 }, choiceField: { flex: 1, gap: 6 }, compactChoice: { marginTop: 1 }, choices: { gap: 8, paddingVertical: 2 }, option: { minHeight: 42, maxWidth: 220, borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, justifyContent: 'center' }, optionText: { fontSize: 13, fontWeight: '600' }, optionDetail: { fontSize: 11, marginTop: 2 },
-  patientList: { gap: 7, maxHeight: 250, overflow: 'hidden' }, quickCreate: { borderWidth: 1, borderRadius: 14, padding: 13, gap: 11 }, quickTitle: { fontSize: 15, fontWeight: '700' }, expand: { minHeight: 34, justifyContent: 'center' }, expandText: { fontSize: 13, fontWeight: '700' }, secondaryButton: { minHeight: 46, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, alignItems: 'center', justifyContent: 'center' }, secondaryButtonText: { fontSize: 14, fontWeight: '700' }, primaryButton: { minHeight: 48, borderRadius: 13, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 16 }, primaryText: { color: '#fff', fontSize: 14, fontWeight: '700' },
+  section: { borderRadius: 17, borderWidth: 1, padding: 15, gap: 12 }, sectionTitle: { fontSize: 17, fontWeight: '700', marginBottom: 1 }, field: { flex: 1, gap: 7 }, label: { fontSize: 13, fontWeight: '600' }, input: { minHeight: 48, borderWidth: 1, borderRadius: 12, paddingHorizontal: 13, fontSize: 15 }, twoCol: { flexDirection: 'row', gap: 10 }, fixedField: { minWidth: 0 }, fixedOption: { flex: 1, minWidth: 0, maxWidth: undefined, minHeight: 48, paddingHorizontal: 8 }, fixedOptionText: { textAlign: 'center' }, choices: { gap: 8, paddingVertical: 2 }, option: { minHeight: 42, maxWidth: 220, borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, justifyContent: 'center' }, optionText: { fontSize: 13, fontWeight: '600' }, optionDetail: { fontSize: 11, marginTop: 2 },
+  patientResultsViewport: { overflow: 'hidden' }, patientList: { position: 'absolute', top: 0, left: 0, right: 0, paddingTop: 12, gap: 6 }, patientResult: { minHeight: 48, borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 7, justifyContent: 'center' }, quickCreate: { borderWidth: 1, borderRadius: 14, padding: 13, gap: 11 }, quickTitle: { fontSize: 15, fontWeight: '700' }, secondaryButton: { minHeight: 46, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, alignItems: 'center', justifyContent: 'center' }, secondaryButtonText: { fontSize: 14, fontWeight: '700' }, primaryButton: { minHeight: 48, borderRadius: 13, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 16 }, primaryText: { color: '#fff', fontSize: 14, fontWeight: '700' },
   help: { fontSize: 12, lineHeight: 18 }, loading: { minHeight: 180, alignItems: 'center', justifyContent: 'center', gap: 10 }, error: { borderWidth: 1, borderRadius: 12, padding: 13, fontSize: 14, lineHeight: 20 }, footer: { flexDirection: 'row', justifyContent: 'flex-end', gap: 9, paddingTop: 2 }, footerCancel: { minWidth: 100 }, footerSave: { minWidth: 150 },
 });

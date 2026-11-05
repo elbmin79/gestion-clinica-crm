@@ -1570,11 +1570,8 @@ html[data-theme="dark"] .patient-search-options button small,html[data-theme="da
 .appointment-quick-patient label{display:grid;min-width:0;gap:5px;color:var(--muted);font-size:12px;font-weight:650}
 .appointment-quick-patient input,.appointment-quick-patient select{width:100%;min-width:0;height:39px;padding:0 10px;border:1px solid var(--line);border-radius:7px;background:var(--paper);color:var(--ink);font:inherit;font-size:13px}
 .appointment-quick-patient input:focus,.appointment-quick-patient select:focus{outline:2px solid color-mix(in srgb,var(--green) 38%,transparent);outline-offset:1px}
-.appointment-quick-patient-more{border-top:1px solid var(--line);padding-top:10px}
-.appointment-quick-patient-more summary{width:max-content;color:var(--green);font-size:12px;font-weight:700;cursor:pointer}
-.appointment-quick-patient-details{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:11px}
 .appointment-quick-patient-actions{display:flex;justify-content:flex-end;gap:8px;padding-top:2px}
-@media(max-width:520px){.appointment-patient-field{grid-template-columns:minmax(0,1fr)}.appointment-add-patient{justify-self:start}.appointment-quick-patient-heading{align-items:flex-start;flex-direction:column;gap:3px}.appointment-quick-patient-details{grid-template-columns:1fr}}
+@media(max-width:520px){.appointment-patient-field{grid-template-columns:minmax(0,1fr)}.appointment-add-patient{justify-self:start}.appointment-quick-patient-heading{align-items:flex-start;flex-direction:column;gap:3px}}
 /* Keep appointment assignment selects within their two-column modal tracks. */
 .appointment-assignment-grid>label{min-width:0}
 .appointment-assignment-grid select{width:100%;min-width:0;max-width:100%}
@@ -1830,4 +1827,74 @@ html[data-theme="dark"] .patient-search-options button small,html[data-theme="da
   .topbar .topbar-actions>.search-shortcut{width:44px;min-width:44px;height:44px;padding:0;justify-content:center}
   .topbar .breadcrumbs{min-width:0;flex:1}
   .topbar .breadcrumbs strong{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+}
+@media screen and (max-width: 900px) {
+  .main-shell {
+    --mobile-topbar-height: calc(62px + env(safe-area-inset-top, 0px));
+    padding-top: var(--mobile-topbar-height);
+  }
+
+  .main-shell > .topbar {
+    position: fixed;
+    inset: 0 0 auto;
+    height: var(--mobile-topbar-height);
+    padding-top: env(safe-area-inset-top, 0px);
+  }
+
+  html:has(.sidebar.mobile-open),
+  body:has(.sidebar.mobile-open) {
+    overflow: hidden;
+    overscroll-behavior: none;
+  }
+
+  .sidebar.mobile-open { overscroll-behavior-y: contain; }
+  .mobile-nav-backdrop { touch-action: none; }
+}
+
+@media screen and (max-width: 700px) {
+  .patient-panel .mini-patient {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: 4px 10px;
+    height: auto;
+    min-height: 64px;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .patient-panel .mini-patient:last-child { border-bottom: 0; }
+  .patient-panel .mini-patient > .avatar { grid-area: 1 / 1 / 3 / 2; }
+  .patient-panel .mini-patient > div:not(.avatar) { grid-area: 1 / 2; overflow-wrap: anywhere; }
+  .patient-panel .mini-patient > .mini-date { grid-area: 2 / 2; overflow-wrap: anywhere; }
+  .patient-panel .mini-patient > svg { grid-area: 1 / 3 / 3 / 4; }
+  .patient-panel .mini-patient strong { color: var(--ink); line-height: 1.3; }
+  .patient-panel .mini-patient span:not(.avatar) { color: var(--muted); line-height: 1.35; }
+}
+
+.clinic-loading-track {
+  position: absolute;
+  inset: auto 0 0;
+  height: 2px;
+  overflow: hidden;
+  pointer-events: none;
+  background: var(--green-soft);
+  animation: clinic-loading-reveal 120ms ease-out 180ms both;
+}
+
+.clinic-loading-track::before {
+  content: "";
+  display: block;
+  width: 38%;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--green);
+  animation: clinic-loading-sweep 1.15s ease-in-out infinite;
+}
+
+@keyframes clinic-loading-reveal { from { opacity: 0; } to { opacity: 1; } }
+@keyframes clinic-loading-sweep { from { transform: translateX(-100%); } to { transform: translateX(265%); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .clinic-loading-track { animation-timing-function: steps(1, end); }
+  .clinic-loading-track::before { width: 100%; animation: none; }
 }

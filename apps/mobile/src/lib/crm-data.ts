@@ -193,14 +193,14 @@ export type AppointmentCatalog = {
 
 export type AgendaFilterCatalog = {
   branches: { id: string; name: string }[];
-  providers: { id: string; name: string; branchSettings: Record<string, { color: string; serviceColors: Record<string, string> }> }[];
+  providers: { id: string; name: string; user_id: string | null; branchSettings: Record<string, { color: string; serviceColors: Record<string, string> }> }[];
 };
 
 export async function loadAgendaFilterCatalog(clinic: ClinicMembership): Promise<AgendaFilterCatalog> {
   const client = getClient();
   const [branches, providers, assignments] = await Promise.all([
     client.from('branches').select('id, name').eq('clinic_id', clinic.clinicId).eq('active', true).order('name'),
-    client.from('clinic_providers').select('id, name').eq('clinic_id', clinic.clinicId).eq('active', true).or(visibleProviderFilter).order('name'),
+    client.from('clinic_providers').select('id, name, user_id').eq('clinic_id', clinic.clinicId).eq('active', true).or(visibleProviderFilter).order('name'),
     client.from('provider_branches').select('provider_id, branch_id, agenda_color, agenda_service_colors').eq('clinic_id', clinic.clinicId),
   ]);
   errorMessage(branches.error, 'No se pudieron cargar las sucursales.');

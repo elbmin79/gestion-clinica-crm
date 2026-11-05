@@ -12,6 +12,8 @@ export function AgendaCalendarView({
   date,
   period,
   todayDate,
+  dayGrid = false,
+  onShowGrid,
   items,
   palette,
   onSelectDate,
@@ -23,6 +25,8 @@ export function AgendaCalendarView({
   date: string;
   period: Period;
   todayDate?: string;
+  dayGrid?: boolean;
+  onShowGrid?: () => void;
   items: AgendaItem[];
   palette: Palette;
   onSelectDate: (date: string, period: Period) => void;
@@ -31,16 +35,38 @@ export function AgendaCalendarView({
   canCreateAppointment?: boolean;
   onCreateAppointment?: (date: string, time: string, providerId: string) => void;
 }) {
-  if (period === 'Día') return <DayView date={date} todayDate={todayDate} items={items} palette={palette} providers={providers} canCreateAppointment={canCreateAppointment} onCreateAppointment={onCreateAppointment} onOpenAppointment={onOpenAppointment} />;
-  if (period === 'Semana') return <WeekView date={date} items={items} palette={palette} onSelectDate={onSelectDate} onOpenAppointment={onOpenAppointment} />;
+  if (period === 'Día' && dayGrid) return <DayView date={date} todayDate={todayDate} items={items} palette={palette} providers={providers} canCreateAppointment={canCreateAppointment} onCreateAppointment={onCreateAppointment} onOpenAppointment={onOpenAppointment} />;
   if (period === 'Mes') return <MonthView date={date} items={items} palette={palette} onSelectDate={onSelectDate} />;
   if (period === 'Año') return <YearView date={date} items={items} palette={palette} onSelectDate={onSelectDate} />;
 
-  return items.length
-    ? <View style={[styles.list, { backgroundColor: palette.backgroundElement, borderColor: palette.line }]}>
-        {items.map((item, index) => <AppointmentRow key={item.id} item={item} palette={palette} showDate={period === 'Lista'} onPress={() => onOpenAppointment(item.id)} last={index === items.length - 1} />)}
-      </View>
-    : <EmptyState date={date} period={period} palette={palette} />;
+  const schedule = period === 'Lista' ? items : items.filter(item => item.date === date).sort((a, b) => a.time.localeCompare(b.time));
+  const now = Date.now();
+  const nextAppointment = period !== 'Lista' && date === todayDate
+    ? schedule.find(item => Date.parse(item.startsAt) >= now)
+    : undefined;
+  return <View style={{ gap: 10 }}>
+    {period === 'Semana' && <View style={{ flexDirection: 'row', gap: 3 }}>
+      {weekDates(date).map(day => {
+        const count = items.filter(item => item.date === day).length;
+        return <Pressable key={day} accessibilityRole="button" accessibilityState={{ selected: day === date }}
+          accessibilityLabel={longDate(day) + ', ' + appointmentCount(count)} onPress={() => onSelectDate(day, 'Semana')}
+          style={{ flex: 1, minHeight: 64, paddingVertical: 7, alignItems: 'center', borderRadius: 10, backgroundColor: day === date ? palette.primarySoft : palette.backgroundElement }}>
+          <Text style={{ color: palette.textSecondary, fontSize: 11 }}>{weekdayShort(day)}</Text>
+          <Text style={{ color: palette.text, fontWeight: '700' }}>{Number(day.slice(-2))}</Text>
+          <Text style={{ color: palette.textSecondary, fontSize: 11 }}>{count}</Text>
+        </Pressable>;
+      })}
+    </View>}
+    <Text style={{ color: palette.textSecondary }}>
+      {appointmentCount(schedule.length)}{nextAppointment ? ` · Próxima a las ${nextAppointment.time}` : ''}
+    </Text>
+    {schedule.length ? <View style={[styles.list, { backgroundColor: palette.backgroundElement, borderColor: palette.line }]}>
+      {schedule.map((item, index) => <AppointmentRow key={item.id} item={item} palette={palette} showDate={period === 'Lista'} onPress={() => onOpenAppointment(item.id)} last={index === schedule.length - 1} />)}
+    </View> : <EmptyState date={date} period={period === 'Semana' ? 'Día' : period} palette={palette} />}
+    {!schedule.length && period === 'Día' && <Pressable accessibilityRole="button" onPress={onShowGrid} style={{ minHeight: 48, justifyContent: 'center' }}>
+      <Text style={{ color: palette.primary }}>Ver disponibilidad</Text>
+    </Pressable>}
+  </View>;
 }
 
 const DAY_START_HOUR = 6;
@@ -113,26 +139,6 @@ function initials(name: string) {
   return name.split(/\s+/).filter(Boolean).slice(0, 2).map(part => part[0]).join('').toLocaleUpperCase('es-MX') || '—';
 }
 
-function WeekView({ date, items, palette, onSelectDate, onOpenAppointment }: { date: string; items: AgendaItem[]; palette: Palette; onSelectDate: (date: string, period: Period) => void; onOpenAppointment: (id: string) => void }) {
-  const days = weekDates(date);
-  return <ScrollView horizontal showsHorizontalScrollIndicator contentContainerStyle={[styles.week, { backgroundColor: palette.backgroundElement, borderColor: palette.line }]}>
-    {days.map((day, index) => {
-      const appointments = items.filter(item => item.date === day);
-      return <View key={day} style={[styles.weekDay, { borderRightColor: palette.line }]}>
-        <Pressable accessibilityRole="button" accessibilityLabel={`Ver agenda del ${longDate(day)}`} onPress={() => onSelectDate(day, 'Día')} style={[styles.weekHeading, { borderBottomColor: palette.line, backgroundColor: day === date ? palette.backgroundSelected : 'transparent' }]}>
-          <Text style={[styles.weekName, { color: palette.textSecondary }]}>{weekdayShort(day)}</Text>
-          <Text style={[styles.weekNumber, { color: day === date ? palette.primary : palette.text }]}>{day.slice(-2).replace(/^0/, '')}</Text>
-          <Text style={[styles.weekCount, { color: palette.textSecondary }]}>{appointments.length ? `${appointments.length} ${appointments.length === 1 ? 'cita' : 'citas'}` : '—'}</Text>
-        </Pressable>
-        <View style={styles.weekEvents}>
-          {appointments.map(item => <WeekEvent key={item.id} item={item} palette={palette} onPress={() => onOpenAppointment(item.id)} />)}
-          {!appointments.length && <Text style={[styles.emptyDay, { color: palette.textSecondary }]}>Sin citas</Text>}
-        </View>
-      </View>;
-    })}
-  </ScrollView>;
-}
-
 function MonthView({ date, items, palette, onSelectDate }: { date: string; items: AgendaItem[]; palette: Palette; onSelectDate: (date: string, period: Period) => void }) {
   const cells = monthDates(date);
   return <View style={[styles.month, { backgroundColor: palette.backgroundElement, borderColor: palette.line }]}>
@@ -176,15 +182,6 @@ function AppointmentRow({ item, palette, showDate, onPress, last }: { item: Agen
     <View style={[styles.timePill, { backgroundColor: palette.primarySoft }]}>{showDate ? <Text style={[styles.dateText, { color: palette.primary }]}>{shortDate(item.date)}</Text> : null}<Text style={[styles.time, { color: palette.primary }]}>{item.time}</Text></View>
     <View style={styles.main}><Text style={[styles.name, { color: palette.text }]} numberOfLines={1}>{item.patientName}</Text><Text style={[styles.copy, { color: palette.textSecondary }]} numberOfLines={1}>{item.service} · {item.clinician}</Text><Text style={[styles.meta, { color: palette.textSecondary }]} numberOfLines={1}>{item.branch}</Text></View>
     <View style={styles.statusWrap}><View style={[styles.colorDot, { backgroundColor: agendaHex(item.agendaColor, palette) }]} /><Text style={[styles.state, { color: palette.textSecondary }]} numberOfLines={2}>{item.status}</Text></View><Text style={[styles.chevron, { color: palette.textSecondary }]}>›</Text>
-  </Pressable>;
-}
-
-function WeekEvent({ item, palette, onPress }: { item: AgendaItem; palette: Palette; onPress: () => void }) {
-  return <Pressable accessibilityRole="button" accessibilityLabel={`${item.time}, ${item.patientName}, ${item.service}`} onPress={onPress} style={[styles.weekEvent, { backgroundColor: palette.backgroundSelected, borderColor: palette.line }]}>
-    <View style={styles.weekEventTime}><View style={[styles.colorDot, { backgroundColor: agendaHex(item.agendaColor, palette) }]} /><Text style={[styles.weekEventMeta, { color: palette.textSecondary }]}>{item.time}</Text></View>
-    <Text style={[styles.weekEventName, { color: palette.text }]} numberOfLines={2}>{item.patientName}</Text>
-    <Text style={[styles.weekEventMeta, { color: palette.textSecondary }]} numberOfLines={2}>{item.service}</Text>
-    <Text style={[styles.weekEventMeta, { color: palette.textSecondary }]} numberOfLines={1}>{item.status}</Text>
   </Pressable>;
 }
 

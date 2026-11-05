@@ -54,7 +54,7 @@ export default function OverviewScreen() {
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.topLine}>
           <Image source={clinicLogos[theme]} style={styles.brandLogo} resizeMode="contain" accessibilityLabel="Elixir Clinic" accessible />
-          <Pressable accessibilityRole="button" accessibilityLabel="Abrir mi perfil" onPress={() => router.push('/profile' as never)} style={[styles.profileButton, { backgroundColor: palette.backgroundElement, borderColor: palette.line }]}>
+          <Pressable accessibilityRole="button" accessibilityLabel="Abrir mi perfil" onPress={() => router.navigate('/profile' as never)} style={[styles.profileButton, { backgroundColor: palette.backgroundElement, borderColor: palette.line }]}>
             {avatarUrl ? <Image source={{ uri: avatarUrl }} style={styles.profileAvatar} resizeMode="cover" accessibilityLabel="Foto de perfil" /> : <Text style={[styles.profileInitials, { color: palette.primary }]}>{profileInitials}</Text>}
           </Pressable>
         </View>

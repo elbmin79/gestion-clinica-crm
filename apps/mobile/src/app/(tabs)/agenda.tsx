@@ -1,3 +1,5 @@
+import { defaultAgendaProvider } from '@/lib/agenda-scope';
+import { useAuth } from '@/providers/auth-provider';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { CrmText as Text } from '@/components/crm-text';
@@ -20,6 +22,7 @@ const emptyCatalog: AgendaFilterCatalog = { branches: [], providers: [] };
 export default function AgendaScreen() {
   const router = useCrmRouter();
   const palette = Colors[useColorScheme() === 'dark' ? 'dark' : 'light'];
+  const { session } = useAuth();
   const { clinic } = useClinicWorkspace();
   const [date, setDate] = useState(() => clinic ? datePartsInZone(new Date(), clinic.timeZone) : new Date().toISOString().slice(0, 10));
   const [listEnd, setListEnd] = useState(() => shiftDate(clinic ? datePartsInZone(new Date(), clinic.timeZone) : new Date().toISOString().slice(0, 10), 29, 'Día'));
@@ -29,7 +32,13 @@ export default function AgendaScreen() {
   const [items, setItems] = useState<AgendaItem[]>([]);
   const [catalog, setCatalog] = useState(emptyCatalog);
   const [branchFilter, setBranchFilter] = useState('');
-  const [providerFilter, setProviderFilter] = useState('');
+  const [providerChoice, setProviderFilter] = useState<string | null>(null);
+  const [defaultProvider, setDefaultProvider] = useState<string | null>(null);
+  const [panel, setPanel] = useState<'view' | 'provider' | 'filters' | null>(null);
+  const [grid, setGrid] = useState(false);
+  const userId = session?.user.id;
+  const myProvider = userId ? catalog.providers.find(provider => provider.user_id === userId) : undefined;
+  const providerFilter = providerChoice ?? (myProvider?.id === defaultProvider ? defaultProvider : '') ?? '';
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const refresh = useCallback(async () => {
@@ -40,11 +49,41 @@ export default function AgendaScreen() {
         loadAgendaForDate(clinic, date, period, period === 'Lista' ? listEnd : undefined),
         loadAgendaFilterCatalog(clinic),
       ]);
+      // Local emulator fixture. These appointments are never saved to the clinic.
+      if (__DEV__ && options.providers.length) {
+        const fixtureDate = datePartsInZone(new Date(), clinic.timeZone);
+        if (date === fixtureDate || period !== 'Día') {
+          const services = ['Consulta', 'Morpheus facial', 'Botox', 'NCTF facial', 'Seguimiento', 'Limpieza facial'];
+          const durations = [20, 35, 45, 60, 75, 90];
+          for (let index = 0; index < 36; index++) {
+            const provider = options.providers[index % options.providers.length];
+            const branch = options.branches.find(item => provider.branchSettings[item.id]) ?? options.branches[0];
+            const minutes = 8 * 60 + Math.floor(index / 3) * 45 + (index % 3) * 10;
+            const time = String(Math.floor(minutes / 60)).padStart(2, '0') + ':' + String(minutes % 60).padStart(2, '0');
+            agenda.push({
+              id: 'local-qa-' + index, patientId: '', patientName: 'Paciente de prueba ' + (index + 1),
+              date: fixtureDate, time, startsAt: fixtureDate + 'T' + time + ':00-08:00',
+              providerId: provider.id, clinician: provider.name, branchId: branch?.id ?? '',
+              branch: branch?.name ?? '', service: services[index % services.length],
+              duration: String(durations[(index * 5 + Math.floor(index / 3)) % durations.length]),
+              status: ['Confirmada', 'Pendiente', 'Completada'][index % 3],
+              agendaColor: provider.branchSettings[branch?.id ?? '']?.color ?? '',
+              businessId: '', business: '', modality: 'Presencial', depositRequired: false,
+              depositAmount: 0, note: '', serviceId: '', serviceIds: [], serviceSnapshot: null,
+            });
+          }
+        }
+      }
       setItems(agenda);
       setCatalog(options);
+      const own = userId ? options.providers.find(provider => provider.user_id === userId) : undefined;
+      const today = datePartsInZone(new Date(), clinic.timeZone);
+      if (date === today && period === 'Día') {
+        setDefaultProvider(previous => previous ?? (defaultAgendaProvider(own?.id, agenda)));
+      }
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'No se pudo cargar la agenda.'); }
     finally { setLoading(false); }
-  }, [clinic, date, period, listEnd]);
+  }, [clinic, date, period, listEnd, userId]);
   useEffect(() => { void refresh(); }, [refresh]);
   useEffect(() => { if (clinic) { const today = datePartsInZone(new Date(), clinic.timeZone); setDate(today); setListEnd(shiftDate(today, 29, 'Día')); } }, [clinic]);
 
@@ -67,29 +106,54 @@ export default function AgendaScreen() {
   return (
     <SafeAreaView edges={['top']} style={[styles.page, { backgroundColor: palette.background }]}>
       <ScrollView contentContainerStyle={styles.content}>
-        <View style={styles.heading}><View><Text style={[styles.title, { color: palette.text }]}>Agenda</Text><Text style={[styles.caption, { color: palette.textSecondary }]}>Citas del equipo por fecha y profesional</Text></View>{clinic && hasClinicPermission(clinic.role, clinic.permissions, 'agenda.create') ? <Pressable accessibilityRole="button" onPress={() => router.push('/appointment/new')} style={({ pressed }) => [styles.newButton, { backgroundColor: palette.primary, opacity: pressed ? 0.78 : 1 }]}><Text style={styles.newButtonText}>＋ Nueva cita</Text></Pressable> : null}</View>
-
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.periods}>{periods.map(value => <Pressable key={value} accessibilityRole="button" accessibilityState={{ selected: period === value }} onPress={() => setView(value)} style={[styles.period, { backgroundColor: period === value ? palette.primarySoft : palette.backgroundElement, borderColor: period === value ? palette.primary : palette.line }]}><Text style={[styles.periodText, { color: period === value ? palette.primary : palette.textSecondary }]}>{value}</Text></Pressable>)}</ScrollView>
+        <View style={styles.heading}><View><Text style={[styles.title, { color: palette.text }]}>Agenda</Text></View>{clinic && hasClinicPermission(clinic.role, clinic.permissions, 'agenda.create') ? <Pressable accessibilityRole="button" onPress={() => router.push('/appointment/new')} style={({ pressed }) => [styles.newButton, { backgroundColor: palette.primary, opacity: pressed ? 0.78 : 1 }]}><Text style={styles.newButtonText}>＋ Nueva cita</Text></Pressable> : null}</View>
 
         <View style={[styles.dateBar, { backgroundColor: palette.backgroundElement, borderColor: palette.line }]}><Pressable accessibilityRole="button" accessibilityLabel={`Anterior ${period.toLocaleLowerCase('es-MX')}`} onPress={() => shift(-1)} style={styles.dateArrow}><Text style={[styles.dateArrowText, { color: palette.primary }]}>‹</Text></Pressable><View style={styles.dateCenter}><Text style={[styles.subtitle, { color: palette.text }]}>{dateLabel}</Text><Text style={[styles.dateCaption, { color: palette.textSecondary }]}>{date === todayDate ? 'Hoy' : new Intl.DateTimeFormat('es-MX', { dateStyle: 'medium' }).format(new Date(`${date}T12:00:00`))}</Text></View><Pressable accessibilityRole="button" accessibilityLabel={`Siguiente ${period.toLocaleLowerCase('es-MX')}`} onPress={() => shift(1)} style={styles.dateArrow}><Text style={[styles.dateArrowText, { color: palette.primary }]}>›</Text></Pressable>{date !== todayDate ? <Pressable accessibilityRole="button" onPress={() => { setDate(todayDate); if (period === 'Lista' && listEnd < todayDate) setListEnd(todayDate); }} style={styles.todayButton}><Text style={[styles.todayText, { color: palette.primary }]}>Hoy</Text></Pressable> : null}</View>
 
-        {period === 'Lista' ? <View style={rangeStyles.listControls}>
-          <View style={rangeStyles.dateRangeRow}>
-            <DateRangeButton label="Desde" value={date} onPress={() => setDatePicker('start')} palette={palette} />
-            <DateRangeButton label="Hasta" value={listEnd} onPress={() => setDatePicker('end')} palette={palette} />
-          </View>
-          <Text style={[styles.filterLabel, { color: palette.textSecondary }]}>Ordenar</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filters}>
-            {sortOptions.map(option => <FilterChip key={option.value} label={option.label} selected={listSort === option.value} onPress={() => setListSort(option.value)} palette={palette} />)}
-          </ScrollView>
-        </View> : null}
+        <View style={mobileStyles.controls}>
+          <FilterChip label={period + ' ▾'} selected={false} onPress={() => setPanel('view')} palette={palette} />
+          <FilterChip label={providerFilter && providerFilter === myProvider?.id ? 'Mis citas ▾' : (catalog.providers.find(item => item.id === providerFilter)?.name || 'Todo el equipo') + ' ▾'} selected={Boolean(providerFilter)} onPress={() => setPanel('provider')} palette={palette} />
+          <FilterChip label={branchFilter ? 'Filtros · 1' : 'Filtros'} selected={Boolean(branchFilter)} onPress={() => setPanel('filters')} palette={palette} />
+        </View>
+        {!!branchFilter && <Text style={[styles.copy, { color: palette.textSecondary }]}>{catalog.branches.find(item => item.id === branchFilter)?.name}</Text>}
+        {date === todayDate && !loading && !error && myProvider && defaultProvider === '' && providerChoice === null &&
+          <Text style={[styles.copy, { color: palette.textSecondary }]}>No tienes citas hoy · Mostrando todo el equipo</Text>}
 
-        <View style={styles.filterBlock}><Text style={[styles.filterLabel, { color: palette.textSecondary }]}>Sucursal</Text><ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filters}><FilterChip label="Todas" selected={!branchFilter} onPress={() => setBranchFilter('')} palette={palette}/>{catalog.branches.map(item => <FilterChip key={item.id} label={item.name} selected={branchFilter === item.id} onPress={() => setBranchFilter(item.id)} palette={palette}/>)}</ScrollView></View>
-        <View style={styles.filterBlock}><Text style={[styles.filterLabel, { color: palette.textSecondary }]}>Profesional</Text><ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filters}><FilterChip label="Todos" selected={!providerFilter} onPress={() => setProviderFilter('')} palette={palette}/>{catalog.providers.map(item => <FilterChip key={item.id} label={item.name} selected={providerFilter === item.id} onPress={() => setProviderFilter(item.id)} palette={palette}/>)}</ScrollView></View>
-
-        {loading ? <View style={styles.center}><ActivityIndicator color={palette.primary} /><Text style={[styles.copy, { color: palette.textSecondary }]}>Cargando citas…</Text></View> : error ? <View style={[styles.message, { backgroundColor: palette.backgroundElement, borderColor: palette.line }]}><Text style={[styles.copy, { color: palette.text }]}>{error}</Text><Pressable onPress={() => void refresh()}><Text style={[styles.action, { color: palette.primary }]}>Intentar de nuevo</Text></Pressable></View> : <AgendaCalendarView date={date} todayDate={todayDate} period={period} items={period === 'Lista' ? orderedItems : visibleItems} providers={visibleProviders} canCreateAppointment={canCreateAppointment} palette={palette} onSelectDate={(nextDate, nextPeriod) => { setDate(nextDate); setPeriod(nextPeriod); }} onCreateAppointment={(appointmentDate, appointmentTime, providerId) => router.push({ pathname: '/appointment/new', params: { date: appointmentDate, time: appointmentTime, providerId } } as never)} onOpenAppointment={id => router.push({ pathname: '/appointment/[id]', params: { id } } as never)} />}
+        {loading ? <View style={styles.center}><ActivityIndicator color={palette.primary} /><Text style={[styles.copy, { color: palette.textSecondary }]}>Cargando citas…</Text></View> : error ? <View style={[styles.message, { backgroundColor: palette.backgroundElement, borderColor: palette.line }]}><Text style={[styles.copy, { color: palette.text }]}>{error}</Text><Pressable onPress={() => void refresh()}><Text style={[styles.action, { color: palette.primary }]}>Intentar de nuevo</Text></Pressable></View> : <AgendaCalendarView date={date} todayDate={todayDate} period={period} dayGrid={grid} onShowGrid={() => setGrid(true)} items={period === 'Lista' ? orderedItems : visibleItems} providers={visibleProviders} canCreateAppointment={canCreateAppointment} palette={palette} onSelectDate={(nextDate, nextPeriod) => { setDate(nextDate); setPeriod(nextPeriod); }} onCreateAppointment={(appointmentDate, appointmentTime, providerId) => router.push({ pathname: '/appointment/new', params: { date: appointmentDate, time: appointmentTime, providerId } } as never)} onOpenAppointment={id => !id.startsWith('local-qa-') && router.push({ pathname: '/appointment/[id]', params: { id } } as never)} />}
         <Pressable onPress={() => void refresh()} style={styles.refresh}><Text style={[styles.action, { color: palette.primary }]}>Actualizar</Text></Pressable>
       </ScrollView>
+      <Modal transparent animationType="slide" visible={panel !== null} onRequestClose={() => setPanel(null)}>
+        <View style={rangeStyles.sheetBackdrop}>
+          <Pressable style={StyleSheet.absoluteFill} accessibilityLabel="Cerrar opciones" onPress={() => setPanel(null)} />
+          <View style={[mobileStyles.sheet, { backgroundColor: palette.backgroundElement }]}>
+            <View style={[mobileStyles.handle, { backgroundColor: palette.line }]} />
+            <View style={styles.heading}><Text style={[styles.subtitle, { color: palette.text }]}>{panel === 'view' ? 'Vista' : panel === 'provider' ? 'Profesional' : 'Filtros'}</Text><Pressable accessibilityRole="button" onPress={() => setPanel(null)} style={mobileStyles.done}><Text style={[styles.action, { color: palette.primary }]}>Listo</Text></Pressable></View>
+            <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={mobileStyles.options}>
+              {panel === 'view' && <>
+                {periods.map(value => <SheetRow key={value} label={value} selected={period === value} onPress={() => { setView(value); setPanel(null); }} palette={palette} />)}
+                {period === 'Día' && <View style={[mobileStyles.layoutOption, { borderColor: palette.line }]}><SheetRow label={grid ? 'Ver horario' : 'Ver cuadrícula'} selected={false} onPress={() => { setGrid(!grid); setPanel(null); }} palette={palette} /></View>}
+              </>}
+              {panel === 'provider' && <>
+                <SheetRow label="Todo el equipo" selected={!providerFilter} onPress={() => { setProviderFilter(''); setPanel(null); }} palette={palette} />
+                {catalog.providers.map(item => <SheetRow key={item.id} label={item.id === myProvider?.id ? 'Mis citas · ' + item.name : item.name} selected={providerFilter === item.id} onPress={() => { setProviderFilter(item.id); setPanel(null); }} palette={palette} />)}
+              </>}
+              {panel === 'filters' && <>
+                <Text style={[styles.copy, { color: palette.textSecondary }]}>Sucursal</Text>
+                <SheetRow label="Todas las sucursales" selected={!branchFilter} onPress={() => setBranchFilter('')} palette={palette} />
+                {catalog.branches.map(item => <SheetRow key={item.id} label={item.name} selected={branchFilter === item.id} onPress={() => setBranchFilter(item.id)} palette={palette} />)}
+                {period === 'Lista' && <>
+                  <View style={rangeStyles.dateRangeRow}>
+                    <DateRangeButton label="Desde" value={date} onPress={() => { setPanel(null); setDatePicker('start'); }} palette={palette} />
+                    <DateRangeButton label="Hasta" value={listEnd} onPress={() => { setPanel(null); setDatePicker('end'); }} palette={palette} />
+                  </View>
+                  <Text style={[styles.copy, { color: palette.textSecondary }]}>Ordenar</Text>
+                  {sortOptions.map(option => <SheetRow key={option.value} label={option.label} selected={listSort === option.value} onPress={() => setListSort(option.value)} palette={palette} />)}
+                </>}
+              </>}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
       <DateSelectSheet visible={datePicker !== null} value={datePicker === 'end' ? listEnd : date} todayDate={todayDate} title={datePicker === 'end' ? 'Hasta' : 'Desde'} palette={palette} onClose={() => setDatePicker(null)} onSelect={value => {
         if (datePicker === 'end') setListEnd(value < date ? date : value);
         else { setDate(value); if (listEnd < value) setListEnd(value); }
@@ -211,4 +275,25 @@ const rangeStyles = StyleSheet.create({
   sheetTodayText: { fontSize: 13, fontWeight: '800' },
   sheetCancel: { minWidth: 100, minHeight: 42, borderWidth: 1, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   sheetCancelText: { fontSize: 13, fontWeight: '700' },
+});
+
+function SheetRow({ label, selected, onPress, palette }: Parameters<typeof FilterChip>[0]) {
+  return (
+    <Pressable accessibilityRole="button" accessibilityState={{ selected }} onPress={onPress}
+      style={({ pressed }) => [mobileStyles.row, { backgroundColor: selected ? palette.primarySoft : pressed ? palette.background : 'transparent' }]}>
+      <Text style={[mobileStyles.rowText, { color: selected ? palette.primary : palette.text }]}>{label}</Text>
+      {selected && <Text accessible={false} style={{ color: palette.primary }}>✓</Text>}
+    </Pressable>
+  );
+}
+
+const mobileStyles = StyleSheet.create({
+  controls: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  sheet: { width: '100%', maxHeight: '75%', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 22, gap: 12 },
+  options: { gap: 2 },
+  handle: { width: 32, height: 4, borderRadius: 2, alignSelf: 'center' },
+  done: { minHeight: 48, minWidth: 52, justifyContent: 'center', alignItems: 'flex-end' },
+  row: { minHeight: 48, paddingVertical: 8, paddingHorizontal: 14, borderRadius: 10, flexDirection: 'row', alignItems: 'center', gap: 12 },
+  rowText: { flex: 1, fontSize: 15, fontWeight: '600' },
+  layoutOption: { borderTopWidth: StyleSheet.hairlineWidth, marginTop: 6, paddingTop: 6 },
 });
