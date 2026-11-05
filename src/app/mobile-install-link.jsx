@@ -54,7 +54,7 @@ export default function MobileInstallLink() {
       <div className="mobile-install-guide">
         <Smartphone size={22} aria-hidden="true" />
         <strong>Escanea con tu cámara</strong>
-        <span>Desde un teléfono Android o iPhone.</span>
+        <span>La app móvil está disponible solo para Android.</span>
       </div>
     </div>
     <div className="mobile-install-share">

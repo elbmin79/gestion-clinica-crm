@@ -6,7 +6,7 @@ export const metadata = { title: 'Instalar Elixir Clinic' };
 
 const platforms = {
   android: { label: 'Android', action: 'Descargar APK', help: 'Abre el archivo descargado y confirma la instalación en Android.' },
-  ios: { label: 'iPhone', action: 'Abrir enlace de instalación', help: 'Sigue las instrucciones de Apple para instalar la app.' },
+  ios: { label: 'iPhone · CRM web' },
 };
 
 export default async function AppDownloadPage() {
@@ -17,14 +17,14 @@ export default async function AppDownloadPage() {
   return <main className="auth-page">
     <article className="auth-card">
       <h1>Instalar Elixir Clinic</h1>
-      <p>Elige tu dispositivo. Después de instalar la app, inicia sesión con tu cuenta del CRM.</p>
+      <p>La app móvil está disponible solo para Android. En iPhone puedes usar el CRM web desde Safari.</p>
       <div className="form-stack">
         {order.map(platform => {
           const { label, action, help } = platforms[platform];
           const release = releases[platform];
           return <section key={platform}>
             <h2>{label}</h2>
-            {platform === 'ios' && !release ? <>
+            {platform === 'ios' ? <>
               <p>Agrega el CRM a la pantalla de inicio desde Safari.</p>
               <ol>
                 <li>Abre el CRM en Safari.</li>
