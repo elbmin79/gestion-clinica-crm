@@ -1,5 +1,6 @@
 import { timingSafeEqual } from 'node:crypto';
 import { validPushSubscription } from './push-validation.js';
+import { BILL_NOTICE } from './clinic-expenses.js';
 
 export function authorizedPushDispatch(request, secret) {
   const supplied = Buffer.from(request.headers.get('authorization') || '');
@@ -18,7 +19,7 @@ export async function dispatchStaffPush(client, send, limit = 20,extraHosts=[]) 
     if (checkError) { state='pending'; reason='Eligibility unavailable'; }
     else if (eligible && validPushSubscription(subscription,extraHosts)) {
       try {
-        await send(subscription, JSON.stringify({title:'CRM clínico',body:row.message,tag:`staff-${row.delivery_id}`,url:row.message==='Nueva solicitud de cita'?`/configuracion?tab=public-agenda&clinic=${encodeURIComponent(row.clinic_id)}`:`/agenda?clinic=${encodeURIComponent(row.clinic_id)}${row.appointment_id ? `&appointment=${encodeURIComponent(row.appointment_id)}` : ''}`}));
+        await send(subscription, JSON.stringify({title:'CRM clínico',body:row.message,tag:`staff-${row.delivery_id}`,url:row.message===BILL_NOTICE?`/pagos?tab=expenses&clinic=${encodeURIComponent(row.clinic_id)}`:row.message==='Nueva solicitud de cita'?`/configuracion?tab=public-agenda&clinic=${encodeURIComponent(row.clinic_id)}`:`/agenda?clinic=${encodeURIComponent(row.clinic_id)}${row.appointment_id ? `&appointment=${encodeURIComponent(row.appointment_id)}` : ''}`}));
         state='sent';
       } catch (error) {
         const status=Number(error.statusCode || 0);

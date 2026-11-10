@@ -9,11 +9,24 @@ import { createPatientDirectoryStore } from '../lib/supabase/patient-directory';
 import { createClinicAgendaStore } from '../lib/supabase/clinic-agenda';
 import { createClinicPaymentsStore } from '../lib/supabase/clinic-payments';
 import ClinicServicesSettings from './clinic-services-settings';
+import ClinicPromotionsSettings from './clinic-promotions-settings';
+import ClinicExpenseLedger from './clinic-expense-ledger';
+import CurrencyConverter, { confirmReferenceRate, ExchangeRatePreview, useReferenceRate } from './exchange-rate-controls';
+import { convertCurrency, paymentExchangeLabel } from '../lib/exchange-rates';
+import AppointmentSessionPrice from './appointment-session-price';
+import AppointmentHistory from './appointment-history';
+import PatientPackagePanel from './patient-package-panel';
+import { usePatientPackages } from './use-patient-packages';
+import { demoPackageBalances } from '../lib/patient-packages';
+import { parseSessionPrice } from '../lib/appointment-pricing';
+import { calculateServiceDeposit, parseFixedDeposit } from '../lib/service-deposits';
+import { quoteSessionPrice } from '../lib/clinic-promotions';
+import { createClinicPromotionsStore } from '../lib/supabase/clinic-promotions';
 import ClinicAvailabilitySettings from './clinic-availability-settings';
 import WhatsAppSettings from './whatsapp-settings';
 import GoogleCalendarSettings from './google-calendar-settings';
 import WhatsAppInbox from './whatsapp-inbox';
-import { initialClinicServices, serviceCategories } from '../lib/clinic-services';
+import { demoClinicServices, eligibleServiceProviders, serviceCategories } from '../lib/clinic-services';
 import { createClinicServicesStore } from '../lib/supabase/clinic-services';
 import { usePatientDirectory } from '../lib/supabase/use-patient-directory';
 import { useClinicAgenda } from '../lib/supabase/use-clinic-agenda';
@@ -214,7 +227,7 @@ function formatCurrencyMXN(value) {
 }
 function summarizeRefundAvailability(patientId, patientName, appointment, appointments, payments) {
   const balance = payments
-    .filter(payment => appointment ? payment.appointmentId === appointment.id : payment.patientId === patientId)
+    .filter(payment => appointment ? payment.appointmentId === appointment.id : payment.patientId === patientId && !payment.packageId)
     .reduce((total, payment) => total + (payment.direction === 'Reembolso' ? -Number(payment.amount) : Number(payment.amount)), 0);
   const isConfirmed = item => ['Confirmada', 'confirmed'].includes(item.status);
   const protectedDeposits = appointment
@@ -320,15 +333,33 @@ function App({ children }) {
   const supabaseConfigured = isSupabaseConfigured();
   const sharedDirectory = usePatientDirectory(supabaseConfigured && !isStandaloneRoute);
   const sharedMode = supabaseConfigured && !isStandaloneRoute;
-  const [serviceCatalog, setServiceCatalog] = useState(initialClinicServices);
+  const [sharedServiceCatalog, setSharedServiceCatalog] = useState([]);
+  const [demoServiceCatalog, setDemoServiceCatalog] = usePersistentList('crm-demo-service-catalog-v1', demoClinicServices, !sharedMode);
+  const serviceCatalog = sharedMode ? sharedServiceCatalog : demoServiceCatalog;
+  const setServiceCatalog = sharedMode ? setSharedServiceCatalog : setDemoServiceCatalog;
   useEffect(() => {
     let active = true;
-    if (!sharedMode) { setServiceCatalog(initialClinicServices); return () => { active = false; }; }
-    if (sharedDirectory.status !== 'ready' || !sharedDirectory.clinicId) { setServiceCatalog([]); return () => { active = false; }; }
-    createClinicServicesStore().load(sharedDirectory.clinicId).then(rows => { if (active) setServiceCatalog(rows); }).catch(() => { if (active) setServiceCatalog([]); });
+    if (!sharedMode) return;
+    if (sharedDirectory.status !== 'ready' || !sharedDirectory.clinicId) { setSharedServiceCatalog([]); return; }
+    createClinicServicesStore().load(sharedDirectory.clinicId).then(rows => { if (active) setSharedServiceCatalog(rows); }).catch(() => { if (active) setSharedServiceCatalog([]); });
     return () => { active = false; };
   }, [sharedMode, sharedDirectory.clinicId, sharedDirectory.status]);
   const clinicTimeZone = sharedMode ? sharedDirectory.timeZone : 'America/Tijuana';
+  const [demoPromotions, setDemoPromotions] = usePersistentList('crm-demo-promotions-v1', [], !sharedMode && !isStandaloneRoute);
+  const [sharedPromotions, setSharedPromotions] = useState(null);
+  const promotionClinicId = sharedDirectory.clinicId;
+  useEffect(() => {
+    if (!sharedMode || sharedDirectory.status !== 'ready' || !promotionClinicId) return;
+    let active = true;
+    createClinicPromotionsStore().load(promotionClinicId).then(
+      rows => { if (active) setSharedPromotions({ clinicId: promotionClinicId, status: 'ready', rows }); },
+      () => { if (active) setSharedPromotions({ clinicId: promotionClinicId, status: 'error', rows: [] }); },
+    );
+    return () => { active = false; };
+  }, [sharedMode, sharedDirectory.status, promotionClinicId]);
+  const promotionData = sharedMode
+    ? sharedPromotions && sharedPromotions.clinicId === promotionClinicId ? sharedPromotions : { status: 'loading', rows: [] }
+    : { status: 'ready', rows: demoPromotions };
   const [clinicProfileName, setClinicProfileName] = useState('Mi clínica');
   const [clinicProfileLoaded, setClinicProfileLoaded] = useState(false);
   const [theme, setTheme] = useState('light');
@@ -425,6 +456,18 @@ function App({ children }) {
   const [focusPatientSearch, setFocusPatientSearch] = useState(false);
   const page = routePages[pathname] || 'overview';
   const can = permission => !sharedMode || hasClinicPermission(sharedDirectory.role, sharedDirectory.permissions, permission);
+  async function saveClinicPromotion(promotion) {
+    if (!can('services.manage')) throw new Error('No tienes permiso para gestionar promociones.');
+    const update = (rows, saved) => [saved, ...rows.filter(item => item.id !== saved.id)];
+    if (sharedMode) {
+      const saved = await createClinicPromotionsStore().save(promotionClinicId, promotion);
+      setSharedPromotions(current => current?.clinicId === promotionClinicId
+        ? { ...current, rows: update(current.rows, saved) } : current);
+    } else {
+      const saved = { ...promotion, id: promotion.id || crypto.randomUUID(), createdAt: promotion.createdAt || new Date().toISOString() };
+      setDemoPromotions(rows => update(rows, saved));
+    }
+  }
   useEffect(() => {
     if (sharedMode && sharedDirectory.status === 'ready' && page === 'whatsapp' && !can('whatsapp.view')) router.replace('/');
   }, [sharedMode, sharedDirectory.status, sharedDirectory.role, sharedDirectory.permissions, page, router]);
@@ -454,6 +497,9 @@ function App({ children }) {
   const [demoPatients, setDemoPatients] = usePersistentList('crm-demo-patients-v1', sharedMode ? [] : initialPatients, !sharedMode && !isStandaloneRoute, migrateDemoPatients);
   const [demoAppointments, setDemoAppointments] = usePersistentList('crm-demo-appointments-v1', sharedMode ? [] : createCurrentDemoAppointments, !sharedMode && !isStandaloneRoute, migrateDemoAppointments);
   const [demoPayments, setPayments] = usePersistentList('crm-demo-payments-v1', [], !sharedMode && !isStandaloneRoute, migrateDemoPayments);
+  const [demoBills, setDemoBills] = usePersistentList('crm-demo-monthly-bills-v1', [], !sharedMode && !isStandaloneRoute);
+  const [demoExpenses, setDemoExpenses] = usePersistentList('crm-demo-expenses-v1', [], !sharedMode && !isStandaloneRoute);
+  const [demoPackages, setDemoPackages] = usePersistentList('crm-demo-packages-v1', [], !sharedMode && !isStandaloneRoute);
   const [demoBusinesses, setDemoBusinesses] = usePersistentList('crm-demo-businesses-v1', sharedMode ? [] : initialBusinesses, !sharedMode && !isStandaloneRoute, migrateDemoBusinesses);
   const [demoBranches, setDemoBranches] = usePersistentList('crm-demo-branches-v1', sharedMode ? [] : initialBranches, !sharedMode && !isStandaloneRoute, migrateDemoBranches);
   const [demoProviders, setDemoProviders] = usePersistentList('crm-demo-providers-v1', sharedMode ? [] : initialProviders, !sharedMode && !isStandaloneRoute);
@@ -985,11 +1031,21 @@ function App({ children }) {
     const date = String(form.get('date') || agendaDate);
     const time = String(form.get('time') || '09:00');
     const modality = String(form.get('modality') || 'Presencial');
+    const note = String(form.get('note') || '').trim();
     const durationMinutes = Number(form.get('durationMinutes') || 45);
     if (!Number.isInteger(durationMinutes) || durationMinutes < 15 || durationMinutes > 720 || durationMinutes % 15 !== 0) { notify('La duración debe ser de 15 minutos a 12 horas, en pasos de 15 minutos.'); return; }
-    const depositRequired = true;
-    const depositAmount = Number(form.get('depositAmount') || 0);
-    if (!Number.isFinite(depositAmount) || depositAmount <= 0) { notify('Indica un monto de anticipo mayor a cero.'); return; }
+    const packageId = String(form.get('packageId') || '');
+    const depositRequired = !packageId;
+    let depositAmount = 0;
+    try { if (depositRequired) depositAmount = parseFixedDeposit(form.get('depositAmount')); }
+    catch (error) { notify(error.message); return; }
+    let sessionPrice;
+    try {
+      sessionPrice = parseSessionPrice(form.get('sessionPriceAmount'), form.get('sessionPriceCurrency'));
+    } catch (error) {
+      notify(error.message);
+      return;
+    }
     if (!isValidAppointmentTime(time, durationMinutes)) { notify(`El horario debe iniciar entre 06:00 y ${latestAppointmentStart(durationMinutes)} para esta duración.`); return; }
     const start=timeToMinutes(time);
     const minutes = timeToMinutes;
@@ -1016,20 +1072,29 @@ function App({ children }) {
     const serviceId = serviceIds[0] || String(form.get('serviceId') || '');
     const selectedCatalogService = serviceCatalog.find(item => item.id === serviceId);
     const selectedCatalogServices = serviceIds.map(id => serviceCatalog.find(item => item.id === id));
+    if (packageId && serviceIds.length !== 1) { notify('Una cita de paquete debe incluir un solo servicio.'); return; }
+    if (packageId && !sharedMode) {
+      const purchase = demoPackageBalances(demoPackages, patientId, demoAppointments, demoPayments).find(item => item.id === packageId);
+      if (!purchase || purchase.serviceId !== serviceIds[0] || !purchase.availableSessions) {
+        notify('El paquete no tiene sesiones disponibles para este servicio.'); return;
+      }
+    }
     if (serviceIds.length > 12 || new Set(serviceIds).size !== serviceIds.length || selectedCatalogServices.some(item => !item || !item.active || (item.branchIds?.length && !item.branchIds.includes(branchId)) || (item.providerIds?.length && !item.providerIds.includes(providerId)))) { notify('Cada servicio debe estar disponible para la sucursal y profesional seleccionados.'); return; }
     const serviceSnapshot = selectedCatalogService ? { code:selectedCatalogService.code, name:selectedCatalogService.name, category:selectedCatalogService.category, durationMin:selectedCatalogService.durationMin, durationMax:selectedCatalogService.durationMax, offers:selectedCatalogService.offers, capturedAt:new Date().toISOString() } : {};
     if (sharedMode) {
       try {
-        await createClinicAgendaStore().create(sharedDirectory.clinicId, { patient: patientRecord, businessId, branchId, providerId, date, time, modality, service, serviceId, serviceIds, serviceSnapshot, depositRequired, depositAmount, durationMinutes, note: '' }, sharedDirectory.timeZone);
+        await createClinicAgendaStore().create(sharedDirectory.clinicId, { patient: patientRecord, businessId, branchId, providerId, date, time, modality, service, serviceId, serviceIds, serviceSnapshot, depositRequired, depositAmount, durationMinutes, note, sessionPrice, packageId }, sharedDirectory.timeZone);
         sharedAgenda.refresh();
         setAgendaDate(date); setModal(null); setPage('agenda'); setProviderFilter(''); setBranchFilter(''); setBusinessFilter(''); notify('Cita guardada en la agenda compartida',false);
       } catch (error) {
+        if (error?.code === 'APPOINTMENT_PRICE_SCHEMA') { notify(error.message); return; }
+        if (packageId && error?.code === '23514' && /package/i.test(error.cause?.message || '')) { notify('El paquete no tiene sesiones disponibles para este servicio.'); return; }
         notify(error?.code === '23P01' ? 'El paciente o profesional ya tiene una cita en ese horario.' : isScheduleBoundsError(error) ? 'La cita debe iniciar a partir de las 06:00, en intervalos de 15 minutos, y terminar a más tardar a medianoche.' : 'No se pudo guardar la cita. Revisa la asignación de sucursal y tus permisos.');
       }
       return;
     }
     const appointmentId = `appointment-${crypto.randomUUID()}`;
-    setAppointments(prev => [...prev, { id: appointmentId, date, time, patient, patientId, initials: patientRecord.initials, service, serviceId, serviceIds, serviceSnapshot, clinician, providerId, branch, branchId, business, businessId, modality, depositRequired, depositAmount, duration: `${durationMinutes} min`, status: 'Por confirmar', tone: patientRecord.tone||'blue' }].sort((a,b)=>a.date.localeCompare(b.date)||a.time.localeCompare(b.time)));
+    setAppointments(prev => [...prev, { id: appointmentId, date, time, patient, patientId, initials: patientRecord.initials, service, serviceId, serviceIds, serviceSnapshot, clinician, providerId, branch, branchId, business, businessId, modality, depositRequired, depositAmount, note, sessionPrice, packageId, duration: `${durationMinutes} min`, status: 'Por confirmar', tone: patientRecord.tone||'blue' }].sort((a,b)=>a.date.localeCompare(b.date)||a.time.localeCompare(b.time)));
     setAgendaDate(date); setModal(null); setPage('agenda'); setProviderFilter(''); setBranchFilter(''); setBusinessFilter(''); notify('Cita agregada a la agenda',false); addDemoAppointmentAlert('new_appointment','Nueva cita registrada',appointmentId);
   };
   const updateAppointment = async (event) => {
@@ -1045,6 +1110,14 @@ function App({ children }) {
     const providerId = String(form.get('providerId') || '');
     const current = appointments.find(item => item.id === id);
     if (!current) return;
+    let sessionPrice;
+    try {
+      sessionPrice = parseSessionPrice(form.get('sessionPriceAmount'), form.get('sessionPriceCurrency'));
+    } catch (error) {
+      notify(error.message);
+      return;
+    }
+    const priceChanged = sessionPrice?.amount !== current.sessionPrice?.amount || sessionPrice?.currency !== current.sessionPrice?.currency;
     let serviceIds = [];
     try { serviceIds = JSON.parse(String(form.get('serviceIds') || '[]')); } catch { serviceIds = []; }
     if (!Array.isArray(serviceIds) || serviceIds.some(id => typeof id !== 'string')) { notify('Revisa los servicios seleccionados.'); return; }
@@ -1073,6 +1146,7 @@ function App({ children }) {
       if (received + 0.001 < Number(current.depositAmount || 0)) { notify(`Registra el anticipo de ${formatCurrencyMXN(current.depositAmount)} antes de confirmar esta cita.`); return; }
     }
     const modality = String(form.get('modality') || current.modality || 'Presencial');
+    const note = String(form.get('note') || '').trim();
     if (status !== 'Cancelada' && !isValidAppointmentTime(time, durationMinutes)) { notify(`El horario debe iniciar entre 06:00 y ${latestAppointmentStart(durationMinutes)} para esta duración.`); return; }
     const minutes = timeToMinutes;
     if (status !== 'Cancelada') {
@@ -1090,14 +1164,15 @@ function App({ children }) {
     }
     if (sharedMode) {
       try {
-        await createClinicAgendaStore().update(sharedDirectory.clinicId, current, { date, time, status, modality, durationMinutes, businessId, branchId, providerId, service, serviceId, serviceIds, serviceSnapshot }, sharedDirectory.timeZone);
+        await createClinicAgendaStore().update(sharedDirectory.clinicId, current, { date, time, status, modality, durationMinutes, businessId, branchId, providerId, service, serviceId, serviceIds, serviceSnapshot, note, sessionPrice: priceChanged ? sessionPrice : undefined }, sharedDirectory.timeZone);
         sharedAgenda.refresh();
       } catch (error) {
+        if (error?.code === 'APPOINTMENT_PRICE_SCHEMA') { notify(error.message); return; }
         notify(error?.code === '23P01' ? 'El paciente o profesional ya tiene una cita en ese horario.' : isScheduleBoundsError(error) ? 'La cita debe iniciar a partir de las 06:00, en intervalos de 15 minutos, y terminar a más tardar a medianoche.' : error?.code === '23514' ? `Registra el anticipo de ${formatCurrencyMXN(current.depositAmount)} antes de confirmar esta cita.` : 'No se pudo actualizar la cita. Revisa el horario y tus permisos.');
         return;
       }
     } else {
-      setAppointments(items => items.map(item => item.id === id ? { ...item, date, time, status, modality, service, serviceId, serviceIds, serviceSnapshot, duration: `${durationMinutes} min`, businessId, business: selectedBusiness.name, branchId, branch: selectedBranch.name, providerId, clinician: selectedProvider.name } : item).sort((a,b)=>a.date.localeCompare(b.date)||a.time.localeCompare(b.time)));
+      setAppointments(items => items.map(item => item.id === id ? { ...item, date, time, status, modality, service, serviceId, serviceIds, serviceSnapshot, note, sessionPrice, duration: `${durationMinutes} min`, businessId, business: selectedBusiness.name, branchId, branch: selectedBranch.name, providerId, clinician: selectedProvider.name } : item).sort((a,b)=>a.date.localeCompare(b.date)||a.time.localeCompare(b.time)));
     }
     if (!sharedMode && (status !== current.status && status === 'Cancelada' || date !== current.date || time !== current.time || durationMinutes !== Number.parseInt(current.duration,10) || providerId !== current.providerId || branchId !== current.branchId)) addDemoAppointmentAlert('agenda_change',status === 'Cancelada' ? 'Cita cancelada' : 'Horario o asignación de cita actualizado',id);
     setAgendaDate(date); setSelectedAppointment(null); setModal(null); notify('Cita actualizada',false);
@@ -1121,7 +1196,24 @@ function App({ children }) {
     } else setAppointments(items => items.map(item => item.id === appointment.id ? { ...item, status: 'Cancelada' } : item));
     setSelectedAppointment(null); setModal(null); notify('Cita cancelada',false);
   };
-  const createPayment = async (event) => {
+  const recordAppointmentArrival = async appointment => {
+    if (!can('agenda.edit') || appointment.arrivedAt || !['Por confirmar', 'Confirmada'].includes(appointment.status)) return;
+    try {
+      const arrivedAt = sharedMode
+        ? await createClinicAgendaStore().recordArrival(sharedDirectory.clinicId, appointment.id)
+        : new Date().toISOString();
+      if (sharedMode) sharedAgenda.refresh();
+      else {
+        setAppointments(items => items.map(item => item.id === appointment.id && !item.arrivedAt ? { ...item, arrivedAt } : item));
+        addDemoAppointmentAlert('patient_arrived', 'Paciente en recepción', appointment.id);
+      }
+      setSelectedAppointment(current => current?.id === appointment.id ? { ...current, arrivedAt } : current);
+      notify('Llegada registrada', false);
+    } catch (error) {
+      notify(error.message);
+    }
+  };
+  const createPayment = async (event, referenceQuote = null) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     if (!can('payments.create')) { notify('No tienes permiso para registrar movimientos.'); return; }
@@ -1130,14 +1222,26 @@ function App({ children }) {
     let patientId = String(form.get('patientId') || '');
     if (appointment) patientId = appointment.patientId || paymentPatients.find(patient => patient.name === appointment.patient)?.id || patientId;
     const patient = paymentPatients.find(item => item.id === patientId);
-    const amount = Number(form.get('amount') || 0);
+    const packageId = appointment?.packageId || (!appointment ? String(form.get('packageId') || '') : '');
+    const date = String(form.get('date') || '');
+    let originalAmount;
+    let amount;
+    try {
+      originalAmount = parseSessionPrice(form.get('amount'), referenceQuote ? 'USD' : 'MXN')?.amount;
+      amount = referenceQuote ? convertCurrency(originalAmount,'USD',referenceQuote)?.amount : originalAmount;
+    } catch (error) {
+      notify(error.message);
+      return;
+    }
     const direction = String(form.get('direction') || 'Ingreso');
     if (direction === 'Reembolso' && !can('payments.refund')) { notify('No tienes permiso para registrar reembolsos.'); return; }
-    const date = String(form.get('date') || '');
     if (!patient || !date || !Number.isFinite(amount) || amount <= 0) { notify('Selecciona un paciente, una fecha y un monto mayor a cero.'); return; }
-    const balance = payments.filter(payment => appointment ? payment.appointmentId === appointment.id : payment.patientId === patient.id).reduce((total, payment) => total + (payment.direction === 'Reembolso' ? -Number(payment.amount) : Number(payment.amount)), 0);
-    if (direction === 'Reembolso' && amount > balance + 0.001) { notify('El reembolso no puede superar los ingresos registrados para este expediente o cita.'); return; }
-    if (direction === 'Reembolso') {
+    if (packageId && !sharedMode) {
+      const purchase = demoPackageBalances(demoPackages, patientId, demoAppointments, demoPayments).find(item => item.id === packageId);
+      const limit = direction === 'Reembolso' ? purchase?.paidAmount : purchase?.outstandingAmount;
+      if (limit == null || amount > limit + 0.001) { notify('El movimiento supera el saldo disponible del paquete.'); return; }
+    }
+    if (direction === 'Reembolso' && (appointment || !packageId)) {
       const availability = summarizeRefundAvailability(patient.id, patient.name, appointment, paymentAppointments, payments);
       if (amount > availability.available + 0.001) {
         notify(appointment
@@ -1149,15 +1253,27 @@ function App({ children }) {
     const branchId = appointment?.branchId || patient.branchId || branches.find(branch => branch.name === patient.branch)?.id || '';
     const providerId = appointment?.providerId || patient.providerId || providers.find(provider => provider.name === patient.clinician)?.id || '';
     const businessId = appointment?.businessId || branches.find(branch => branch.id === branchId)?.businessId || '';
+    let exchange = null;
+    if (referenceQuote) {
+      try {
+        const confirmed = await confirmReferenceRate(date,referenceQuote);
+        if (sharedMode && !confirmed.id) throw new Error('No se pudo conservar el tipo de cambio.');
+        exchange = { ...confirmed,originalAmount };
+      } catch (error) {
+        notify(error.message || 'No se pudo confirmar el tipo de cambio.');
+        return;
+      }
+    }
     if (sharedMode) {
       try {
-        await createClinicPaymentsStore().create(sharedDirectory.clinicId, patient, appointment, { direction, amount, method: String(form.get('method') || 'Otro'), date, note: String(form.get('note') || '').trim() });
+        await createClinicPaymentsStore().create(sharedDirectory.clinicId, patient, appointment, { direction, amount, packageId, exchange, method: String(form.get('method') || 'Otro'), date, note: String(form.get('note') || '').trim() });
         sharedPaymentWorkspace.refresh();
         setModal(modalReturn === 'appointment' ? 'appointment' : null);
         setModalReturn(null);
         notify(direction === 'Reembolso' ? 'Reembolso guardado en el historial compartido' : 'Pago guardado en el historial compartido');
       } catch (error) {
         const databaseDetail = [error?.cause?.constraint, error?.cause?.message, error?.cause?.details].filter(Boolean).join(' ');
+        if (/package balance|payments_package_balance/.test(databaseDetail)) { notify('El movimiento supera el saldo disponible del paquete.'); return; }
         notify(databaseDetail.includes('payments_refund_preserves_appointment_deposit')
           ? 'Ese reembolso dejaría una cita confirmada por debajo del anticipo requerido.'
           : databaseDetail.includes('payments_refund_preserves_patient_deposits')
@@ -1166,7 +1282,7 @@ function App({ children }) {
       }
       return;
     }
-    const payment = { id: `payment-${Date.now()}`, patientId: patient.id, patientNameSnapshot: patient.name, appointmentId: appointment?.id || '', date, direction, amount, method: String(form.get('method') || 'Otro'), note: String(form.get('note') || '').trim(), branchId, providerId, businessId, branchName: appointment?.branch || patient.branch || '', providerName: appointment?.clinician || patient.clinician || '', businessName: appointment?.business || businesses.find(item => item.id === businessId)?.name || '', createdAt: new Date().toISOString() };
+    const payment = { id: `payment-${Date.now()}`, patientId: patient.id, patientNameSnapshot: patient.name, appointmentId: appointment?.id || '', packageId, date, direction, amount, exchange, method: String(form.get('method') || 'Otro'), note: String(form.get('note') || '').trim(), branchId, providerId, businessId, branchName: appointment?.branch || patient.branch || '', providerName: appointment?.clinician || patient.clinician || '', businessName: appointment?.business || businesses.find(item => item.id === businessId)?.name || '', createdAt: new Date().toISOString() };
     setPayments(previous => [...previous, payment].sort((a,b)=>b.date.localeCompare(a.date)||String(b.createdAt||'').localeCompare(String(a.createdAt||''))));
     setModal(modalReturn === 'appointment' ? 'appointment' : null);
     setModalReturn(null);
@@ -1520,8 +1636,14 @@ function App({ children }) {
         {page==='patients' && <PatientsPage key={`${activeWorkspaceSelection.businessId}:${activeWorkspaceSelection.branchId}`} patients={filteredPatients} allPatients={workspacePatients} query={query} setQuery={setQuery} searchRef={patientSearchRef} setModal={setModal} canCreatePatient={can('patients.create')} onOpen={p=>{setSelectedPatient(p);setModalReturn(null);setModal('patient')}}/>}
         {!sharedMode&&page==='agenda' && <AgendaPage currentAccountProviderId={providers.find(provider=>provider.userId&&provider.userId===userProfile.userId)?.id||''} accountReady={profileLoaded&&sharedDirectory.status==='ready'} listEnd={agendaListEnd} setListEnd={setAgendaListEnd} timeZone={clinicTimeZone} appointments={filteredAppointments} payments={workspacePayments} providerFilter={providerFilter} setProviderFilter={setProviderFilter} providerOptions={providerOptions} branchFilter={branchFilter} setBranchFilter={updateAgendaBranchFilter} branchOptions={branchOptions} businessFilter={businessFilter} setBusinessFilter={updateAgendaBusinessFilter} businessOptions={businessOptions} period={period} setPeriod={setPeriod} onNewAppointment={openNewAppointment} canCreateAppointment onEditAppointment onCancelAppointment notify={notify} agendaDate={agendaDate} setAgendaDate={setAgendaDate} onOpenAppointment={appointment=>{setSelectedAppointment(appointment);setModal('appointment')}}/>}
         {sharedMode&&page==='agenda'&&<AgendaPage currentAccountProviderId={providers.find(provider=>provider.userId&&provider.userId===userProfile.userId)?.id||''} accountReady={profileLoaded&&sharedDirectory.status==='ready'} listEnd={agendaListEnd} setListEnd={setAgendaListEnd} timeZone={clinicTimeZone} appointments={filteredAppointments} payments={[]} sharedMode providerFilter={providerFilter} setProviderFilter={setProviderFilter} providerOptions={providerOptions} branchFilter={branchFilter} setBranchFilter={updateAgendaBranchFilter} branchOptions={branchOptions} businessFilter={businessFilter} setBusinessFilter={updateAgendaBusinessFilter} businessOptions={businessOptions} period={period} setPeriod={setPeriod} onNewAppointment={openNewAppointment} canCreateAppointment={can('agenda.create')} canEditAppointment={can('agenda.edit')} canCancelAppointment={can('agenda.cancel')} notify={notify} agendaDate={agendaDate} setAgendaDate={setAgendaDate} onOpenAppointment={appointment=>{setSelectedAppointment(appointment);setModal('appointment')}}/>}
-        {!sharedMode&&page==='payments' && <PaymentsPage payments={workspacePayments} appointments={workspaceAppointments} patients={workspacePatients} onNewPayment={()=>openPaymentModal()} canCreatePayment/>}
-        {sharedMode&&page==='payments'&&<PaymentsPage sharedMode payments={workspacePayments} appointments={workspacePaymentAppointments} patients={workspacePaymentPatients} onNewPayment={()=>openPaymentModal()} canCreatePayment={can('payments.create')}/>}
+        {page==='payments' && <FinanceWorkspace expenses={<ClinicExpenseLedger clinicId={sharedDirectory.clinicId} sharedMode={sharedMode}
+          timeZone={clinicTimeZone} canWrite={can('payments.create')} payments={payments} paymentsReady={!sharedMode || sharedPaymentWorkspace.status==='ready'}
+          demoBills={demoBills} demoExpenses={demoExpenses}
+          onDemoBill={saved=>setDemoBills(rows=>[saved,...rows.filter(item=>item.id!==saved.id)])}
+          onDemoExpense={saved=>setDemoExpenses(rows=>[saved,...rows.filter(item=>item.id!==saved.id)])}/>}>
+          <PaymentsPage sharedMode={sharedMode} payments={workspacePayments} appointments={sharedMode ? workspacePaymentAppointments : workspaceAppointments}
+            patients={sharedMode ? workspacePaymentPatients : workspacePatients} onNewPayment={()=>openPaymentModal()} canCreatePayment={can('payments.create')}/>
+        </FinanceWorkspace>}
         {!sharedMode&&page==='reminders'&&<RemindersPage reminders={workspaceReminders}/>}
         {sharedMode&&page==='reminders'&&<RemindersPage sharedMode reminders={workspaceReminders}/>}
       {page==='consents'&&<ConsentsPage patients={workspacePatients} templates={consentTemplatesForPage} notify={notify} onOpenDocument={openPatientDocument} onPrepareConsent={template=>openConsentPreparation('',null,template?.id||template?.title||'')} onNewTemplate={()=>openConsentTemplateCreation()} onNewVersion={template=>openConsentTemplateCreation(null, template)} sharedMode={sharedMode} canPrepare={can('documents.create')} canManageTemplates={can('documents.manage_templates')}/>}
@@ -1529,16 +1651,16 @@ function App({ children }) {
         {!sharedMode&&page==='team' && <TeamPage businesses={businesses} branches={branches} providers={providers} setModal={setModal} notify={notify} onEditBranch={branch=>{setSelectedBranchRecord(branch);setModal('edit-branch')}} onEditProvider={provider=>{setSelectedProvider(provider);setModal('edit-provider')}}/>}
         {sharedMode&&page==='team'&&<><TeamPage sharedMode clinicId={sharedDirectory.clinicId} businesses={businesses} branches={branches} providers={providers} setModal={setModal} notify={notify} onEditBranch={branch=>{setSelectedBranchRecord(branch);setModal('edit-branch')}} onEditProvider={provider=>{setSelectedProvider(provider);setModal('edit-provider')}} canManageBusinesses={can('team.manage_branches')} canManageProviders={can('team.manage_professionals')}/>{sharedDirectory.role==='admin'&&<ClinicAccessManager clinicId={sharedDirectory.clinicId}/>}</>}
         {page==='whatsapp'&&<WhatsAppInbox sharedMode={sharedMode} clinicId={sharedDirectory.clinicId} role={sharedDirectory.role} permissions={sharedDirectory.permissions}/>}
-        {page==='settings'&&<SettingsPage currentUserId={userProfile.userId} publicBranches={branches} publicProviders={providers} services={serviceCatalog} patients={patients} onRequestApproved={sharedDirectory.refresh} clinicName={activeClinicName} sharedMode={sharedMode} clinicId={sharedDirectory.clinicId} role={sharedDirectory.role} permissions={sharedDirectory.permissions} branches={workspaceBranches} providers={workspaceProviders} timeZone={sharedDirectory.timeZone} onCatalogChange={setServiceCatalog} onSaveClinicName={saveClinicName}/>}
+        {page==='settings'&&<SettingsPage currentUserId={userProfile.userId} publicBranches={branches} publicProviders={providers} services={serviceCatalog} promotionData={promotionData} onSavePromotion={saveClinicPromotion} patients={patients} onRequestApproved={sharedDirectory.refresh} clinicName={activeClinicName} sharedMode={sharedMode} clinicId={sharedDirectory.clinicId} role={sharedDirectory.role} permissions={sharedDirectory.permissions} branches={workspaceBranches} providers={workspaceProviders} timeZone={sharedDirectory.timeZone} onCatalogChange={setServiceCatalog} onSaveClinicName={saveClinicName}/>}
         {page==='profile'&&<ProfilePage profile={{...userProfile,name:displayUserName}} clinicName={activeClinicName} memberships={sharedDirectory.memberships} clinicId={sharedDirectory.clinicId} onSelectClinic={sharedDirectory.chooseClinic} sharedMode={sharedMode} onProfileChange={setUserProfile} notify={notify}/>}
         </div>
       </div>
     </main>
     {modal==='install-app' && <Modal className="mobile-install-modal" title="Instalar Elixir Clinic para Android" subtitle="Escanea el código con tu teléfono o copia el enlace." close={()=>setModal(null)}><MobileInstallLink /></Modal>}
     {modal==='confirm-logout'&&<Modal title="Cerrar sesión" subtitle="¿Quieres salir de tu cuenta en este dispositivo?" close={()=>setModal(null)}><div className="modal-actions"><button type="button" className="button secondary" onClick={()=>setModal(null)}>Cancelar</button><form action={async formData=>{await unlinkPushOnSignOut(formData);await signOut(formData)}}><button type="submit" className="button primary">Cerrar sesión</button></form></div></Modal>}
-    {modal==='patient' && selectedPatient && <PatientModal patient={selectedPatient} appointments={workspaceAppointments} activities={workspacePatientActivities.filter(activity=>activity.patientId===selectedPatient.id)} clinicalHistory={sharedMode?(selectedPatient.clinicalHistory||[]):demoClinicalHistory.filter(item=>item.patientId===selectedPatient.id)} botoxTreatments={sharedMode?(selectedPatient.botoxTreatments||[]):demoBotoxTreatments.filter(item=>item.patientId===selectedPatient.id)} recordFiles={sharedMode?(selectedPatient.recordFiles||[]):demoRecordFiles.filter(item=>item.patientId===selectedPatient.id)} sharedMode={sharedMode} canEditPatient={can('patients.edit')} canDiagnose={can('clinical.edit')} canWriteClinical={can('clinical.create')} canPrepareContract={can('documents.create')} canPrepareConsent={can('documents.create')} canCreateAppointment={can('agenda.create')} close={()=>setModal(null)} notify={notify} onAddActivity={()=>setModal('new-patient-activity')} onNewEncounter={()=>setModal('new-clinical-encounter')} onNewBotoxTreatment={()=>setModal('new-botox-treatment')} onAddRecordFile={()=>setModal('new-patient-file')} onOpenRecordFile={openPatientFile} onEdit={()=>setModal('edit-patient')} onDiagnosis={()=>setModal('diagnosis')} onNewAppointment={()=>openNewAppointment(agendaDate,'17:00',selectedPatient.id)} onPrepareContract={()=>openContractPreparation(selectedPatient.id,'patient')} onPrepareConsent={()=>openConsentPreparation(selectedPatient.id,'patient')} onOpenContract={()=>openPatientDocument(selectedPatient,'contract','patient')} onOpenConsent={()=>openPatientDocument(selectedPatient,'consent','patient')} onOpenDocumentRecord={record=>openPatientDocumentRecord(selectedPatient,record,'patient')}/>}
-    {modal==='appointment' && selectedAppointment && <AppointmentModal serviceCatalog={serviceCatalog} sharedMode={sharedMode} canEditAppointment={can('agenda.edit')} canCancelAppointment={can('agenda.cancel')} canCreatePayment={can('payments.create')} canManagePayments={!sharedMode||can('payments.create')} paymentDataReady={!sharedMode||sharedPaymentWorkspace.status==='ready'} appointment={selectedAppointment} businesses={workspaceBusinesses} branches={workspaceBranches} providers={workspaceProviders} payments={workspacePayments.filter(payment=>payment.appointmentId===selectedAppointment.id)} close={()=>{setModal(null);setSelectedAppointment(null)}} onSubmit={updateAppointment} onCancelAppointment={()=>cancelAppointment(selectedAppointment)} onOpenPatient={openPatientFromAppointment} onAddPayment={()=>openPaymentModal(selectedAppointment.id)}/>}
-    {modal==='new-payment' && <PaymentModal close={()=>{setModal(modalReturn==='appointment'?'appointment':null);setModalReturn(null)}} onSubmit={createPayment} canRefund={can('payments.refund')} defaultDate={paymentDefaults.date} defaultAppointmentId={paymentDefaults.appointmentId} patients={workspacePaymentPatients} appointments={selectedAppointment?[...workspacePaymentAppointments.filter(item=>item.id!==selectedAppointment.id),selectedAppointment]:workspacePaymentAppointments} payments={workspacePayments}/>}
+    {modal==='patient' && selectedPatient && <PatientModal patient={selectedPatient} packagePanel={<PatientPackagePanel key={selectedPatient.id} patient={selectedPatient} clinicId={sharedDirectory.clinicId} sharedMode={sharedMode} timeZone={clinicTimeZone} canCreate={can('payments.create')} services={serviceCatalog} promotions={promotionData.rows} demoPurchases={demoPackages} appointments={demoAppointments} payments={demoPayments} onDemoPurchase={purchase=>setDemoPackages(items=>[purchase,...items.filter(item=>item.id!==purchase.id)])}/>} appointments={workspaceAppointments} activities={workspacePatientActivities.filter(activity=>activity.patientId===selectedPatient.id)} clinicalHistory={sharedMode?(selectedPatient.clinicalHistory||[]):demoClinicalHistory.filter(item=>item.patientId===selectedPatient.id)} botoxTreatments={sharedMode?(selectedPatient.botoxTreatments||[]):demoBotoxTreatments.filter(item=>item.patientId===selectedPatient.id)} recordFiles={sharedMode?(selectedPatient.recordFiles||[]):demoRecordFiles.filter(item=>item.patientId===selectedPatient.id)} sharedMode={sharedMode} canEditPatient={can('patients.edit')} canDiagnose={can('clinical.edit')} canWriteClinical={can('clinical.create')} canPrepareContract={can('documents.create')} canPrepareConsent={can('documents.create')} canCreateAppointment={can('agenda.create')} close={()=>setModal(null)} notify={notify} onAddActivity={()=>setModal('new-patient-activity')} onNewEncounter={()=>setModal('new-clinical-encounter')} onNewBotoxTreatment={()=>setModal('new-botox-treatment')} onAddRecordFile={()=>setModal('new-patient-file')} onOpenRecordFile={openPatientFile} onEdit={()=>setModal('edit-patient')} onDiagnosis={()=>setModal('diagnosis')} onNewAppointment={()=>openNewAppointment(agendaDate,'17:00',selectedPatient.id)} onPrepareContract={()=>openContractPreparation(selectedPatient.id,'patient')} onPrepareConsent={()=>openConsentPreparation(selectedPatient.id,'patient')} onOpenContract={()=>openPatientDocument(selectedPatient,'contract','patient')} onOpenConsent={()=>openPatientDocument(selectedPatient,'consent','patient')} onOpenDocumentRecord={record=>openPatientDocumentRecord(selectedPatient,record,'patient')}/>}
+    {modal==='appointment' && selectedAppointment && <AppointmentModal serviceCatalog={serviceCatalog} timeZone={clinicTimeZone} onRecordArrival={recordAppointmentArrival} sharedMode={sharedMode} canEditAppointment={can('agenda.edit')} canCancelAppointment={can('agenda.cancel')} canCreatePayment={can('payments.create')} canManagePayments={!sharedMode||can('payments.create')} paymentDataReady={!sharedMode||sharedPaymentWorkspace.status==='ready'} appointment={selectedAppointment} businesses={workspaceBusinesses} branches={workspaceBranches} providers={workspaceProviders} payments={workspacePayments.filter(payment=>payment.appointmentId===selectedAppointment.id)} close={()=>{setModal(null);setSelectedAppointment(null)}} onSubmit={updateAppointment} onCancelAppointment={()=>cancelAppointment(selectedAppointment)} onOpenPatient={openPatientFromAppointment} onAddPayment={()=>openPaymentModal(selectedAppointment.id)}/>}
+    {modal==='new-payment' && <PaymentModal sharedMode={sharedMode} clinicId={sharedDirectory.clinicId} demoPurchases={demoPackages} demoAppointments={demoAppointments} demoPayments={demoPayments} close={()=>{setModal(modalReturn==='appointment'?'appointment':null);setModalReturn(null)}} onSubmit={createPayment} canRefund={can('payments.refund')} defaultDate={paymentDefaults.date} defaultAppointmentId={paymentDefaults.appointmentId} patients={workspacePaymentPatients} appointments={selectedAppointment?[...workspacePaymentAppointments.filter(item=>item.id!==selectedAppointment.id),selectedAppointment]:workspacePaymentAppointments} payments={workspacePayments}/>}
     {modal==='new-patient-activity' && selectedPatient && <Modal title="Registrar seguimiento" subtitle={`${selectedPatient.name} · Expediente ${selectedPatient.id}`} close={()=>setModal('patient')}><form onSubmit={addPatientActivity} className="form-stack"><input type="hidden" name="patientId" value={selectedPatient.id}/><label>Tipo de actividad<select name="type" defaultValue="Seguimiento"><option>Seguimiento</option><option>Llamada</option><option>Mensaje</option><option>Administrativa</option><option>Otro</option></select></label><label>Nota<textarea name="note" rows="4" maxLength="1000" placeholder="Resumen de llamada, acuerdo o pendiente. No agregues datos clínicos sensibles." required autoFocus/></label><div className="form-note"><ShieldCheck size={15}/> {sharedMode?'Nota guardada en la base compartida del consultorio.':'Nota interna de demostración, guardada solo en este navegador.'}</div><div className="modal-actions"><button type="button" className="button secondary" onClick={()=>setModal('patient')}>Cancelar</button><button className="button primary" type="submit"><Check size={15}/> Guardar nota</button></div></form></Modal>}
     {modal==='new-clinical-encounter' && selectedPatient && <ClinicalEncounterModal patient={selectedPatient} appointments={workspaceAppointments.filter(item=>item.patientId===selectedPatient.id||item.patient===selectedPatient.name)} sharedMode={sharedMode} close={()=>setModal('patient')} onSubmit={addClinicalEncounter}/>}
     {modal==='new-botox-treatment' && selectedPatient && <BotoxTreatmentModal patient={selectedPatient} appointments={workspaceAppointments.filter(item=>item.patientId===selectedPatient.id||item.patient===selectedPatient.name)} sharedMode={sharedMode} close={()=>setModal('patient')} onSubmit={addBotoxTreatment}/>}
@@ -1548,7 +1670,7 @@ function App({ children }) {
     {modal==='contract-view' && selectedPatient && <ContractViewerModal sharedMode={sharedMode} patient={viewedContractPatient || selectedPatient} close={()=>setModal(modalReturn || null)} onPrint={()=>window.print()} onDiagnosis={()=>setModal('diagnosis')} onSign={()=>simulateSignature('contract')} onPrepare={()=>openContractPreparation(selectedPatient.id, modalReturn)}/>}
     {modal==='consent-view' && selectedPatient && <ConsentViewerModal sharedMode={sharedMode} patient={selectedPatient} document={selectedConsent} content={selectedConsentRecord?.contentSnapshot ?? ''} status={selectedConsentRecord?.status || selectedPatient.consent} signedAt={selectedConsentRecord?.signedAt || null} close={()=>setModal(modalReturn || null)} onPrint={()=>window.print()} onSign={()=>simulateSignature('consent')}/>}
     {modal==='new-patient' && <Modal title="Agregar paciente" subtitle="Crea el expediente; el profesional se elige en cada cita." close={()=>setModal(null)}><form onSubmit={addPatient} className="form-stack"><label>Nombre completo<input name="name" autoFocus placeholder="Ej. Andrea García" required/></label><div className="form-grid"><label>Correo electrónico<input name="email" type="email" placeholder="correo@ejemplo.com"/></label><label>Teléfono<input name="phone" placeholder="Teléfono de contacto"/></label></div><label>Tratamiento o servicio<input name="treatment" placeholder="Por definir"/></label><label>Sucursal<select name="branchId" defaultValue={activeWorkspaceSelection.branchId || workspaceBranches.find(item=>item.active)?.id || ''}><option value="">Sin asignar</option>{workspaceBranches.filter(item=>item.active).map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</select></label><div className="form-note"><ShieldCheck size={15}/> {sharedMode?"Se guardará en el directorio compartido del consultorio.":"Prototipo de demostración: no ingreses datos reales de pacientes."}</div><div className="modal-actions"><button type="button" className="button secondary" onClick={()=>setModal(null)}>Cancelar</button><button className="button primary" type="submit"><Plus size={16}/> Crear expediente</button></div></form></Modal>}
-    {modal==='edit-patient' && selectedPatient && <Modal title="Editar expediente" subtitle={`${selectedPatient.id} · Actualiza sus datos de contacto y atención.`} close={()=>setModal('patient')}><form onSubmit={updatePatient} className="form-stack"><input type="hidden" name="id" value={selectedPatient.id}/><label>Nombre completo<input name="name" defaultValue={selectedPatient.name} autoFocus required/></label><div className="form-grid"><label>Correo electrónico<input name="email" type="email" defaultValue={selectedPatient.email||''} placeholder="correo@ejemplo.com"/></label><label>Teléfono<input name="phone" defaultValue={selectedPatient.phone||''} placeholder="Teléfono de contacto"/></label></div><label>Tratamiento o servicio<input name="treatment" defaultValue={selectedPatient.treatment||''} placeholder="Por definir"/></label><div className="form-grid"><label>Sucursal<select name="branchId" defaultValue={workspaceBranches.find(item=>item.name===selectedPatient.branch)?.id||selectedPatient.branchId||''}><option value="">Sin asignar</option>{workspaceBranches.filter(item=>item.active).map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label>Profesional de referencia<select name="providerId" defaultValue={workspaceProviders.find(item=>item.name===selectedPatient.clinician)?.id||selectedPatient.providerId||''}><option value="">Sin asignar</option>{workspaceProviders.filter(item=>item.active).map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</select></label></div><div className="form-note"><ShieldCheck size={15}/> Este profesional solo se sugiere al agendar; cada cita puede tener otro.</div><label>Estado<select name="status" defaultValue={selectedPatient.status}><option>Activo</option><option>Seguimiento</option><option>Nuevo</option><option>Inactivo</option></select></label><label className="whatsapp-opt-in"><input type="checkbox" name="whatsappOptIn" defaultChecked={Boolean(selectedPatient.whatsappOptIn)}/> Autoriza avisos de citas por WhatsApp</label><label>Origen de la autorización<select name="whatsappOptInSource" defaultValue={selectedPatient.whatsappOptInSource||''}><option value="">Seleccionar si autoriza…</option><option value="written">Consentimiento escrito</option><option value="verbal">Autorización verbal</option><option value="electronic">Consentimiento electrónico</option></select></label><div className="form-note"><ShieldCheck size={15}/> Registra solo una autorización ya otorgada por el paciente. Esto no envía mensajes.</div><div className="form-note"><ShieldCheck size={15}/> {sharedMode?"Cambios guardados en el directorio compartido.":"Datos guardados solo en este navegador de demostración."}</div><div className="modal-actions"><button type="button" className="button secondary" onClick={()=>setModal('patient')}>Cancelar</button><button className="button primary" type="submit"><Check size={15}/> Guardar cambios</button></div></form></Modal>}    {modal==='new-appointment' && <NewAppointmentModal serviceCatalog={serviceCatalog} sharedMode={sharedMode} canCreatePatient={can('patients.create')} onCreatePatient={createAppointmentPatient} close={()=>setModal(null)} onSubmit={createAppointment} defaultDate={appointmentDefaults.date} defaultTime={appointmentDefaults.time} defaultPatientId={appointmentDefaults.patientId} defaultProviderId={appointmentDefaults.providerId} defaultBusinessId={activeWorkspaceSelection.businessId} defaultBranchId={activeWorkspaceSelection.branchId} patients={workspacePatients} businesses={workspaceBusinesses} branches={workspaceBranches} providers={workspaceProviders} appointments={workspaceAppointments}/>}
+    {modal==='edit-patient' && selectedPatient && <Modal title="Editar expediente" subtitle={`${selectedPatient.id} · Actualiza sus datos de contacto y atención.`} close={()=>setModal('patient')}><form onSubmit={updatePatient} className="form-stack"><input type="hidden" name="id" value={selectedPatient.id}/><label>Nombre completo<input name="name" defaultValue={selectedPatient.name} autoFocus required/></label><div className="form-grid"><label>Correo electrónico<input name="email" type="email" defaultValue={selectedPatient.email||''} placeholder="correo@ejemplo.com"/></label><label>Teléfono<input name="phone" defaultValue={selectedPatient.phone||''} placeholder="Teléfono de contacto"/></label></div><label>Tratamiento o servicio<input name="treatment" defaultValue={selectedPatient.treatment||''} placeholder="Por definir"/></label><div className="form-grid"><label>Sucursal<select name="branchId" defaultValue={workspaceBranches.find(item=>item.name===selectedPatient.branch)?.id||selectedPatient.branchId||''}><option value="">Sin asignar</option>{workspaceBranches.filter(item=>item.active).map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label>Profesional de referencia<select name="providerId" defaultValue={workspaceProviders.find(item=>item.name===selectedPatient.clinician)?.id||selectedPatient.providerId||''}><option value="">Sin asignar</option>{workspaceProviders.filter(item=>item.active).map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</select></label></div><div className="form-note"><ShieldCheck size={15}/> Este profesional solo se sugiere al agendar; cada cita puede tener otro.</div><label>Estado<select name="status" defaultValue={selectedPatient.status}><option>Activo</option><option>Seguimiento</option><option>Nuevo</option><option>Inactivo</option></select></label><label className="whatsapp-opt-in"><input type="checkbox" name="whatsappOptIn" defaultChecked={Boolean(selectedPatient.whatsappOptIn)}/> Autoriza avisos de citas por WhatsApp</label><label>Origen de la autorización<select name="whatsappOptInSource" defaultValue={selectedPatient.whatsappOptInSource||''}><option value="">Seleccionar si autoriza…</option><option value="written">Consentimiento escrito</option><option value="verbal">Autorización verbal</option><option value="electronic">Consentimiento electrónico</option></select></label><div className="form-note"><ShieldCheck size={15}/> Registra solo una autorización ya otorgada por el paciente. Esto no envía mensajes.</div><div className="form-note"><ShieldCheck size={15}/> {sharedMode?"Cambios guardados en el directorio compartido.":"Datos guardados solo en este navegador de demostración."}</div><div className="modal-actions"><button type="button" className="button secondary" onClick={()=>setModal('patient')}>Cancelar</button><button className="button primary" type="submit"><Check size={15}/> Guardar cambios</button></div></form></Modal>}    {modal==='new-appointment' && <NewAppointmentModal serviceCatalog={serviceCatalog} promotions={promotionData.rows} sharedMode={sharedMode} clinicId={sharedDirectory.clinicId} timeZone={clinicTimeZone} historyAppointments={demoAppointments} demoPurchases={demoPackages} demoPayments={demoPayments} canCreatePatient={can('patients.create')} onCreatePatient={createAppointmentPatient} close={()=>setModal(null)} onSubmit={createAppointment} defaultDate={appointmentDefaults.date} defaultTime={appointmentDefaults.time} defaultPatientId={appointmentDefaults.patientId} defaultProviderId={appointmentDefaults.providerId} defaultBusinessId={activeWorkspaceSelection.businessId} defaultBranchId={activeWorkspaceSelection.branchId} patients={workspacePatients} businesses={workspaceBusinesses} branches={workspaceBranches} providers={workspaceProviders} appointments={workspaceAppointments}/>}
     {modal==='new-business' && <Modal title="Agregar negocio" subtitle="Crea un negocio para organizar sus sucursales y agenda." close={()=>setModal(null)}><form className="form-stack" onSubmit={createBusiness}><label>Nombre del negocio<input name="name" placeholder={sharedMode?'Nombre del negocio':'Nombre de demostración'} required autoFocus/></label><div className="form-note"><ShieldCheck size={15}/> {sharedMode?'Se guardará en el catálogo compartido.':'Solo se guarda en este navegador de demostración.'}</div><div className="modal-actions"><button type="button" className="button secondary" onClick={()=>setModal(null)}>Cancelar</button><button className="button primary"><Plus size={15}/> Agregar negocio</button></div></form></Modal>}
     {modal==='new-branch' && <Modal title="Agregar sucursal" subtitle="Asigna la nueva ubicación a uno de tus negocios." close={()=>setModal(null)}><form className="form-stack" onSubmit={createBranch}><label>Negocio<select name="businessId" required defaultValue=""><option value="" disabled>Seleccionar negocio…</option>{businesses.filter(item=>item.active).map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label>Nombre de sucursal<input name="name" placeholder={sharedMode?'Nombre de sucursal':'Nombre de demostración'} required/></label><label>Dirección<input name="address" placeholder={sharedMode?'Dirección de la sucursal':'Dirección de demostración'}/></label><label>Teléfono<input name="phone" placeholder="686 308 6854"/></label><label>Horario de atención<input name="hours" placeholder="Lunes a sábados, 9:00 a.m. a 7:00 p.m."/></label><div className="form-note"><ShieldCheck size={15}/> {sharedMode?'Se guardará en el catálogo compartido.':'Solo se guarda en este navegador de demostración.'}</div><div className="modal-actions"><button type="button" className="button secondary" onClick={()=>setModal(null)}>Cancelar</button><button className="button primary" type="submit" disabled={!businesses.some(item=>item.active)}><Plus size={15}/> Agregar sucursal</button></div></form></Modal>}
     {modal==='edit-branch' && selectedBranchRecord && <Modal title="Editar sucursal" subtitle={`${businesses.find(item=>item.id===selectedBranchRecord.businessId)?.name||'Negocio'} · La sucursal seguirá asociada a este negocio.`} close={()=>{setModal(null);setSelectedBranchRecord(null)}}><form className="form-stack" onSubmit={updateBranch}><label>Nombre de sucursal<input name="name" defaultValue={selectedBranchRecord.name} required autoFocus/></label><label>Dirección<input name="address" defaultValue={selectedBranchRecord.address||''} placeholder="Dirección de la sucursal"/></label><label>Teléfono<input name="phone" defaultValue={selectedBranchRecord.phone||''} placeholder="686 308 6854"/></label><label>Horario de atención<input name="hours" defaultValue={selectedBranchRecord.hours||''} placeholder="Lunes a sábados, 9:00 a.m. a 7:00 p.m."/></label><div className="form-note"><ShieldCheck size={15}/> {sharedMode?'El cambio se guarda en el catálogo compartido.':'El cambio se guarda en este navegador de demostración.'}</div><div className="modal-actions"><button type="button" className="button secondary" onClick={()=>{setModal(null);setSelectedBranchRecord(null)}}>Cancelar</button><button className="button primary"><Check size={15}/> Guardar cambios</button></div></form></Modal>}
@@ -1568,6 +1690,7 @@ const settingsSections = [
   {id:'availability',label:'Disponibilidad',icon:Clock3,title:'Gestión de disponibilidad',description:'Define horarios bloqueados y reglas para citas simultáneas.',status:'Disponible',items:[]},
   {id:'push',label:'Notificaciones Push',icon:Bell,title:'Notificaciones Push',description:'Administra los avisos que recibe el equipo en sus dispositivos.',status:'Disponible',items:[['Nuevas citas','Avisos al equipo cuando se registra una cita.'],['Cambios en la agenda','Notificaciones sobre cancelaciones y cambios de horario.'],['Preferencias por usuario','Cada integrante podrá elegir qué avisos recibe.']]},
   {id:'services',label:'Servicios',icon:Settings2,title:'Catálogo de servicios',description:'Administra tratamientos, duraciones, precios y paquetes de la clínica.',status:'Disponible'},
+  {id:'promotions',label:'Promociones',icon:DollarSign,title:'Promociones del mes',description:'Define precios promocionales para sesiones y paquetes con fechas de vigencia.',status:'Disponible'},
   {id:'public-agenda',label:'Agenda Pública',icon:UsersRound,title:'Agenda pública',description:'Configura la página de solicitudes y revisa las citas que piden tus pacientes.',status:'Disponible',items:[['Página de reservas','Configura el enlace público de la clínica.'],['Disponibilidad para pacientes','Elige horarios, profesionales y sucursales visibles.'],['Reglas de reservación','Define anticipación, confirmaciones y datos requeridos.']]},
   {id:'clinic',label:'Clínica',icon:Building2,title:'Perfil de la clínica',description:'Revisa el nombre y la identidad de este espacio.',status:'Disponible'},
 ];
@@ -1962,7 +2085,7 @@ function ProfilePage({ profile, clinicName, memberships, clinicId, onSelectClini
   </div>;
 }
 
-function SettingsPage({currentUserId,clinicName,sharedMode,onSaveClinicName,clinicId,role,permissions={},branches,providers,timeZone,onCatalogChange,publicBranches,publicProviders,services,patients,onRequestApproved}) {
+function SettingsPage({currentUserId,clinicName,sharedMode,onSaveClinicName,clinicId,role,permissions={},branches,providers,timeZone,onCatalogChange,publicBranches,publicProviders,services,promotionData,onSavePromotion,patients,onRequestApproved}) {
   const [activeSectionId,setActiveSectionId]=useState('google-calendar');
   useEffect(()=>{const tab=new URL(window.location.href).searchParams.get('tab');if(settingsSections.some(section=>section.id===tab))setActiveSectionId(tab);},[]);
   const visibleSettingsSections=settingsSections.filter(section=>{
@@ -1978,7 +2101,7 @@ function SettingsPage({currentUserId,clinicName,sharedMode,onSaveClinicName,clin
     <div className="settings-tabs-viewport"><nav className="settings-tabs" aria-label="Secciones de configuración">{visibleSettingsSections.map(section=>{const Icon=section.icon;const active=section.id===activeSection.id;return <button key={section.id} type="button" className={`settings-tab${active?' is-active':''}`} aria-pressed={active} onClick={()=>setActiveSectionId(section.id)}><Icon size={15}/>{section.label}</button>})}</nav></div>
     <section className="panel settings-panel" aria-labelledby="settings-section-title">
       <header className="settings-panel-heading"><span className="settings-section-icon"><SectionIcon size={19}/></span><div className="settings-section-copy"><span className="settings-section-kicker">{activeSection.id==='clinic'?'CLÍNICA':'CONFIGURACIÓN'}</span><h2 id="settings-section-title">{activeSection.title}</h2><p>{activeSection.description}</p></div></header>
-      {activeSection.id==='clinic'?<div className="settings-clinic-content">{sharedMode?<><div className="settings-clinic-row"><div><strong>Nombre de la clínica</strong><span>Identidad del espacio compartido</span></div><div className="settings-readonly-value">{clinicName}</div></div><div className="settings-preview-note"><ShieldCheck size={17}/><p>El nombre del consultorio compartido se administra desde la configuración de la clínica.</p></div></>:<form className="settings-clinic-form" onSubmit={onSaveClinicName}><label htmlFor="settings-clinic-name">Nombre de la clínica</label><div className="settings-clinic-input-row"><input id="settings-clinic-name" name="clinicName" defaultValue={clinicName} maxLength={80} placeholder="Ej. Clínica del Valle" required/><button className="button primary" type="submit"><Check size={15}/> Guardar cambios</button></div><p>Este nombre se guarda en este navegador de demostración y aparece en la navegación del CRM.</p></form>}</div>:activeSection.id==='public-agenda'?<PublicAgendaSettings key={clinicId || 'demo'} clinicId={clinicId} clinicName={clinicName} role={role} permissions={permissions} sharedMode={sharedMode} branches={publicBranches} providers={publicProviders} services={services} patients={patients} timeZone={timeZone} onApproved={onRequestApproved}/>:activeSection.id==='push'?<PushSettings key={clinicId || 'demo'} clinicId={clinicId} sharedMode={sharedMode} role={role}/>:activeSection.id==='availability'?<ClinicAvailabilitySettings clinicId={clinicId} currentUserId={currentUserId} role={role} permissions={permissions} branches={branches} providers={providers} timeZone={timeZone} sharedMode={sharedMode}/>:activeSection.id==='google-calendar'?<GoogleCalendarSettings clinicId={clinicId} role={role} permissions={permissions} sharedMode={sharedMode}/>:activeSection.id==='whatsapp'?<WhatsAppSettings clinicId={clinicId} role={role} permissions={permissions} branches={branches} sharedMode={sharedMode}/>:activeSection.id==='services'?<ClinicServicesSettings clinicId={clinicId} role={role} permissions={permissions} branches={branches} providers={providers} sharedMode={sharedMode} onCatalogChange={onCatalogChange}/>:<div className="settings-preview-content"><div className="settings-preview-banner"><ShieldCheck size={17}/><div><strong>Vista previa de esta sección</strong><span>La navegación ya está preparada; las funciones aún no se conectan a este CRM.</span></div></div><div className="settings-option-list">{activeSection.items.map(([title,description])=><div className="settings-option-row" key={title}><div><strong>{title}</strong><span>{description}</span></div><span className="settings-option-status">Próximamente</span></div>)}</div><p className="settings-preview-footnote">Estas opciones son placeholders: todavía no guardan cambios ni se conectan a servicios externos.</p></div>}
+      {activeSection.id==='clinic'?<div className="settings-clinic-content">{sharedMode?<><div className="settings-clinic-row"><div><strong>Nombre de la clínica</strong><span>Identidad del espacio compartido</span></div><div className="settings-readonly-value">{clinicName}</div></div><div className="settings-preview-note"><ShieldCheck size={17}/><p>El nombre del consultorio compartido se administra desde la configuración de la clínica.</p></div></>:<form className="settings-clinic-form" onSubmit={onSaveClinicName}><label htmlFor="settings-clinic-name">Nombre de la clínica</label><div className="settings-clinic-input-row"><input id="settings-clinic-name" name="clinicName" defaultValue={clinicName} maxLength={80} placeholder="Ej. Clínica del Valle" required/><button className="button primary" type="submit"><Check size={15}/> Guardar cambios</button></div><p>Este nombre se guarda en este navegador de demostración y aparece en la navegación del CRM.</p></form>}</div>:activeSection.id==='public-agenda'?<PublicAgendaSettings key={clinicId || 'demo'} clinicId={clinicId} clinicName={clinicName} role={role} permissions={permissions} sharedMode={sharedMode} branches={publicBranches} providers={publicProviders} services={services} patients={patients} timeZone={timeZone} onApproved={onRequestApproved}/>:activeSection.id==='push'?<PushSettings key={clinicId || 'demo'} clinicId={clinicId} sharedMode={sharedMode} role={role}/>:activeSection.id==='availability'?<ClinicAvailabilitySettings clinicId={clinicId} currentUserId={currentUserId} role={role} permissions={permissions} branches={branches} providers={providers} timeZone={timeZone} sharedMode={sharedMode}/>:activeSection.id==='google-calendar'?<GoogleCalendarSettings clinicId={clinicId} role={role} permissions={permissions} sharedMode={sharedMode}/>:activeSection.id==='whatsapp'?<WhatsAppSettings clinicId={clinicId} role={role} permissions={permissions} branches={branches} sharedMode={sharedMode}/>:activeSection.id==='promotions'?<ClinicPromotionsSettings promotions={promotionData.rows} services={services} status={promotionData.status} today={dateKeyInTimeZone(new Date(),timeZone)} canManage={!sharedMode||hasClinicPermission(role,permissions,'services.manage')} onSave={onSavePromotion}/>:activeSection.id==='services'?<ClinicServicesSettings clinicId={clinicId} role={role} permissions={permissions} branches={branches} providers={providers} sharedMode={sharedMode} demoServices={sharedMode?undefined:services} onCatalogChange={onCatalogChange}/>:<div className="settings-preview-content"><div className="settings-preview-banner"><ShieldCheck size={17}/><div><strong>Vista previa de esta sección</strong><span>La navegación ya está preparada; las funciones aún no se conectan a este CRM.</span></div></div><div className="settings-option-list">{activeSection.items.map(([title,description])=><div className="settings-option-row" key={title}><div><strong>{title}</strong><span>{description}</span></div><span className="settings-option-status">Próximamente</span></div>)}</div><p className="settings-preview-footnote">Estas opciones son placeholders: todavía no guardan cambios ni se conectan a servicios externos.</p></div>}
     </section>
   </div>;
 }
@@ -2046,30 +2169,56 @@ function serviceOfferSummary(service) {
   }).join(' · ');
 }
 
-function AppointmentServicePicker({ services, selectedIds, onChange }) {
+function AppointmentServicePicker({ services, selectedIds, providers, branchId, providerId, onChange, manualField, manualInitiallyOpen = false, onCloseManual }) {
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState('Todas');
   const [open, setOpen] = useState(false);
+  const [manualOpen, setManualOpen] = useState(manualInitiallyOpen);
   const selected = selectedIds.map(id => services.find(service => service.id === id)).filter(Boolean);
   const normalize = value => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('es-MX');
   const matches = services.filter(service => !selectedIds.includes(service.id)
     && (category === 'Todas' || service.category === category)
-    && (!query || normalize(`${service.name} ${service.category} ${service.code}`).includes(normalize(query))));
+    && (!query || normalize(`${service.name} ${service.category} ${service.code}`).includes(normalize(query))))
+    .map(service => {
+      const eligible = eligibleServiceProviders([...selected, service], providers, branchId);
+      const assigned = eligible.find(provider => provider.id === providerId) || (eligible.length === 1 ? eligible[0] : null);
+      return { service, assigned };
+    }).filter(match => match.assigned);
   const remove = id => onChange(selectedIds.filter(current => current !== id));
 
-  return <section className="appointment-service-picker" aria-label="Servicios de la cita">
-    <div className="appointment-service-picker-heading"><strong>Servicios</strong><span>{selected.length ? `${selected.length} seleccionados` : 'Busca y agrega uno o varios'}</span></div>
+  return <section className="appointment-service-picker" aria-label="Servicios de la cita" onBlur={event=>{
+    if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false);
+  }}>
+    <div className="appointment-service-picker-heading">
+      <strong>Servicios</strong>
+      {selected.length>0&&<span>{selected.length} seleccionados</span>}
+      {selectedIds.length===0&&<button type="button" className="text-link" aria-expanded={manualOpen} onClick={()=>{
+        if (manualOpen) onCloseManual();
+        setManualOpen(!manualOpen);
+        setOpen(false);
+      }}>{manualOpen?'Volver al catálogo':'Servicio manual'}</button>}
+    </div>
+    {manualOpen ? manualField : <>
     {selected.length>0&&<div className="appointment-service-chips" aria-label="Servicios seleccionados">{selected.map(service=><span className="appointment-service-chip" key={service.id}><span>{service.name}</span><button type="button" aria-label={`Quitar ${service.name}`} onClick={()=>remove(service.id)}><X size={13}/></button></span>)}</div>}
-    <label className="appointment-service-search"><Search size={15}/><input aria-label="Buscar servicios" value={query} onFocus={()=>setOpen(true)} onChange={event=>{setQuery(event.target.value);setOpen(true)}} onBlur={()=>setTimeout(()=>setOpen(false),120)} placeholder="Buscar servicio por nombre…" autoComplete="off"/></label>
+    <label className="appointment-service-search"><Search size={15}/><input aria-label="Buscar servicios" value={query} onFocus={()=>setOpen(true)} onChange={event=>{setQuery(event.target.value);setOpen(true)}} placeholder="Buscar servicio por nombre…" autoComplete="off"/></label>
     {open&&<div className="appointment-service-dropdown">
       <label className="appointment-service-category">Categoría<select aria-label="Categoría del servicio" value={category} onChange={event=>setCategory(event.target.value)}><option>Todas</option>{serviceCategories.map(item=><option key={item}>{item}</option>)}</select></label>
-      <div className="appointment-service-results">{matches.slice(0,12).map(service=><button className="appointment-service-result" key={service.id} type="button" onMouseDown={event=>event.preventDefault()} onClick={()=>{onChange([...selectedIds,service.id]);setQuery('')}}><span className="appointment-service-result-main"><strong>{service.name}</strong><small>{serviceOfferSummary(service)}</small></span><span className="appointment-service-result-meta"><span>{service.durationMin?`${service.durationMin}${service.durationMax&&service.durationMax!==service.durationMin?`–${service.durationMax}`:''} min`:'Duración pendiente'}</span><Plus size={15}/></span></button>)}{matches.length===0&&<p className="appointment-service-no-results">No hay servicios que coincidan. Puedes capturarlo como servicio manual.</p>}{matches.length>12&&<p className="appointment-service-more">Escribe para acotar los resultados ({matches.length} disponibles).</p>}</div>
+      <div className="appointment-service-results">{matches.slice(0,12).map(({service, assigned})=><button className="appointment-service-result" key={service.id} type="button" onMouseDown={event=>event.preventDefault()} onClick={()=>{onChange([...selectedIds,service.id],assigned.id);setQuery('')}}><span className="appointment-service-result-main"><strong>{service.name}</strong><small>{serviceOfferSummary(service)}</small>{assigned.id!==providerId&&<small>Asignar a {assigned.name}</small>}</span><span className="appointment-service-result-meta"><span>{service.durationMin?`${service.durationMin}${service.durationMax&&service.durationMax!==service.durationMin?`–${service.durationMax}`:''} min`:'Duración pendiente'}</span><Plus size={15}/></span></button>)}{matches.length===0&&<p className="appointment-service-no-results">No hay servicios que coincidan. Puedes capturarlo como servicio manual.</p>}{matches.length>12&&<p className="appointment-service-more">Escribe para acotar los resultados ({matches.length} disponibles).</p>}</div>
     </div>}
     {!open&&selected.length===0&&<p className="appointment-service-picker-hint">Los servicios activos del catálogo están disponibles. Si la duración está pendiente, ingrésala abajo.</p>}
+    </>}
   </section>;
 }
 
-function AppointmentModal({appointment,payments,businesses,branches,providers,serviceCatalog=[],sharedMode=false,canEditAppointment=true,canCancelAppointment=true,canManagePayments=!sharedMode,paymentDataReady=true,close,onSubmit,onCancelAppointment,onOpenPatient,onAddPayment}) {
+function AppointmentModal({appointment,payments,businesses,branches,providers,serviceCatalog=[],sharedMode=false,canEditAppointment=true,canCancelAppointment=true,canManagePayments=!sharedMode,paymentDataReady=true,timeZone,close,onSubmit,onCancelAppointment,onOpenPatient,onAddPayment,onRecordArrival}) {
+  const [recordingArrival, setRecordingArrival] = useState(false);
+  const canRecordArrival = canEditAppointment && !appointment.arrivedAt && ['Por confirmar', 'Confirmada'].includes(appointment.status);
+  const recordArrival = async () => {
+    if (recordingArrival) return;
+    setRecordingArrival(true);
+    try { await onRecordArrival(appointment); }
+    finally { setRecordingArrival(false); }
+  };
   const netReceived=payments.reduce((total,payment)=>total+(payment.direction==='Reembolso'?-Number(payment.amount):Number(payment.amount)),0);
   const currentDuration=Number.parseInt(appointment.duration,10)||45;
   const [time,setTime]=useState(appointment.time);
@@ -2087,37 +2236,39 @@ function AppointmentModal({appointment,payments,businesses,branches,providers,se
   const providersForBranch=activeProviders.filter(item=>!item.branchIds?.length||item.branchIds.includes(branchId));
   const currentProvider=activeProviders.find(item=>item.id===appointment.providerId||item.name===appointment.clinician);
   const [providerId,setProviderId]=useState(currentProvider&&( !currentProvider.branchIds?.length||currentProvider.branchIds.includes(branchId))?currentProvider.id:providersForBranch[0]?.id||'');
-  const branchServices=serviceCatalog.filter(item=>item.active!==false&&(!item.branchIds?.length||item.branchIds.includes(branchId))&&(!item.providerIds?.length||item.providerIds.includes(providerId)));
-  const serviceOptions=[...branchServices,...serviceIds.filter(id=>!branchServices.some(item=>item.id===id)).map(id=>serviceCatalog.find(item=>item.id===id)).filter(Boolean)];
   const updateDuration=next=>{setDurationMinutes(next);if(Number(next)>0&&timeToMinutes(time)>timeToMinutes(latestAppointmentStart(next)))setTime(latestAppointmentStart(next))};
   return <Modal title="Detalle de la cita" subtitle={`${appointment.patient} · ${appointment.service}`} close={close}>
     <form onSubmit={onSubmit} className="form-stack">
       <input type="hidden" name="id" value={appointment.id}/>
       <input type="hidden" name="serviceId" value={serviceId}/>
       <input type="hidden" name="serviceIds" value={JSON.stringify(serviceIds)}/>
+      {appointment.arrivedAt && <div className="form-note" role="status"><Check size={15}/> Llegada registrada · {new Intl.DateTimeFormat('es-MX', { timeZone, dateStyle: 'short', timeStyle: 'short' }).format(new Date(appointment.arrivedAt))}</div>}
+      {canRecordArrival && <div><button type="button" className="button outline compact" onClick={recordArrival} disabled={recordingArrival}><Check size={15}/>{recordingArrival ? 'Registrando…' : 'Ya llegó'}</button></div>}
       <fieldset disabled={!canEditAppointment} className="appointment-edit-fields"><div className="form-note"><CalendarDays size={15}/>{appointment.clinician} · {appointment.branch} · {appointment.duration||'45 min'} · {appointment.modality||'Presencial'}</div>
       {appointment.depositRequired&&<div className="form-note"><DollarSign size={15}/>{sharedMode&&!canManagePayments?`Anticipo requerido: ${formatCurrencyMXN(appointment.depositAmount)}. El sistema validará el pago antes de confirmar.`:sharedMode&&!paymentDataReady?`Anticipo requerido: ${formatCurrencyMXN(appointment.depositAmount)} · Actualizando pagos registrados…`:`Anticipo requerido: ${formatCurrencyMXN(appointment.depositAmount)} · Registrado: ${formatCurrencyMXN(netReceived)}.`}</div>}
+      <AppointmentSessionPrice price={appointment.sessionPrice}/>
       <label>Negocio<select name="businessId" value={businessId} onChange={event=>{const nextBusinessId=event.target.value;setBusinessId(nextBusinessId);const nextBranch=activeBranches.find(item=>item.businessId===nextBusinessId);setBranchId(nextBranch?.id||'');const nextProvider=activeProviders.find(item=>!item.branchIds?.length||item.branchIds.includes(nextBranch?.id));setProviderId(nextProvider?.id||'')}} required>{activeBusinesses.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
       <div className="form-grid"><label>Profesional<select name="providerId" value={providerId} onChange={event=>setProviderId(event.target.value)} required>{providersForBranch.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label>Sucursal<select name="branchId" value={branchId} onChange={event=>{const nextBranchId=event.target.value;setBranchId(nextBranchId);const nextProvider=activeProviders.find(item=>!item.branchIds?.length||item.branchIds.includes(nextBranchId));setProviderId(nextProvider?.id||'')}} required>{branchesForBusiness.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</select></label></div>
       <section className="appointment-reminder-card"><div className="appointment-reminder-heading"><strong>Avisos de la cita</strong><span>{appointment.status==='Confirmada'?'Programados':appointment.status==='Cancelada'?'Cancelados':appointment.status==='Completada'?'Cita completada':'Al confirmar'}</span></div><div className="appointment-reminder-row"><span>Confirmación</span><strong>2 días antes</strong></div><div className="appointment-reminder-row"><span>Recordatorio</span><strong>1 día antes</strong></div><div className="appointment-reminder-row"><span>Recordatorio del día</span><strong>5 horas antes</strong></div><p>La agenda de avisos se actualiza al confirmar, reprogramar o cancelar. El envío automático requiere conectar un proveedor.</p></section>
       <div className="form-grid"><label>Fecha<input name="date" type="date" defaultValue={appointment.date} required/></label><label>Hora<input name="time" type="time" value={time} onChange={event=>setTime(event.target.value)} min="06:00" max={latestAppointmentStart(durationMinutes)} step="900" required/></label></div>
       <div className="form-grid"><label>Duración (minutos)<input name="durationMinutes" type="number" min="15" max="720" step="15" value={durationMinutes} onChange={event=>updateDuration(event.target.value)}/></label><label>Modalidad<select name="modality" defaultValue={appointment.modality||'Presencial'}><option>Presencial</option><option>Virtual</option></select></label></div>
       <AppointmentColorPreview providerId={providerId} branchId={branchId} service={service} providers={providers}/>
-      <AppointmentServicePicker services={serviceOptions} selectedIds={serviceIds} onChange={next=>{setServiceIds(next);setServiceId(next[0]||'');setService(next.map(id=>serviceCatalog.find(option=>option.id===id)?.name).filter(Boolean).join(' + '));const selected=next.map(id=>serviceCatalog.find(option=>option.id===id));if(selected.length&&selected.every(option=>option?.durationMin))updateDuration(String(selected.reduce((total,option)=>total+Number(option.durationMax||option.durationMin),0)));}}/>
-      {serviceIds.length===0&&<label>Servicio manual<input name="service" value={service} onChange={event=>{setService(event.target.value);setServiceId('')}} maxLength="120" required/></label>}
+      {appointment.packageId ? <div className="form-note">Sesión de paquete · {appointment.service}</div> : <AppointmentServicePicker manualInitiallyOpen={!serviceIds.length && Boolean(appointment.service)} onCloseManual={()=>{setService(appointment.service||'');setServiceId(appointment.serviceId||'')}} manualField={<label>Servicio manual<input name="service" value={service} onChange={event=>{setService(event.target.value);setServiceId('')}} maxLength="120" required/></label>} services={serviceCatalog} selectedIds={serviceIds} providers={providersForBranch} branchId={branchId} providerId={providerId} onChange={(next, nextProviderId)=>{if(nextProviderId)setProviderId(nextProviderId);setServiceIds(next);setServiceId(next[0]||'');setService(next.map(id=>serviceCatalog.find(option=>option.id===id)?.name).filter(Boolean).join(' + '));const selected=next.map(id=>serviceCatalog.find(option=>option.id===id));if(selected.length&&selected.every(option=>option?.durationMin))updateDuration(String(selected.reduce((total,option)=>total+Number(option.durationMax||option.durationMin),0)));}}/>}
+      <label>Notas de la cita (opcional)<textarea name="note" rows={3} defaultValue={appointment.note || ''}/></label>
       <label>Estado<select name="status" defaultValue={appointment.status||'Por confirmar'}><option>Por confirmar</option><option>Confirmada</option><option>Completada</option>{canCancelAppointment&&<option>Cancelada</option>}</select></label></fieldset>
       <section className="appointment-payment-card"><div className="appointment-payment-heading"><div><strong>Pagos de esta cita</strong><span>{paymentDataReady?`Saldo neto registrado: ${formatCurrencyMXN(netReceived)}`:'Cargando el historial de pagos…'}</span></div>{canManagePayments&&<button type="button" className="button outline compact" disabled={!paymentDataReady} onClick={onAddPayment}><Plus size={14}/> Registrar pago</button>}</div>{paymentDataReady&&payments.slice().sort((a,b)=>b.date.localeCompare(a.date)).map(payment=><div className="appointment-payment-row" key={payment.id}><span>{formatRecordDate(payment.date)} · {payment.method}</span><strong className={payment.direction==='Reembolso'?'refund-text':''}>{payment.direction==='Reembolso'?'−':'+'}{formatCurrencyMXN(payment.amount)}</strong></div>)}{paymentDataReady&&payments.length===0&&<p className="appointment-payment-empty">Todavía no hay movimientos para esta cita.</p>}</section>
       <div className="modal-actions appointment-modal-actions"><button type="button" className="button outline compact" onClick={onOpenPatient}><UsersRound size={15}/> Ver expediente</button>{canCancelAppointment&&appointment.status!=='Cancelada'&&<button type="button" className="button outline compact" onClick={onCancelAppointment}>Cancelar cita</button>}<span/><button type="button" className="button secondary" onClick={close}>Cerrar</button>{canEditAppointment&&<button className="button primary" type="submit"><Check size={15}/> Guardar cita</button>}</div>
     </form>
   </Modal>;
 }
-function NewAppointmentModal({serviceCatalog=[],close,onSubmit,onCreatePatient,canCreatePatient=true,defaultDate,defaultTime,defaultPatientId='',defaultProviderId='',defaultBusinessId='',defaultBranchId='',patients,businesses,branches,providers,appointments=[],sharedMode=false}) {
+function NewAppointmentModal({serviceCatalog=[],promotions=[],close,onSubmit,onCreatePatient,canCreatePatient=true,defaultDate,defaultTime,defaultPatientId='',defaultProviderId='',defaultBusinessId='',defaultBranchId='',patients,businesses,branches,providers,appointments=[],sharedMode=false,clinicId,timeZone,historyAppointments=[],demoPurchases=[],demoPayments=[]}) {
+  const [date,setDate]=useState(defaultDate);
   const [time,setTime]=useState(defaultTime);
   const [durationMinutes,setDurationMinutes]=useState('45');
   const [service,setService]=useState('');
   const [serviceId,setServiceId]=useState('');
   const [serviceIds,setServiceIds]=useState([]);
-  const [depositAmount,setDepositAmount]=useState('');
+  const [depositOverride,setDepositOverride]=useState(null);
   const updateDuration=next=>{setDurationMinutes(next);if(Number(next)>0&&timeToMinutes(time)>timeToMinutes(latestAppointmentStart(next)))setTime(latestAppointmentStart(next))};
   const [patientId,setPatientId]=useState(defaultPatientId);
   const preferredPatient=patients.find(patient=>patient.id===defaultPatientId);
@@ -2144,6 +2295,16 @@ function NewAppointmentModal({serviceCatalog=[],close,onSubmit,onCreatePatient,c
     ...quickCreatedPatients,
     ...patients.filter(patient=>!quickCreatedPatients.some(created=>created.id===patient.id)),
   ],[patients,quickCreatedPatients]);
+  const selectedPatient = patientsForAppointment.find(patient => patient.id === patientId);
+  const selectedServices = serviceIds.map(id => serviceCatalog.find(item => item.id === id)).filter(Boolean);
+  const quotedServices = selectedServices.length ? selectedServices : serviceCatalog.filter(item => item.id === serviceId);
+  const quote = quoteSessionPrice(quotedServices, promotions, date);
+  const { amount: suggestedDeposit, subtotal: depositSubtotal, pending: pendingDeposits } = calculateServiceDeposit(quotedServices, promotions, date);
+  const historyTreatments = selectedServices.length ? selectedServices : service.trim() ? [{ name: service.trim() }] : [];
+  const [packageId,setPackageId] = useState('');
+  const packageRows = usePatientPackages({ patient:selectedPatient, clinicId, sharedMode, demoPurchases, appointments:historyAppointments, payments:demoPayments });
+  const packageOptions = serviceIds.length === 1 ? (packageRows?.rows || []).filter(item => item.serviceId === serviceIds[0] && item.availableSessions > 0) : [];
+  const selectedPackage = packageOptions.find(item => item.id === packageId);
   const createAndSelectPatient=async()=>{
     if(quickPatientSaving||!quickPatientName.trim()) return;
     setQuickPatientSaving(true);
@@ -2169,13 +2330,12 @@ function NewAppointmentModal({serviceCatalog=[],close,onSubmit,onCreatePatient,c
   const servicePresets=[...servicePresetsByName.values()];
   const applyServicePreset=value=>{
     const catalogService=branchServices.find(item=>item.name.toLocaleLowerCase('es-MX')===String(value||'').trim().toLocaleLowerCase('es-MX'));
-    if(catalogService){setServiceId(catalogService.id);updateDuration(String(catalogService.durationMax||catalogService.durationMin));setDepositAmount('');return;}
+    if(catalogService){setServiceId(catalogService.id);updateDuration(String(catalogService.durationMax||catalogService.durationMin));return;}
     setServiceId('');
     const preset=servicePresetsByName.get(String(value||'').trim().toLocaleLowerCase('es-MX'));
-    if(!preset) { updateDuration('45'); setDepositAmount(''); return; }
+    if(!preset) { updateDuration('45'); return; }
     const presetDuration=Number.parseInt(preset.duration,10);
     if([15,30,45,60,75,90,120].includes(presetDuration)) updateDuration(String(presetDuration));
-    setDepositAmount(Number(preset.depositAmount)>0?String(preset.depositAmount):'');
   };
   const providersForBranch=activeProviders.filter(item=>!item.branchIds?.length||item.branchIds.includes(branchId));
   const providersForBusiness=activeProviders.filter(item=>!item.branchIds?.length||item.branchIds.some(id=>branchesForBusiness.some(branch=>branch.id===id)));
@@ -2190,24 +2350,42 @@ function NewAppointmentModal({serviceCatalog=[],close,onSubmit,onCreatePatient,c
     return businessName&&(duplicateName||!branchIncludesBusiness)?`${branch.name} · ${businessName}`:branch.name;
   };
   const branchServices=serviceCatalog.filter(item=>item.active!==false&&(!item.branchIds?.length||item.branchIds.includes(branchId))&&(!item.providerIds?.length||item.providerIds.includes(providerId)));
-  const serviceOptions=[...branchServices,...serviceIds.filter(id=>!branchServices.some(item=>item.id===id)).map(id=>serviceCatalog.find(item=>item.id===id)).filter(Boolean)];
   return <Modal title="Nueva cita" subtitle="Vincula el expediente y elige un profesional y una sucursal donde atiende." close={close}>
     <form onSubmit={onSubmit} className="form-stack">
       <input type="hidden" name="serviceId" value={serviceId}/>
       <input type="hidden" name="serviceIds" value={JSON.stringify(serviceIds)}/>
       <div className="appointment-patient-field"><label>Paciente<SearchablePatientSelect patients={patientsForAppointment} name="patientId" value={patientId} onChange={setPatientId}/></label>{canCreatePatient&&<button type="button" className="button outline compact appointment-add-patient" onClick={()=>setQuickPatientOpen(open=>!open)} aria-expanded={quickPatientOpen}><Plus size={14}/>{quickPatientOpen?'Cerrar':'Nuevo paciente'}</button>}</div>
       {quickPatientOpen&&<section className="appointment-quick-patient" aria-label="Crear paciente para esta cita"><div className="appointment-quick-patient-heading"><strong>Nuevo expediente</strong><span>Se agregará a esta cita al guardarlo.</span></div><label>Nombre completo<input autoFocus value={quickPatientName} onChange={event=>setQuickPatientName(event.target.value)} placeholder="Ej. Andrea García" maxLength="160"/></label><div className="form-grid"><label>Correo electrónico<input type="text" inputMode="email" value={quickPatientEmail} onChange={event=>setQuickPatientEmail(event.target.value)} placeholder="correo@ejemplo.com" maxLength="254"/></label><label>Teléfono<input type="tel" value={quickPatientPhone} onChange={event=>setQuickPatientPhone(event.target.value)} placeholder="Teléfono de contacto" maxLength="40"/></label></div><div className="appointment-quick-patient-actions"><button type="button" className="button secondary compact" onClick={()=>setQuickPatientOpen(false)}>Cancelar</button><button type="button" className="button primary compact" onClick={createAndSelectPatient} disabled={!quickPatientName.trim()||quickPatientSaving}><Plus size={14}/>{quickPatientSaving?'Guardando…':'Crear y seleccionar'}</button></div></section>}
-      <div className="form-grid"><label>Fecha<input name="date" type="date" defaultValue={defaultDate} required/></label><label>Hora<input name="time" type="time" value={time} onChange={event=>setTime(event.target.value)} min="06:00" max={latestAppointmentStart(durationMinutes)} step="900" required/></label></div>
-      <AppointmentServicePicker services={serviceOptions} selectedIds={serviceIds} onChange={next=>{setServiceIds(next);setServiceId(next[0]||'');setService(next.map(id=>serviceCatalog.find(option=>option.id===id)?.name).filter(Boolean).join(' + '));const selected=next.map(id=>serviceCatalog.find(option=>option.id===id));if(selected.length&&selected.every(option=>option?.durationMin))updateDuration(String(selected.reduce((total,option)=>total+Number(option.durationMax||option.durationMin),0)));}}/>
-      {serviceIds.length===0&&<><label>Servicio manual<input name="service" value={service} onChange={event=>setService(event.target.value)} onBlur={event=>applyServicePreset(event.target.value)} list="clinic-service-new-suggestions" placeholder="Captura un servicio manual" maxLength="120" required/></label><datalist id="clinic-service-new-suggestions">{[...new Set(['Consulta de valoración','Limpieza facial','Tratamiento facial','Seguimiento',...servicePresets.map(appointment=>appointment.service),...branchServices.map(item=>item.name)].filter(Boolean))].map(name=><option key={name} value={name}/>)}</datalist></>}
+      <div className="form-grid"><label>Fecha<input name="date" type="date" value={date} onChange={event=>setDate(event.target.value)} required/></label><label>Hora<input name="time" type="time" value={time} onChange={event=>setTime(event.target.value)} min="06:00" max={latestAppointmentStart(durationMinutes)} step="900" required/></label></div>
+      <AppointmentServicePicker onCloseManual={()=>{setService('');setServiceId('')}} manualField={<><label>Servicio manual<input autoFocus name="service" value={service} onChange={event=>setService(event.target.value)} onBlur={event=>applyServicePreset(event.target.value)} list="clinic-service-new-suggestions" placeholder="Captura un servicio manual" maxLength="120" required/></label><datalist id="clinic-service-new-suggestions">{[...new Set(['Consulta de valoración','Limpieza facial','Tratamiento facial','Seguimiento',...servicePresets.map(appointment=>appointment.service),...branchServices.map(item=>item.name)].filter(Boolean))].map(name=><option key={name} value={name}/>)}</datalist></>} services={serviceCatalog} selectedIds={serviceIds} providers={providersForBranch} branchId={branchId} providerId={providerId} onChange={(next, nextProviderId)=>{if(nextProviderId)setProviderId(nextProviderId);setServiceIds(next);setServiceId(next[0]||'');setService(next.map(id=>serviceCatalog.find(option=>option.id===id)?.name).filter(Boolean).join(' + '));const selected=next.map(id=>serviceCatalog.find(option=>option.id===id));if(selected.length&&selected.every(option=>option?.durationMin))updateDuration(String(selected.reduce((total,option)=>total+Number(option.durationMax||option.durationMin),0)));}}/>
+      {selectedPatient && <AppointmentHistory key={`${clinicId || 'demo'}:${patientId}`} patient={selectedPatient} sharedMode={sharedMode}
+        clinicId={clinicId} appointments={historyAppointments} treatments={historyTreatments} date={date} time={time} timeZone={timeZone}/>}
       <label>Duración (minutos)<input name="durationMinutes" type="number" min="15" max="720" step="15" value={durationMinutes} onChange={event=>updateDuration(event.target.value)}/></label>
       <label>Modalidad<select name="modality" defaultValue="Presencial"><option>Presencial</option><option>Virtual</option></select></label>
       <label>Negocio<select name="businessId" required value={businessId} onChange={event=>{const nextBusinessId=event.target.value;const nextBranches=activeBranches.filter(item=>item.businessId===nextBusinessId);const currentProvider=activeProviders.find(item=>item.id===providerId);const nextBranch=nextBranches.find(item=>!currentProvider?.branchIds?.length||currentProvider.branchIds.includes(item.id))||nextBranches[0];const nextProvider=activeProviders.find(item=>!item.branchIds?.length||item.branchIds.includes(nextBranch?.id));setBusinessId(nextBusinessId);setBranchId(nextBranch?.id||'');setProviderId(currentProvider&&(!currentProvider.branchIds?.length||currentProvider.branchIds.includes(nextBranch?.id))?currentProvider.id:nextProvider?.id||'')}}>{activeBusinesses.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
       <div className="form-grid appointment-assignment-grid"><label>Profesional<select name="providerId" required value={providerId} onChange={event=>{const nextProviderId=event.target.value;const nextProvider=activeProviders.find(item=>item.id===nextProviderId);const nextBranch=branchesForBusiness.find(item=>item.id===branchId&&(!nextProvider?.branchIds?.length||nextProvider.branchIds.includes(item.id)))||branchesForBusiness.find(item=>!nextProvider?.branchIds?.length||nextProvider.branchIds.includes(item.id));setProviderId(nextProviderId);setBranchId(nextBranch?.id||'')}}>{providersForBusiness.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label>Sucursal<select name="branchId" required value={branchId} onChange={event=>{const nextBranch=activeBranches.find(item=>item.id===event.target.value);setBranchId(nextBranch?.id||'');if(nextBranch?.businessId)setBusinessId(nextBranch.businessId)}}>{branchOptions.map(item=><option key={item.id} value={item.id}>{branchOptionLabel(item)}</option>)}</select></label></div>
       {branchOptions.some(item=>item.businessId!==businessId)&&<div className="form-note"><Building2 size={15}/> Al elegir una sucursal de otro negocio, este campo se actualizará automáticamente.</div>}
       <AppointmentColorPreview providerId={providerId} branchId={branchId} service={service} providers={providers}/>
-      <label>Monto del anticipo requerido (MXN)<input name="depositAmount" type="number" min="0.01" step="0.01" value={depositAmount} onChange={event=>setDepositAmount(event.target.value)} placeholder="Ej. 500" required/></label>
+      {packageOptions.length > 0 && <label>Paquete del paciente<select name="packageId" value={selectedPackage?.id || ''} onChange={event=>setPackageId(event.target.value)}>
+        <option value="">Cita individual</option>
+        {packageOptions.map(item=><option key={item.id} value={item.id}>{item.serviceName} · {item.availableSessions} disponibles · {item.outstandingAmount ? formatCurrencyMXN(item.outstandingAmount) + ' pendientes' : 'Liquidado'} · {item.id.slice(-6)}</option>)}
+      </select></label>}
+      {selectedPackage ? <div className="form-note">La cita reserva una sesión. Los cobros se registran en el saldo del paquete.</div> : <>
+      <label>Monto del anticipo requerido (MXN)<input name="depositAmount" type="number" min="0.01" max="9999999999.99" step="0.01" value={depositOverride ?? suggestedDeposit ?? ''} onChange={event=>setDepositOverride(event.target.value)} placeholder="Captura el anticipo" required/></label>
+      {suggestedDeposit != null && <div className="form-note">
+        <span>Anticipo sugerido según los servicios: {formatCurrencyMXN(suggestedDeposit)}. Puedes editarlo.</span>
+        {depositOverride !== null && <button type="button" className="text-link" onClick={()=>setDepositOverride(null)}>Usar anticipo sugerido</button>}
+      </div>}
+      {pendingDeposits.length > 0 && <div className="form-note" role="status">
+        <span>Falta definir el anticipo para {pendingDeposits.join(', ')}.
+          {depositSubtotal > 0 && <> Subtotal calculado: {formatCurrencyMXN(depositSubtotal)}.</>}
+          {' '}Captura el total de la cita o configura el precio por sesión o un anticipo fijo en Servicios.
+        </span>
+      </div>}
+      <AppointmentSessionPrice key={serviceIds.join('|') || serviceId} {...quote}/>
       <div className="form-note"><Bell size={15}/> {sharedMode?"La base compartida verificará el anticipo registrado antes de permitir confirmar.":"La cita no podrá marcarse como confirmada hasta que el anticipo esté registrado en Pagos."}</div>
+      </>}
+      <label>Notas de la cita (opcional)<textarea name="note" rows={3}/></label>
       <div className="modal-actions"><button type="button" className="button secondary" onClick={close}>Cancelar</button><button className="button primary" type="submit" disabled={!patients.length||!activeBusinesses.length||!branchOptions.length||!providersForBranch.length}><CalendarDays size={16}/> Agendar cita</button></div>
     </form>
   </Modal>;
@@ -2232,7 +2410,7 @@ function NewContractModal({close,onSubmit,onReviewDiagnosis,onAddTemplate,patien
   </Modal>;
 }
 
-function PaymentModal({close,onSubmit,defaultDate,defaultAppointmentId,patients,appointments,payments,canRefund=true}) {
+function PaymentModal({close,onSubmit,defaultDate,defaultAppointmentId,patients,appointments,payments,canRefund=true,sharedMode=false,clinicId,demoPurchases=[],demoAppointments=[],demoPayments=[]}) {
   const initialAppointment=appointments.find(item=>item.id===defaultAppointmentId);
   const initialPatientId=initialAppointment?.patientId||patients.find(patient=>patient.name===initialAppointment?.patient)?.id||patients[0]?.id||'';
   const [patientId,setPatientId]=useState(initialPatientId);
@@ -2241,8 +2419,27 @@ function PaymentModal({close,onSubmit,defaultDate,defaultAppointmentId,patients,
   const patient=patients.find(item=>item.id===patientId);
   const appointmentOptions=appointments.filter(item=>item.patientId===patientId||item.patient===patient?.name);
   const linkedAppointment=appointments.find(item=>item.id===appointmentId);
-  const refundAvailability=patient?summarizeRefundAvailability(patient.id,patient.name,linkedAppointment,appointments,payments):{balance:0,protectedDeposits:0,available:0};
-  return <Modal title="Registrar movimiento" subtitle="Guarda un ingreso o reembolso como un registro independiente." close={close}><form onSubmit={onSubmit} className="form-stack"><label>Paciente<SearchablePatientSelect patients={patients} name="patientId" value={patientId} onChange={id=>{setPatientId(id);setAppointmentId('')}}/></label><label>Cita vinculada<select name="appointmentId" value={appointmentId} onChange={event=>setAppointmentId(event.target.value)}><option value="">Sin cita vinculada</option>{appointmentOptions.map(item=><option key={item.id} value={item.id}>{item.date} · {item.time} · {item.service}</option>)}</select></label><div className="form-grid"><label>Tipo<select name="direction" value={direction} onChange={event=>setDirection(event.target.value)}><option>Ingreso</option>{canRefund&&<option>Reembolso</option>}</select></label><label>Monto (MXN)<input name="amount" type="number" min="0.01" max={direction==='Reembolso'?refundAvailability.available:undefined} step="0.01" placeholder="0.00" required/></label></div><div className="form-grid"><label>Fecha<input name="date" type="date" defaultValue={defaultDate} required/></label><label>Método<select name="method" defaultValue="Transferencia"><option>Efectivo</option><option>Tarjeta</option><option>Transferencia</option><option>Otro</option></select></label></div><label>Nota opcional<input name="note" maxLength="240" placeholder="Referencia, concepto o motivo"/></label>{direction==='Reembolso'&&patient&&<div className="form-note"><CalendarDays size={15}/>{linkedAppointment?`${linkedAppointment.service} · ${linkedAppointment.date}`:`Saldo del expediente de ${patient.name}`} · Saldo: {formatCurrencyMXN(refundAvailability.balance)} · Anticipos reservados: {formatCurrencyMXN(refundAvailability.protectedDeposits)} · Disponible para reembolso: {formatCurrencyMXN(refundAvailability.available)}</div>}<div className="form-note"><ShieldCheck size={15}/> Los movimientos se conservan en el historial. Para corregir un ingreso registra un reembolso, no edites el movimiento.</div><div className="modal-actions"><button type="button" className="button secondary" onClick={close}>Cancelar</button><button className="button primary" type="submit"><DollarSign size={15}/> Guardar movimiento</button></div></form></Modal>;
+  const [packageId,setPackageId]=useState('');
+  const packageRows=usePatientPackages({patient,clinicId,sharedMode,demoPurchases,appointments:demoAppointments,payments:demoPayments});
+  const packageOptions=packageRows?.rows||[];
+  const purchase=!appointmentId&&packageOptions.find(item=>item.id===packageId);
+  const refundAvailability=purchase ? {balance:purchase.paidAmount,protectedDeposits:0,available:purchase.paidAmount}
+    : patient?summarizeRefundAvailability(patient.id,patient.name,linkedAppointment,appointments,payments):{balance:0,protectedDeposits:0,available:0};
+  const [currency,setCurrency]=useState('MXN');
+  const [amount,setAmount]=useState('');
+  const [transactionDate,setTransactionDate]=useState(defaultDate);
+  const [saving,setSaving]=useState(false);
+  const submitting=useRef(false);
+  const rate=useReferenceRate(transactionDate);
+  async function submit(event) {
+    event.preventDefault();
+    if (submitting.current || (currency === 'USD' && !rate.quote)) return;
+    submitting.current=true;
+    setSaving(true);
+    try { await onSubmit(event,currency === 'USD' ? rate.quote : null); }
+    finally { submitting.current=false; setSaving(false); }
+  }
+  return <Modal title="Registrar movimiento" subtitle="Guarda un ingreso o reembolso como un registro independiente." close={close}><form onSubmit={submit} className="form-stack"><label>Paciente<SearchablePatientSelect patients={patients} name="patientId" value={patientId} onChange={id=>{setPatientId(id);setAppointmentId('');setPackageId('')}}/></label><label>Cita vinculada<select name="appointmentId" value={appointmentId} onChange={event=>{setAppointmentId(event.target.value);setPackageId('')}}><option value="">Sin cita vinculada</option>{appointmentOptions.map(item=><option key={item.id} value={item.id}>{item.date} · {item.time} · {item.service}</option>)}</select></label>{!appointmentId&&packageOptions.length>0&&<label>Paquete vinculado<select name="packageId" value={purchase?.id||''} onChange={event=>setPackageId(event.target.value)}><option value="">Sin paquete</option>{packageOptions.map(item=><option key={item.id} value={item.id}>{item.serviceName} · {item.outstandingAmount?formatCurrencyMXN(item.outstandingAmount)+' pendientes':'Liquidado'} · {item.id.slice(-6)}</option>)}</select></label>}<div className="form-grid"><label>Tipo<select name="direction" value={direction} onChange={event=>setDirection(event.target.value)}><option>Ingreso</option>{canRefund&&<option>Reembolso</option>}</select></label><label>Moneda del movimiento<select value={currency} onChange={event=>{setCurrency(event.target.value);setAmount('')}}><option>MXN</option><option>USD</option></select></label><label>{`Monto (${currency})`}<input name="amount" type="number" min="0.01" max={currency==='USD'?9999999999.99:direction==='Reembolso'?refundAvailability.available:purchase?.outstandingAmount} step="0.01" placeholder="0.00" required value={amount} onChange={event=>setAmount(event.target.value)}/></label></div><div className="form-grid"><label>Fecha<input name="date" type="date" value={transactionDate} onChange={event=>setTransactionDate(event.target.value)} required/></label><label>Método<select name="method" defaultValue="Transferencia"><option>Efectivo</option><option>Tarjeta</option><option>Transferencia</option><option>Otro</option></select></label></div>{currency==='USD'&&<ExchangeRatePreview rate={rate} amount={amount} currency={currency} disabled={!transactionDate || saving}/>}<label>Nota opcional<input name="note" maxLength="240" placeholder="Referencia, concepto o motivo"/></label>{direction==='Reembolso'&&patient&&<div className="form-note"><CalendarDays size={15}/>{purchase?`Saldo del paquete ${purchase.serviceName}`:linkedAppointment?`${linkedAppointment.service} · ${linkedAppointment.date}`:`Saldo del expediente de ${patient.name}`} · Saldo: {formatCurrencyMXN(refundAvailability.balance)} · Anticipos reservados: {formatCurrencyMXN(refundAvailability.protectedDeposits)} · Disponible para reembolso: {formatCurrencyMXN(refundAvailability.available)}</div>}<div className="form-note"><ShieldCheck size={15}/> Los movimientos se conservan en el historial. Para corregir un ingreso registra un reembolso, no edites el movimiento.</div><div className="modal-actions"><button type="button" className="button secondary" onClick={close}>Cancelar</button><button className="button primary" type="submit" disabled={saving || (currency==='USD' && !rate.quote)}><DollarSign size={15}/>{saving?'Guardando…':'Guardar movimiento'}</button></div></form></Modal>;
 }
 
 function RemindersPage({ reminders, sharedMode = false }) {
@@ -2295,12 +2492,35 @@ function RemindersPage({ reminders, sharedMode = false }) {
   </>;
 }
 
+function FinanceWorkspace({children,expenses}) {
+  const [tab,setTab] = useState('payments');
+  useEffect(() => {
+    const requested = new URL(window.location.href).searchParams.get('tab');
+    if (requested === 'expenses' || requested === 'exchange') setTab(requested);
+  }, []);
+  function select(next) {
+    setTab(next);
+    const url = new URL(window.location.href);
+    if (next === 'payments') url.searchParams.delete('tab');
+    else url.searchParams.set('tab',next);
+    window.history.replaceState(null,'',url);
+  }
+  return <>
+    <nav className="expense-tabs" aria-label="Finanzas">
+      <button className={`button ${tab==='payments'?'primary':'outline'} compact`} type="button" aria-pressed={tab==='payments'} onClick={()=>select('payments')}>Pagos de pacientes</button>
+      <button className={`button ${tab==='expenses'?'primary':'outline'} compact`} type="button" aria-pressed={tab==='expenses'} onClick={()=>select('expenses')}>Gastos y corte</button>
+      <button className={`button ${tab==='exchange'?'primary':'outline'} compact`} type="button" aria-pressed={tab==='exchange'} onClick={()=>select('exchange')}>Convertir moneda</button>
+    </nav>
+    {tab==='expenses' ? expenses : tab==='exchange' ? <CurrencyConverter/> : children}
+  </>;
+}
+
 function PaymentsPage({payments,appointments,patients,onNewPayment,sharedMode=false,canCreatePayment=true}) {
   const sortedPayments=payments.slice().sort((a,b)=>b.date.localeCompare(a.date)||(b.createdAt||'').localeCompare(a.createdAt||''));
   const income=payments.filter(payment=>payment.direction==='Ingreso').reduce((total,payment)=>total+Number(payment.amount||0),0);
   const refunds=payments.filter(payment=>payment.direction==='Reembolso').reduce((total,payment)=>total+Number(payment.amount||0),0);
   const net=income-refunds;
-  return <><PageTitle eyebrow="ADMINISTRACIÓN" title="Pagos" description="Registra ingresos y reembolsos vinculados a pacientes y citas." action={canCreatePayment&&<button className="button primary" onClick={onNewPayment}><Plus size={16}/> Registrar movimiento</button>}/><div className="payment-summary-grid"><div className="payment-summary-card"><span>Ingresos registrados</span><strong>{formatCurrencyMXN(income)}</strong></div><div className="payment-summary-card refund"><span>Reembolsos</span><strong>{formatCurrencyMXN(refunds)}</strong></div><div className="payment-summary-card net"><span>Neto registrado</span><strong>{formatCurrencyMXN(net)}</strong></div></div><section className="panel payment-ledger"><div className="panel-heading"><div><div className="panel-title">Historial de movimientos</div><p className="panel-subtitle">{payments.length} movimientos · cada ingreso y reembolso conserva su propio registro</p></div></div><div className="table-wrap"><table><thead><tr><th>FECHA</th><th>PACIENTE</th><th>CITA</th><th>TIPO</th><th>MÉTODO</th><th>NOTA</th><th>MONTO</th></tr></thead><tbody>{sortedPayments.map(payment=>{const patient=patients.find(item=>item.id===payment.patientId);const appointment=appointments.find(item=>item.id===payment.appointmentId);return <tr key={payment.id}><td>{formatRecordDate(payment.date)}</td><td><div className="patient-cell"><Avatar initials={patient?.initials||payment.patientNameSnapshot?.split(/\s+/).slice(0,2).map(part=>part[0]).join('').toUpperCase()||'PA'} tone={patient?.tone||'blue'}/><div><strong>{patient?.name||payment.patientNameSnapshot||'Paciente'}</strong><span>{patient?.id||'Expediente'}</span></div></div></td><td>{appointment?`${appointment.date} · ${appointment.time} · ${appointment.service}`:'Sin cita vinculada'}</td><td><span className={`payment-type ${payment.direction==='Reembolso'?'refund':''}`}>{payment.direction}</span></td><td>{payment.method}</td><td>{payment.note||'—'}</td><td className={`payment-amount ${payment.direction==='Reembolso'?'refund-text':''}`}>{payment.direction==='Reembolso'?'−':'+'}{formatCurrencyMXN(payment.amount)}</td></tr>})}</tbody></table>{sortedPayments.length===0&&<div className="empty-state"><DollarSign size={20}/><strong>Aún no hay movimientos</strong><span>Registra un ingreso o un reembolso para empezar el historial.</span><button className="button primary compact" onClick={onNewPayment}><Plus size={14}/> Registrar movimiento</button></div>}</div></section><p className="payment-demo-note"><ShieldCheck size={14}/>{sharedMode?'Movimientos compartidos y de solo alta; confirma la conciliación bancaria por separado.':'Movimientos guardados localmente para demostración; no sustituyen una conciliación contable.'}</p></>;
+  return <><PageTitle eyebrow="ADMINISTRACIÓN" title="Pagos" description="Registra ingresos y reembolsos vinculados a pacientes y citas." action={canCreatePayment&&<button className="button primary" onClick={onNewPayment}><Plus size={16}/> Registrar movimiento</button>}/><div className="payment-summary-grid"><div className="payment-summary-card"><span>Ingresos registrados</span><strong>{formatCurrencyMXN(income)}</strong></div><div className="payment-summary-card refund"><span>Reembolsos</span><strong>{formatCurrencyMXN(refunds)}</strong></div><div className="payment-summary-card net"><span>Neto registrado</span><strong>{formatCurrencyMXN(net)}</strong></div></div><section className="panel payment-ledger"><div className="panel-heading"><div><div className="panel-title">Historial de movimientos</div><p className="panel-subtitle">{payments.length} movimientos · cada ingreso y reembolso conserva su propio registro</p></div></div><div className="table-wrap"><table><thead><tr><th>FECHA</th><th>PACIENTE</th><th>CITA</th><th>TIPO</th><th>MÉTODO</th><th>NOTA</th><th>MONTO</th></tr></thead><tbody>{sortedPayments.map(payment=>{const patient=patients.find(item=>item.id===payment.patientId);const appointment=appointments.find(item=>item.id===payment.appointmentId);return <tr key={payment.id}><td>{formatRecordDate(payment.date)}</td><td><div className="patient-cell"><Avatar initials={patient?.initials||payment.patientNameSnapshot?.split(/\s+/).slice(0,2).map(part=>part[0]).join('').toUpperCase()||'PA'} tone={patient?.tone||'blue'}/><div><strong>{patient?.name||payment.patientNameSnapshot||'Paciente'}</strong><span>{patient?.id||'Expediente'}</span></div></div></td><td>{appointment?`${appointment.date} · ${appointment.time} · ${appointment.service}`:'Sin cita vinculada'}</td><td><span className={`payment-type ${payment.direction==='Reembolso'?'refund':''}`}>{payment.direction}</span></td><td>{payment.method}</td><td>{payment.note||'—'}</td><td className={`payment-amount ${payment.direction==='Reembolso'?'refund-text':''}`}>{payment.direction==='Reembolso'?'−':'+'}{formatCurrencyMXN(payment.amount)}{payment.exchange&&<small>{paymentExchangeLabel(payment.exchange)}</small>}</td></tr>})}</tbody></table>{sortedPayments.length===0&&<div className="empty-state"><DollarSign size={20}/><strong>Aún no hay movimientos</strong><span>Registra un ingreso o un reembolso para empezar el historial.</span><button className="button primary compact" onClick={onNewPayment}><Plus size={14}/> Registrar movimiento</button></div>}</div></section><p className="payment-demo-note"><ShieldCheck size={14}/>{sharedMode?'Movimientos compartidos y de solo alta; confirma la conciliación bancaria por separado.':'Movimientos guardados localmente para demostración; no sustituyen una conciliación contable.'}</p></>;
 }
 
 function AgendaEventCard({ appointment, variant = 'calendar-event', compact = false, style, onOpen }) {
@@ -2315,6 +2535,7 @@ function AgendaEventCard({ appointment, variant = 'calendar-event', compact = fa
     appointment.patient,
     appointment.service,
     status,
+    appointment.arrivedAt ? 'Llegó a recepción' : '',
     modality,
     appointment.clinician,
     appointment.branch,
@@ -2336,7 +2557,7 @@ function AgendaEventCard({ appointment, variant = 'calendar-event', compact = fa
     </span>
     <span className="event-sub">
       <span className="event-service">{appointment.service}</span>
-      <span className="event-status">{status}</span>
+      <span className="event-status">{appointment.arrivedAt && ['Por confirmar', 'Confirmada'].includes(status) ? 'Llegó' : status}</span>
     </span>
     {!compact && <small className="event-meta">{[appointment.clinician, appointment.branch, modality].filter(Boolean).join(' · ')}</small>}
   </button>;
@@ -2423,7 +2644,7 @@ function AgendaPage({canCreateAppointment=true,canEditAppointment=true,canCancel
   {period==='Semana'&&<div className="agenda-week">{weekDays.map(date=>{const dayAppointments=appointmentsFor(dateKey(date));return <section className={`week-day ${dateKey(date)===agendaDate?'selected':''}`} key={dateKey(date)}><button className="week-day-heading" onClick={()=>{setAgendaDate(dateKey(date));setPeriod('Día')}}><span>{weekdayFormatter.format(date)}</span><strong>{date.getUTCDate()}</strong></button><div className="week-day-events">{dayAppointments.map(item=><AgendaEventCard appointment={item} variant="week-event" compact onOpen={onOpenAppointment} key={item.id||`${item.date}-${item.time}-${item.patient}`}/>)}{!dayAppointments.length&&<span className="week-empty">Sin citas</span>}</div></section>})}</div>}
   {period==='Mes'&&<div className="agenda-month"><div className="month-weekdays">{['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'].map(day=><span key={day}>{day}</span>)}</div><div className="month-grid">{monthCells.map((day,index)=>{const valid=day>0&&day<=monthLength;const date=valid?new Date(Date.UTC(selectedDate.getUTCFullYear(),selectedDate.getUTCMonth(),day,12)):null;const dayAppointments=date?appointmentsFor(dateKey(date)):[];return <button key={index} disabled={!valid} className={`month-cell ${valid?'':'outside'} ${valid&&dateKey(date)===agendaDate?'selected':''} ${valid&&dayAppointments.length?'has-events':''}`} onClick={()=>{if(date){setAgendaDate(dateKey(date));setPeriod('Día')}}}>{valid&&<><strong>{day}</strong>{dayAppointments.slice(0,3).map(item=><span className="month-event agenda-colored-event" style={colorStyle(item.agendaColor)} title={`${item.clinician} · ${item.service} · ${item.status}`} key={`${item.time}-${item.patient}`}>{item.time} {item.patient}</span>)}{dayAppointments.length>3&&<small>+{dayAppointments.length-3} más</small>}</>}</button>})}</div></div>}
   {period==='Año'&&<div className="agenda-year">{yearMonths.map(date=>{const monthAppointments=appointmentsInRange.filter(item=>{const itemDate=new Date(`${item.date||agendaDate}T12:00:00Z`);return itemDate.getUTCMonth()===date.getUTCMonth()});return <button className="year-month" key={date.getUTCMonth()} onClick={()=>{setAgendaDate(dateKey(date));setPeriod('Mes')}}><strong>{new Intl.DateTimeFormat('es-MX',{month:'long',timeZone:'UTC'}).format(date)}</strong><span>{monthAppointments.length} {monthAppointments.length===1?'cita':'citas'}</span><i>{monthAppointments.length?`${new Set(monthAppointments.map(item=>item.date)).size} días con actividad`:'Sin actividad registrada'}</i></button>})}</div>}
-  {period==='Lista'&&<div className="agenda-list-wrap"><div className="agenda-list-controls"><label>Desde<input type="date" aria-label="Lista desde" value={agendaDate} onChange={event=>setAgendaDate(event.target.value)}/></label><label>Hasta<input type="date" aria-label="Lista hasta" min={agendaDate} value={listEnd>=agendaDate?listEnd:agendaDate} onChange={event=>setListEnd(event.target.value)}/></label><label>Ordenar<select aria-label="Ordenar citas" value={listSort} onChange={event=>setListSort(event.target.value)}><option value="date">Fecha y hora · ascendente</option><option value="date-desc">Fecha y hora · descendente</option><option value="patient">Paciente</option><option value="provider">Profesional</option></select></label></div><table className="agenda-list-table"><thead><tr><th>HORA</th><th>PACIENTE</th><th>SERVICIO</th><th>PROFESIONAL</th><th>SUCURSAL</th><th>ESTADO</th><th></th></tr></thead><tbody>{sortAgendaAppointments(appointmentsInRange,listSort).map(appointment=><tr key={appointment.id||`${appointment.date}-${appointment.time}-${appointment.patient}`} onClick={()=>onOpenAppointment(appointment)} className="clickable-row"><td><strong>{appointment.time}</strong><span>{appointment.duration||'45 min'}</span></td><td><div className="patient-cell"><Avatar initials={appointment.initials} tone={appointment.tone}/><div><strong>{appointment.patient}</strong><span>{appointment.date}</span></div></div></td><td>{appointment.service}</td><td><span className="agenda-list-professional"><i className="agenda-color-dot" style={colorStyle(appointment.agendaColor)}/>{appointment.clinician}</span><small className="agenda-list-color">{agendaPalette.find(color=>color.id===appointment.agendaColor)?.label}</small></td><td>{appointment.branch}</td><td><Badge variant={appointment.status==='Confirmada'?'confirmed':appointment.status==='Completada'?'active':appointment.status==='Cancelada'?'':'pending'}><span className="badge-dot"/>{appointment.status||'Por confirmar'}</Badge></td><td><button className="row-action" aria-label={`Abrir cita de ${appointment.patient}`} onClick={event=>{event.stopPropagation();onOpenAppointment(appointment)}}>Abrir <ArrowRight size={13}/></button></td></tr>)}</tbody></table>{appointmentsInRange.length===0&&<div className="empty-state"><CalendarDays size={20}/><strong>Sin citas para estos filtros</strong><span>Prueba otro estado o fecha, o agrega una cita.</span>{canCreateAppointment&&<button className="button primary compact" onClick={()=>onNewAppointment()}><Plus size={14}/> Nueva cita</button>}</div>}</div>}
+  {period==='Lista'&&<div className="agenda-list-wrap"><div className="agenda-list-controls"><label>Desde<input type="date" aria-label="Lista desde" value={agendaDate} onChange={event=>setAgendaDate(event.target.value)}/></label><label>Hasta<input type="date" aria-label="Lista hasta" min={agendaDate} value={listEnd>=agendaDate?listEnd:agendaDate} onChange={event=>setListEnd(event.target.value)}/></label><label>Ordenar<select aria-label="Ordenar citas" value={listSort} onChange={event=>setListSort(event.target.value)}><option value="date">Fecha y hora · ascendente</option><option value="date-desc">Fecha y hora · descendente</option><option value="patient">Paciente</option><option value="provider">Profesional</option></select></label></div><table className="agenda-list-table"><thead><tr><th>HORA</th><th>PACIENTE</th><th>SERVICIO</th><th>PROFESIONAL</th><th>SUCURSAL</th><th>ESTADO</th><th></th></tr></thead><tbody>{sortAgendaAppointments(appointmentsInRange,listSort).map(appointment=><tr key={appointment.id||`${appointment.date}-${appointment.time}-${appointment.patient}`} onClick={()=>onOpenAppointment(appointment)} className="clickable-row"><td><strong>{appointment.time}</strong><span>{appointment.duration||'45 min'}</span></td><td><div className="patient-cell"><Avatar initials={appointment.initials} tone={appointment.tone}/><div><strong>{appointment.patient}</strong><span>{appointment.date}</span></div></div></td><td>{appointment.service}</td><td><span className="agenda-list-professional"><i className="agenda-color-dot" style={colorStyle(appointment.agendaColor)}/>{appointment.clinician}</span><small className="agenda-list-color">{agendaPalette.find(color=>color.id===appointment.agendaColor)?.label}</small></td><td>{appointment.branch}</td><td><Badge variant={appointment.status==='Confirmada'?'confirmed':appointment.status==='Completada'?'active':appointment.status==='Cancelada'?'':'pending'}><span className="badge-dot"/>{appointment.status||'Por confirmar'}</Badge>{appointment.arrivedAt&&<small>Llegó a recepción</small>}</td><td><button className="row-action" aria-label={`Abrir cita de ${appointment.patient}`} onClick={event=>{event.stopPropagation();onOpenAppointment(appointment)}}>Abrir <ArrowRight size={13}/></button></td></tr>)}</tbody></table>{appointmentsInRange.length===0&&<div className="empty-state"><CalendarDays size={20}/><strong>Sin citas para estos filtros</strong><span>Prueba otro estado o fecha, o agrega una cita.</span>{canCreateAppointment&&<button className="button primary compact" onClick={()=>onNewAppointment()}><Plus size={14}/> Nueva cita</button>}</div>}</div>}
   <section className="agenda-print-sheet" aria-label="Agenda imprimible"><header className="agenda-print-heading"><div><span>Agenda clínica</span><h1>Agenda de citas</h1><p>{dateLabel}</p></div><strong>{appointmentsInRange.length} {appointmentsInRange.length===1?'cita':'citas'}</strong></header>{appointmentsInRange.length>0?<table className="agenda-print-table"><thead><tr><th>Fecha y hora</th><th>Paciente</th><th>Servicio</th><th>Profesional</th><th>Sucursal</th><th>Modalidad</th><th>Color</th><th>Estado</th></tr></thead><tbody>{sortAgendaAppointments(appointmentsInRange,period==='Lista'?listSort:'date').map(appointment=><tr key={`print-${appointment.id||`${appointment.date}-${appointment.time}-${appointment.patient}`}`}><td>{appointment.date||agendaDate} · {appointment.time} · {appointment.duration||'45 min'}</td><td>{appointment.patient}</td><td>{appointment.service||'—'}</td><td>{appointment.clinician||'Sin profesional'}</td><td>{appointment.branch||'—'}</td><td>{appointment.modality||'Presencial'}</td><td><span className="agenda-print-color" style={colorStyle(appointment.agendaColor)}/>{agendaPalette.find(color=>color.id===appointment.agendaColor)?.label||'Sin color asignado'}</td><td>{appointment.status||'Por confirmar'}</td></tr>)}</tbody></table>:<p className="agenda-print-empty">No hay citas para imprimir con el periodo y los filtros actuales.</p>}</section>
 <div className="calendar-bottom"><span>Mostrando <strong>{appointmentsInRange.length}</strong> {appointmentsInRange.length===1?'cita':'citas'} en este periodo según tus filtros</span><button className="text-link" onClick={clearFilters}>Limpiar filtros <X size={13}/></button></div></section></>;
 }
@@ -2495,7 +2716,7 @@ function TeamPage({businesses,branches,providers,setModal,notify,onEditBranch,on
   return <><PageTitle title="Equipo y sucursales" description="Administra los negocios, ubicaciones y profesionales que aparecen en la agenda."/><div className="team-layout"><section className="panel team-panel"><div className="panel-heading padded"><div><div className="panel-title">Equipo clínico</div><p className="panel-subtitle">{providers.filter(item=>item.active).length} profesionales activos</p></div>{canManageProviders&&<button className="more-button" onClick={()=>setModal('new-provider')} aria-label="Agregar profesional"><Plus size={18}/></button>}</div><div className="team-list">{accountDirectory.error&&<p className="professional-error" role="alert">{accountDirectory.error} <button className="button outline compact" onClick={accountDirectory.reload}>Reintentar</button></p>}{providers.filter(item=>item.active).map(provider=><div className="team-member" key={provider.id}><Avatar initials={provider.initials||provider.name.split(/\s+/).slice(0,2).map(part=>part[0]).join('').toUpperCase()} tone={provider.tone||'blue'} imageUrl={accountFor(provider)?.avatarUrl} size="large"/><div className="team-person"><div className="professional-name-line"><strong>{professionalName(provider)}</strong>{provider.userId&&<span className="professional-link-icon" role="img" aria-label="Cuenta vinculada" title={accountFor(provider)?.email?`Cuenta vinculada: ${accountFor(provider).email}`:'Cuenta vinculada'}><Link2 size={14}/></span>}</div><span>{provider.role}</span><small><Activity size={12}/>{branchNamesForProvider(provider)}</small></div><span className="team-presence"><i/> Activo</span>{canManageProviders&&<button className="row-more" onClick={()=>onEditProvider(provider)} aria-label={`Editar profesional ${professionalName(provider)}`}><MoreHorizontal size={17}/></button>}</div>)}</div></section><section className="panel team-panel branch-panel"><div className="panel-heading padded"><div><div className="panel-title">Sucursales</div><p className="panel-subtitle">{branches.filter(item=>item.active).length} ubicaciones habilitadas</p></div>{canManageBusinesses&&<button className="icon-button outline" onClick={()=>setModal('new-branch')} aria-label="Agregar sucursal"><Plus size={16}/></button>}</div>{branches.filter(item=>item.active).map((branch,index)=><div className="branch-row" key={branch.id}><div className={`branch-icon branch-${index%3}`}><Activity size={16}/></div><div><strong>{branch.name}</strong><span>{branch.address||'Dirección pendiente'}</span>{branch.phone&&<small>{branch.phone}</small>}{branch.hours&&<small>{branch.hours}</small>}</div><span className="branch-active"><i/>Activa</span>{canManageBusinesses&&<button className="row-more" onClick={()=>onEditBranch(branch)} aria-label={`Editar sucursal ${branch.name}`}><Settings2 size={15}/></button>}</div>)}</section><section className="panel team-panel business-panel"><div className="panel-heading padded"><div><div className="panel-title">Negocios</div><p className="panel-subtitle">Agendas y sucursales agrupadas por negocio</p></div>{canManageBusinesses&&<button className="button outline compact" onClick={()=>setModal('new-business')}><Plus size={15}/> Agregar negocio</button>}</div><div className="business-list">{businesses.filter(item=>item.active).map(business=>{const count=branches.filter(branch=>branch.active&&branch.businessId===business.id).length;return <div className="business-row" key={business.id}><div className="branch-icon"><Building2 size={16}/></div><div><strong>{business.name}</strong><span>{count} {count===1?'sucursal activa':'sucursales activas'}</span></div><Badge variant="active"><span className="badge-dot"/>Activo</Badge></div>})}{businesses.filter(item=>item.active).length===0&&<div className="empty-inline">Aún no hay negocios. Agrega uno para empezar.</div>}</div></section></div></>;
 }
 
-function PatientModal({patient,appointments,activities,clinicalHistory=[],botoxTreatments=[],recordFiles=[],sharedMode=false,canEditPatient=true,canCreateAppointment=true,canDiagnose=true,canWriteClinical=true,canPrepareContract=true,canPrepareConsent=true,close,notify,onAddActivity,onNewEncounter,onNewBotoxTreatment,onAddRecordFile,onOpenRecordFile,onEdit,onDiagnosis,onNewAppointment,onPrepareContract,onPrepareConsent,onOpenContract,onOpenConsent,onOpenDocumentRecord}) {
+function PatientModal({patient,packagePanel,appointments,activities,clinicalHistory=[],botoxTreatments=[],recordFiles=[],sharedMode=false,canEditPatient=true,canCreateAppointment=true,canDiagnose=true,canWriteClinical=true,canPrepareContract=true,canPrepareConsent=true,close,notify,onAddActivity,onNewEncounter,onNewBotoxTreatment,onAddRecordFile,onOpenRecordFile,onEdit,onDiagnosis,onNewAppointment,onPrepareContract,onPrepareConsent,onOpenContract,onOpenConsent,onOpenDocumentRecord}) {
   const patientAppointments=appointments.filter(appointment=>appointment.patientId===patient.id||appointment.patient===patient.name).sort((a,b)=>`${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`));
   const sortedActivities=[...activities].sort((a,b)=>b.createdAt.localeCompare(a.createdAt));
   const documentRecords=[...documentHistory(patient,'contract').map(record=>({...record,kind:'contract'})),...documentHistory(patient,'consent').map(record=>({...record,kind:'consent'}))].sort((a,b)=>(b.requestedAt||'').localeCompare(a.requestedAt||''));
@@ -2513,6 +2734,7 @@ function PatientModal({patient,appointments,activities,clinicalHistory=[],botoxT
     <article className={contractReady||contractSignedCurrent?'complete':''}><div><span className="patient-workflow-number">2</span><strong>Contrato</strong><Badge variant={contractReady?'pending':contractSignedCurrent?'confirmed':patient.contract==='Firmado'?'new':'pending'}><span className="badge-dot"/>{contractStatus}</Badge></div><p>{contractDescription}{canPrepareContract&&diagnosisAccepted&&<button type="button" className="text-link" onClick={contractReady?onOpenContract:onPrepareContract}>{contractReady?'Revisar contrato':'Preparar contrato'}</button>}</p></article>
     <article className={consentReady?'complete':''}><div><span className="patient-workflow-number">3</span><strong>Consentimiento</strong><Badge variant={patient.consent==='Firmado'?'confirmed':consentReady?'pending':'pending'}><span className="badge-dot"/>{patient.consent==='Firmado'?'Firmado':consentReady?'Pendiente de firma':'Por preparar'}</Badge></div><p>{consentReady?'Hay un consentimiento preparado para este expediente.':'Prepara el consentimiento informado que corresponda.'}{canPrepareConsent&&<button type="button" className="text-link" onClick={consentReady?onOpenConsent:onPrepareConsent}>{consentReady?'Revisar consentimiento':'Preparar consentimiento'}</button>}</p></article>
   </section>
+   {packagePanel}
    <section className="patient-appointments"><div className="panel-title">Citas del expediente <span>{patientAppointments.length}</span></div>{patientAppointments.map(appointment=><div className="patient-appointment-row" key={`${appointment.date}-${appointment.time}-${appointment.patient}`}><div><strong>{appointment.time}</strong><span>{appointment.date?new Intl.DateTimeFormat('es-MX',{day:'2-digit',month:'short',year:'numeric'}).format(new Date(`${appointment.date}T12:00:00`)):'Fecha pendiente'}</span></div><div><strong>{appointment.service}</strong><span>{appointment.clinician} · {appointment.branch}</span></div><Badge variant={appointment.status==='Confirmada'?'confirmed':'pending'}><span className="badge-dot"/>{appointment.status}</Badge></div>)}{patientAppointments.length===0&&<div className="empty-inline">Este expediente aún no tiene citas.</div>}</section>
    <section className="patient-activity-box clinical-history-box"><div className="panel-title"><span>Historia clínica</span><div className="record-actions"><span>{clinicalHistory.length} consultas</span>{canWriteClinical&&<button className="button outline compact" onClick={onNewEncounter}><Plus size={13}/> Nueva consulta</button>}</div></div>{clinicalHistory.map(record=><article className="patient-activity-row clinical-encounter" key={record.id}><div className="patient-activity-meta"><strong>Consulta clínica</strong><time dateTime={record.occurredAt}>{record.occurredAt?new Intl.DateTimeFormat('es-MX',{dateStyle:'medium',timeStyle:'short'}).format(new Date(record.occurredAt)):'Fecha no registrada'}</time></div><p><b>Motivo:</b> {record.chiefComplaint}</p>{record.history&&<p><b>Antecedentes:</b> {record.history}</p>}{record.examination&&<p><b>Exploración:</b> {record.examination}</p>}{record.assessment&&<p><b>Valoración:</b> {record.assessment}</p>}{record.plan&&<p><b>Plan:</b> {record.plan}</p>}</article>)}{clinicalHistory.length===0&&<div className="empty-inline">Aún no hay consultas clínicas registradas.</div>}</section>
    <section className="patient-activity-box botox-treatment-box"><div className="panel-title"><span>Tratamientos de Botox</span><div className="record-actions"><span>{botoxTreatments.length} sesiones</span>{canWriteClinical&&<button className="button outline compact" onClick={onNewBotoxTreatment}><Plus size={13}/> Registrar sesión</button>}</div></div>{botoxTreatments.map(record=><article className="patient-activity-row clinical-encounter" key={record.id}><div className="patient-activity-meta"><strong>{record.product}</strong><time dateTime={record.performedAt}>{record.performedAt?new Intl.DateTimeFormat('es-MX',{dateStyle:'medium',timeStyle:'short'}).format(new Date(record.performedAt)):'Fecha no registrada'}</time></div><div className="botox-record-facts"><span><b>Lote:</b> {record.lotNumber}</span><span><b>Unidades totales:</b> {record.totalUnits}</span>{record.expirationDate&&<span><b>Caducidad:</b> {formatRecordDate(record.expirationDate)}</span>}</div><p><b>Áreas y unidades por área:</b> {record.treatmentAreas}</p>{record.followUp&&<p><b>Seguimiento:</b> {record.followUp}</p>}{record.consentDocumentId&&<p><b>Consentimiento vinculado:</b> {(patient.consentHistory||[]).find(item=>item.id===record.consentDocumentId)?.title||'Documento firmado'}</p>}{record.consentFileId&&<p><b>Consentimiento vinculado:</b> {(patient.recordFiles||[]).find(item=>item.id===record.consentFileId)?.title||'Archivo firmado'}</p>}</article>)}{botoxTreatments.length===0&&<div className="empty-inline">Aún no hay sesiones registradas.</div>}</section>

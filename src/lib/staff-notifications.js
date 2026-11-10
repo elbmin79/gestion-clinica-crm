@@ -32,7 +32,7 @@ export async function unlinkPushOnSignOut(formData) {
 export function addDemoAppointmentAlert(kind,message,appointmentId){
   try {
     const prefs={...defaultNotificationPreferences,...JSON.parse(localStorage.getItem(demoPreferenceKey)||'{}')};
-    if(!prefs[kind] || !prefs.include_self)return;
+    if(kind!=='patient_arrived' && (!prefs[kind] || !prefs.include_self))return;
     const items=JSON.parse(localStorage.getItem(demoNotificationKey)||'[]');
     localStorage.setItem(demoNotificationKey,JSON.stringify([{id:crypto.randomUUID(),message,createdAt:Date.now(),read:false,appointmentAlert:true,href:appointmentId?`/agenda?appointment=${encodeURIComponent(appointmentId)}`:'/agenda'},...items].slice(0,100)));
     window.dispatchEvent(new Event('crm-staff-alerts'));

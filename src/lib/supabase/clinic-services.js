@@ -30,7 +30,7 @@ export function createClinicServicesStore({ clientFactory = createClient } = {})
     async save(clinicId, service) {
       const client = clientFactory();
       if (!client) throw new Error('La conexión con Supabase no está configurada.');
-      const result = await client.rpc('save_clinic_service', {
+      const result = await client.rpc(service.depositMode ? 'save_clinic_service_with_deposit' : 'save_clinic_service', {
         target_clinic_id: clinicId, target_service_id: service.id || null, target_code: service.code,
         target_category: service.category, target_name: service.name.trim(), target_description: service.description?.trim() || null,
         target_duration_min: service.durationMin ? Number(service.durationMin) : null,
@@ -38,16 +38,18 @@ export function createClinicServicesStore({ clientFactory = createClient } = {})
         target_offers: service.offers || [], target_variants: service.variants || [], target_notes: service.notes?.trim() || null,
         target_source: service.source?.trim() || 'Capturado por la clínica', target_status: service.status || 'setup_needed',
         target_active: service.active !== false, target_branch_ids: service.branchIds || [], target_provider_ids: service.providerIds || [],
+        ...(service.depositMode ? { target_deposit_mode: service.depositMode, target_deposit_fixed_amount: service.depositFixedAmount ?? null } : {}),
       });
+      if (service.depositMode && result.error?.code === 'PGRST202') throw new Error('Aplica la migración de anticipos para guardar esta configuración.');
       raise(result.error, 'No se pudo guardar el servicio.');
       const saved = await client.from('clinic_services').select('*').eq('clinic_id', clinicId).eq('id', result.data).single();
       raise(saved.error, 'El servicio se guardó, pero no se pudo volver a leer.');
       return { ...normalizeServiceRow(saved.data), branchIds: service.branchIds || [], providerIds: service.providerIds || [] };
     },
-    async seed(clinicId) {
+    async seed(clinicId, services = initialClinicServices) {
       const client = clientFactory();
       if (!client) throw new Error('La conexión con Supabase no está configurada.');
-      const rows = initialClinicServices.map(service => ({
+      const rows = services.map(service => ({
         clinic_id: clinicId, code: service.code, category: service.category, name: service.name,
         duration_min: service.durationMin, duration_max: service.durationMax, offers: service.offers,
         variants: service.variants, notes: service.notes || null, source: service.source, active: true,

@@ -25,11 +25,20 @@ test('service worker suppresses unapproved notification text and refuses cross-o
   await pending;
   assert.equal(shown[0].title,'CRM clínico');
   assert.equal(shown[0].body,'Hay una actualización en tu clínica.');
+  listeners.get('push')({data:{json:()=>({body:'Paciente en recepción',url:'/agenda?appointment=test'})},waitUntil:promise=>pending=promise});
+  await pending;
+  assert.equal(shown[1].body,'Paciente en recepción');
+  listeners.get('push')({data:{json:()=>({body:'Pago mensual pendiente',url:'/pagos?tab=expenses'})},waitUntil:promise=>pending=promise});
+  await pending;
+  assert.equal(shown[2].body,'Pago mensual pendiente');
   listeners.get('notificationclick')({notification:{close(){},data:{url:'https://untrusted.example/agenda'}},waitUntil:promise=>pending=promise});
   assert.equal(opened.length,0);
   listeners.get('notificationclick')({notification:{close(){},data:{url:'/agenda?clinic=test'}},waitUntil:promise=>pending=promise});
   await pending;
   assert.deepEqual(opened,['https://crm.example/agenda?clinic=test']);
+  listeners.get('notificationclick')({notification:{close(){},data:{url:'/pagos?tab=expenses'}},waitUntil:promise=>pending=promise});
+  await pending;
+  assert.equal(opened[1],'https://crm.example/pagos?tab=expenses');
 });
 test('push subscriptions reject local addresses, credentials, arbitrary hosts and malformed keys',()=>{
   assert.equal(validPushSubscription(subscription),true);
@@ -48,6 +57,7 @@ test('native push accepts Expo tokens and creates privacy-safe routes for each C
  assert.equal(nativeNotificationRoute({kind:'new_appointment',appointment_id:'abc'}),'/appointment/abc');
  assert.equal(nativeNotificationRoute({message:'Nueva solicitud de cita',booking_request_id:'request'}),'/public-agenda');
  assert.equal(nativeNotificationRoute({kind:'test'}),'/(tabs)/agenda');
+ assert.equal(nativeNotificationRoute({kind:'bill_due'}),'/payments');
 });
 test('native dispatcher rechecks eligibility and sends only generic CRM notice content',async()=>{
  const token='ExponentPushToken[AbCdEfGhIjKlMnOpQrStUv]';let payload;const calls=[];
@@ -165,4 +175,51 @@ test('PostgreSQL staff alerts enforce recipients, preferences, clinic isolation,
  assert.equal((await db.query('select public.staff_push_is_eligible($1,$2) ok',[testClaim.delivery_id,testClaim.token])).rows[0].ok,false,'device preference also blocks tests');
  await db.query(`insert into public.public_booking_requests(clinic_id) values($1)`,[c]);
  assert.equal((await db.query("select count(*)::int n from public.staff_notifications where user_id=$1 and message='Nueva solicitud de cita'",[b])).rows[0].n,1,'billing preference also enables public booking alerts');
+
+ await t.test('check-in records one arrival and targets only the assigned professional', async () => {
+  const permissions = await readFile(new URL('../../supabase/migrations/20261031074344_custom_clinic_permissions.sql',import.meta.url),'utf8');
+  const arrival = await readFile(new URL('../../supabase/migrations/20261109233501_patient_arrival.sql',import.meta.url),'utf8');
+  await db.exec(permissions.slice(0, permissions.indexOf('-- Existing read policies')));
+  await db.exec(`
+    insert into public.clinic_memberships(clinic_id,user_id,role,permissions)
+      values('${c}','${r}','receptionist',private.default_clinic_permissions('receptionist'));
+    grant select, update on public.appointments to authenticated;
+    alter table public.appointments enable row level security;
+    create policy test_read on public.appointments for select to authenticated
+      using (private.has_clinic_permission(clinic_id, 'agenda.view'));
+    create policy test_edit on public.appointments for update to authenticated
+      using (private.has_clinic_permission(clinic_id, 'agenda.edit'))
+      with check (private.has_clinic_permission(clinic_id, 'agenda.edit'));
+    insert into public.staff_push_subscriptions(clinic_id,user_id,endpoint,p256dh,auth)
+      values('${c}','${p}','https://fcm.googleapis.com/fcm/send/professional','${subscription.keys.p256dh}','${subscription.keys.auth}');
+    insert into public.staff_native_push_subscriptions(clinic_id,user_id,expo_push_token,platform)
+      values('${c}','${p}','ExponentPushToken[AbCdEfGhIjKlMnOpQrStUv]','ios');
+    ${arrival}
+  `);
+  const create = async (professional, status) => (await db.query(
+    'insert into public.appointments(clinic_id,provider_id,status) values($1,$2,$3) returning id', [c,professional,status]
+  )).rows[0].id;
+  const open = await create(provider, 'pending');
+  const unlinked = await create(nextProvider, 'confirmed');
+  const completed = await create(provider, 'completed');
+  const checkIn = (id, clinic = c) => db.query('select public.record_appointment_arrival($1,$2) as arrival', [clinic,id]);
+  await db.exec(`select set_config('request.jwt.claim.sub','${r}',false);set role authenticated;`);
+  const first = (await checkIn(open)).rows[0].arrival;
+  assert.ok(first instanceof Date);
+  assert.deepEqual((await checkIn(open)).rows[0].arrival, first);
+  assert.equal((await db.query('select status from public.appointments where id=$1',[open])).rows[0].status, 'pending');
+  await assert.rejects(db.query('update public.appointments set arrived_at=null where id=$1',[open]), { code: '23514' });
+  await assert.rejects(checkIn(completed), { code: '55000' });
+  await assert.rejects(checkIn(open, other), { code: '42501' });
+  assert.ok((await checkIn(unlinked)).rows[0].arrival);
+  await db.exec(`select set_config('request.jwt.claim.sub','${b}',false);`);
+  await assert.rejects(checkIn(open), { code: '42501' });
+  await db.exec('reset role;');
+  assert.deepEqual((await db.query("select user_id, appointment_id, message from public.staff_notifications where kind='patient_arrived'")).rows,
+    [{ user_id:p, appointment_id:open, message:'Paciente en recepción' }]);
+  for (const table of ['staff_push_deliveries','staff_native_push_deliveries']) {
+    const result = await db.query(`select count(*)::int as count from private.${table} d join public.staff_notifications n on n.id=d.notification_id where n.kind='patient_arrived'`);
+    assert.equal(result.rows[0].count, 1);
+  }
+ });
 });

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { PGlite } from '@electric-sql/pglite';
 import { createClinicServicesStore } from './clinic-services.js';
+import { consultationServices } from '../clinic-services.js';
 
 test('clinic service store saves through the clinic-scoped atomic catalog RPC', async () => {
   const calls = [];
@@ -13,6 +14,28 @@ test('clinic service store saves through the clinic-scoped atomic catalog RPC', 
   assert.equal(calls[0].args.target_name,'Limpieza');
   assert.deepEqual(calls[0].args.target_branch_ids,['branch-id']);
   assert.deepEqual(calls[0].args.target_provider_ids,[]);
+});
+
+test('consultation import inserts only the selected templates and preserves existing services on conflict', async () => {
+  let request;
+  const store = createClinicServicesStore({ clientFactory: () => ({
+    from(table) {
+      assert.equal(table, 'clinic_services');
+      return {
+        upsert(rows, options) {
+          request = { rows, options };
+          return { select: async () => ({ data: rows }) };
+        },
+      };
+    },
+  }) });
+  const [review] = await store.seed('clinic-id', [consultationServices[1]]);
+  assert.deepEqual(request.options, { onConflict: 'clinic_id,code', ignoreDuplicates: true });
+  assert.equal(request.rows.length, 1);
+  assert.equal(request.rows[0].clinic_id, 'clinic-id');
+  assert.equal(review.code, 'revision-botox');
+  assert.equal(review.durationMin, 15);
+  assert.deepEqual(review.offers, []);
 });
 
 test('PostgreSQL enforces service edit permissions, clinic scope, branch assignments and atomic persistence', async t => {
@@ -91,5 +114,21 @@ test('PostgreSQL enforces service edit permissions, clinic scope, branch assignm
     const global=(await db.query("insert into public.appointments(clinic_id,patient_id,business_id,branch_id,provider_id,starts_at,ends_at,service,service_ids) values ($1,$2,$1,$3,$4,'2026-10-29T15:00:00Z','2026-10-29T15:45:00Z','ignored',array[$5::uuid]) returning service,service_snapshot",[clinic,patient,branch,provider,unscoped])).rows[0];
     assert.equal(global.service,'Clinic-wide service');
     assert.equal(global.service_snapshot.services[0].durationMin,null);
+  });
+  await t.test('deposit migration backfills special services and saves rule and service atomically', async () => {
+    const depositMigration=await readFile(new URL('../../../supabase/migrations/20261110012620_clinic_service_deposit_rules.sql', import.meta.url),'utf8');
+    await db.query("insert into public.clinic_services(clinic_id,code,category,name) values ($1,'fac-morpheus8','Faciales','Morpheus 8')",[clinic]);
+    await db.exec(depositMigration);
+    const {rows:[morpheus]}=await db.query("select id,deposit_mode,deposit_fixed_amount from public.clinic_services where code='fac-morpheus8'");
+    assert.deepEqual([morpheus.deposit_mode,Number(morpheus.deposit_fixed_amount)],['fixed',1000]);
+    await session(admin);
+    await db.exec('set role authenticated');
+    try {
+      const change=(name,amount)=>db.query("select public.save_clinic_service_with_deposit($1,$2,'fac-morpheus8','Faciales',$3,null,30,30,'[]','[]',null,'test','ready',true,'{}'::uuid[],'{}'::uuid[],'fixed',$4)",[clinic,morpheus.id,name,amount]);
+      await change('Morpheus actualizado',750);
+      await assert.rejects(change('Cambio inválido',0),{constraint:'clinic_services_deposit_rule'});
+      const {rows:[saved]}=await db.query('select name,deposit_fixed_amount from public.clinic_services where id=$1',[morpheus.id]);
+      assert.deepEqual([saved.name,Number(saved.deposit_fixed_amount)],['Morpheus actualizado',750]);
+    } finally { await db.exec('reset role'); }
   });
 });

@@ -6,6 +6,13 @@ const row = (code, category, name, durationMin = null, durationMax = durationMin
 });
 const offer = (kind, amount, currency = 'MXN', sessions = null, label = '') => ({ kind, amount, currency, sessions, label });
 
+export const consultationServices = [
+  row('consulta-valoracion', 'Consultas y revisiones', 'Valoración'),
+  row('revision-botox', 'Consultas y revisiones', 'Revisión de Botox', 15),
+  row('revision-relleno', 'Consultas y revisiones', 'Revisión de relleno', 15),
+  row('revision-enolyse', 'Consultas y revisiones', 'Revisión de enolyse', 15),
+];
+
 // Preserve the source's distinctions and unknowns. Null is never interpreted as zero.
 export const initialClinicServices = [
   row('fac-limpieza', 'Faciales', 'Facial Limpieza', 30, 30, [offer('single', 700), offer('package', 2500, 'MXN', null, 'Número de sesiones por definir')]),
@@ -45,13 +52,24 @@ export const initialClinicServices = [
   row('lipo-assessment', 'Lipoláser', 'Valoración Lipoláser', null, null, [offer('single', 500, 'MXN')], { notes: 'Moneda aclarada por la clínica: MXN.' }),
   ...[['1/2 área',300],['1 área',550],['2 áreas',850],['3 áreas',1100]].map(([name,amount], i) => row(`lipo-${i+1}`, 'Lipoláser', `Lipoláser · ${name}`, null, null, [offer('single', amount, 'USD')], { variants: ['Brazos','Papada','Entrepierna','Vientre bajo','Banana rolls','Joroba','Área del brasier','Piernas','Monte venus','Rodillas','Tobillos','Chaparreras','Love handles','Espalda','Abdomen alto','Jowls'] })),
   row('velka-alopecia', 'Consultas y revisiones', 'Alopecia / Caída de Cabello', 30, 30, [offer('single', 2000)], { source: 'Entrada existente en Velka; confirmar que siga vigente.' }),
+  ...consultationServices,
 ];
 
+export const demoClinicServices = initialClinicServices.map(service => ({ ...service, id: service.code }));
+
 export function normalizeServiceRow(record) {
-  return { id: record.id, code: record.code, category: record.category, name: record.name, description: record.description || '', durationMin: record.duration_min ?? record.durationMin ?? null, durationMax: record.duration_max ?? record.durationMax ?? null, offers: record.offers || [], variants: record.variants || [], notes: record.notes || '', source: record.source || '', status: record.status || 'setup_needed', active: record.active !== false, branchIds: record.branch_ids || [], updatedAt: record.updated_at || null };
+  const fixed = record.deposit_fixed_amount ?? record.depositFixedAmount;
+  return { id: record.id, code: record.code, category: record.category, name: record.name, description: record.description || '', durationMin: record.duration_min ?? record.durationMin ?? null, durationMax: record.duration_max ?? record.durationMax ?? null, offers: record.offers || [], variants: record.variants || [], notes: record.notes || '', source: record.source || '', status: record.status || 'setup_needed', active: record.active !== false, branchIds: record.branch_ids || [], updatedAt: record.updated_at || null, depositMode: record.deposit_mode ?? record.depositMode, depositFixedAmount: fixed == null ? null : Number(fixed) };
 }
 
 export function serviceSetupState(service) {
   if (!service.durationMin || !service.offers?.length || service.offers.some(item => item.currency === 'UNRESOLVED')) return 'setup_needed';
   return 'ready';
+}
+
+export function eligibleServiceProviders(services, providers, branchId) {
+  if (services.some(service => !service || service.active === false || (service.branchIds?.length && !service.branchIds.includes(branchId)))) return [];
+  return providers.filter(provider => provider.active !== false
+    && (!provider.branchIds?.length || provider.branchIds.includes(branchId))
+    && services.every(service => !service.providerIds?.length || service.providerIds.includes(provider.id)));
 }

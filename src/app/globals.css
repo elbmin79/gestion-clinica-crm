@@ -1898,3 +1898,24 @@ html[data-theme="dark"] .patient-search-options button small,html[data-theme="da
   .clinic-loading-track { animation-timing-function: steps(1, end); }
   .clinic-loading-track::before { width: 100%; animation: none; }
 }
+
+.patient-package-form { padding: 12px; }
+
+.expense-tabs, .expense-toolbar { display: flex; gap: 10px; flex-wrap: wrap; align-items: end; }
+.expense-tabs { margin-bottom: 16px; }
+.expense-workspace { display: grid; gap: 14px; }
+.expense-toolbar:has(h1) { justify-content: space-between; }
+.expense-toolbar h1 { margin: 0; font-size: clamp(20px, 3vw, 27px); color: var(--ink); }
+.expense-toolbar p { margin: 4px 0 0; color: var(--muted); }
+.expense-toolbar label { display: grid; gap: 4px; color: var(--ink); font-weight: 650; }
+.expense-toolbar input { padding: 6px 8px; color: var(--ink); background: var(--paper); border: 1px solid var(--line); border-radius: 6px; }
+.expense-panel { padding: 14px; min-width: 0; }
+.expense-panel h2 { margin: 0 0 10px; font-size: 16px; color: var(--ink); }
+.expense-panel table { min-width: 530px; }
+.expense-close { display: grid; grid-template-columns: repeat(auto-fit, minmax(125px, 1fr)); gap: 12px; margin: 0; }
+.expense-close dt { color: var(--muted); }
+.expense-close dd { margin: 4px 0 0; color: var(--ink); font-weight: 750; font-variant-numeric: tabular-nums; }
+.expense-archive { margin-top: 12px; }
+.expense-archive > div { display: flex; align-items: center; gap: 8px; margin-top: 5px; }
+.exchange-rate-preview { display: grid; justify-items: start; gap: 6px; }
+.exchange-rate-preview strong { display: block; margin-bottom: 3px; }

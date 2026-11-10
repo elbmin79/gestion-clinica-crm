@@ -3,6 +3,7 @@ export function validExpoPushToken(value) {
 }
 
 export function nativeNotificationRoute(row) {
+  if (row.kind === 'bill_due') return '/payments';
   if (row.kind === 'whatsapp_message' || row.kind === 'whatsapp_confirmation') return '/whatsapp';
   if (row.booking_request_id || row.message === 'Nueva solicitud de cita') return '/public-agenda';
   if (row.appointment_id) return `/appointment/${encodeURIComponent(row.appointment_id)}`;

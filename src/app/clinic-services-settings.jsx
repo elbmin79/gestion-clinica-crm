@@ -2,9 +2,10 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { Archive, Check, CircleAlert, Plus, RotateCcw, Search, ShieldCheck, Sparkles } from 'lucide-react';
-import { initialClinicServices, serviceCategories, serviceSetupState } from '../lib/clinic-services';
+import { consultationServices, demoClinicServices, initialClinicServices, serviceCategories, serviceSetupState } from '../lib/clinic-services';
 import { hasClinicPermission } from '../lib/clinic-permissions.js';
 import { createClinicServicesStore } from '../lib/supabase/clinic-services';
+import { parseFixedDeposit, serviceDepositRule } from '../lib/service-deposits';
 
 const money = amount => Number(amount).toLocaleString('es-MX', { maximumFractionDigits: 2 });
 const readyForAgenda = item => item.active !== false && serviceSetupState(item) === 'ready';
@@ -14,7 +15,7 @@ const displayOffer = item => {
   return `${item.kind === 'package' ? 'Paquete' : 'Sesión'} · ${amount}${item.sessions ? ` · ${item.sessions} sesiones` : item.kind === 'package' ? ' · sesiones por definir' : ''}`;
 };
 
-export default function ClinicServicesSettings({ clinicId, role, permissions = {}, branches = [], providers = [], sharedMode = true, onCatalogChange }) {
+export default function ClinicServicesSettings({ clinicId, role, permissions = {}, branches = [], providers = [], sharedMode = true, demoServices = demoClinicServices, onCatalogChange }) {
   const [services, setServices] = useState([]);
   const [status, setStatus] = useState('loading');
   const [error, setError] = useState('');
@@ -27,12 +28,12 @@ export default function ClinicServicesSettings({ clinicId, role, permissions = {
   const canManage = !sharedMode || hasClinicPermission(role, permissions, 'services.manage');
 
   const refresh = async () => {
-    if (!sharedMode || !clinicId) { setServices(initialClinicServices); setStatus('ready'); return; }
+    if (!sharedMode || !clinicId) { setServices(demoServices); setStatus('ready'); return; }
     setStatus('loading'); setError('');
     try { const loaded=await createClinicServicesStore().load(clinicId); setServices(loaded); onCatalogChange?.(loaded); setStatus('ready'); }
     catch (cause) { setError(cause.message || 'No se pudo cargar el catálogo.'); setStatus('error'); }
   };
-  useEffect(() => { refresh(); }, [clinicId, sharedMode]);
+  useEffect(() => { refresh(); }, [clinicId, sharedMode, demoServices]);
 
   const filtered = useMemo(() => services.filter(item => {
     const text = `${item.name} ${item.category} ${item.code} ${item.notes}`.toLocaleLowerCase('es-MX');
@@ -56,9 +57,11 @@ export default function ClinicServicesSettings({ clinicId, role, permissions = {
     finally { setSaving(false); }
   };
 
-  const importInitial = async () => {
+  const missingConsultations = consultationServices.filter(template => !services.some(service =>
+    service.code === template.code || service.name.trim().toLocaleLowerCase('es-MX') === template.name.toLocaleLowerCase('es-MX')));
+  const importServices = async (templates) => {
     setSaving(true); setError('');
-    try { await createClinicServicesStore().seed(clinicId); await refresh(); }
+    try { await createClinicServicesStore().seed(clinicId, templates); await refresh(); }
     catch (cause) { setError(cause.message || 'No se pudo importar la lista.'); }
     finally { setSaving(false); }
   };
@@ -75,8 +78,9 @@ export default function ClinicServicesSettings({ clinicId, role, permissions = {
       {canManage&&<button className="button primary" onClick={()=>setEditing({ code:'', category:'Faciales', name:'', description:'', durationMin:'', durationMax:'', offers:[], variants:[], branchIds:[], providerIds:[], notes:'', source:'Capturado por la clínica', status:'setup_needed', active:true })}><Plus size={15}/> Nuevo servicio</button>}
     </div>
     {error&&<div className="form-note" role="alert"><CircleAlert size={16}/>{error}</div>}
-    {sharedMode&&services.length===0&&canManage&&<div className="clinic-services-import"><div><strong>Lista clínica lista para revisar</strong><span>Importa {initialClinicServices.length} servicios. Los datos faltantes quedan marcados para configurar.</span></div><button className="button secondary" onClick={importInitial} disabled={saving}><Sparkles size={15}/> Importar lista inicial</button></div>}
-    {!sharedMode&&<div className="clinic-services-import"><ShieldCheck size={16}/><span>Modo de demostración: los cambios se conservan en esta sesión del catálogo.</span></div>}
+    {sharedMode&&services.length===0&&canManage&&<div className="clinic-services-import"><div><strong>Lista clínica lista para revisar</strong><span>Importa {initialClinicServices.length} servicios. Los datos faltantes quedan marcados para configurar.</span></div><button className="button secondary" onClick={()=>importServices(initialClinicServices)} disabled={saving}><Sparkles size={15}/> Importar lista inicial</button></div>}
+    {sharedMode&&services.length>0&&missingConsultations.length>0&&canManage&&<div className="clinic-services-import"><div><strong>Consultas y revisiones</strong><span>Agrega los servicios faltantes al catálogo. Las revisiones duran 15 minutos.</span></div><button className="button secondary" onClick={()=>importServices(missingConsultations)} disabled={saving}><Plus size={15}/> Agregar consultas y revisiones</button></div>}
+    {!sharedMode&&<div className="clinic-services-import"><ShieldCheck size={16}/><span>Modo de demostración: los cambios se guardan en este navegador.</span></div>}
     {editing&&<ServiceEditor key={editing.id||'new'} service={editing} branches={branches.filter(branch=>branch.active)} providers={providers.filter(provider=>provider.active)} saving={saving} onCancel={()=>setEditing(null)} onSave={persist}/>}
     <p className="clinic-services-scroll-hint">En pantallas pequeñas, desliza la tabla horizontalmente para ver precios, disponibilidad y acciones.</p>
     <div className="clinic-services-table-wrap"><table className="clinic-services-table"><thead><tr><th>Servicio</th><th>Duración</th><th>Precios y paquetes</th><th>Disponibilidad</th><th>Estado de configuración</th><th><span className="sr-only">Acciones</span></th></tr></thead><tbody>
@@ -98,7 +102,11 @@ export default function ClinicServicesSettings({ clinicId, role, permissions = {
 }
 
 function ServiceEditor({ service, branches, providers, onSave, onCancel, saving }) {
-  const [record, setRecord] = useState(() => ({ ...service, offers: service.offers || [], variants: service.variants || [] }));
+  const [record, setRecord] = useState(() => {
+    const rule = serviceDepositRule(service);
+    return { ...service, offers: service.offers || [], variants: service.variants || [], depositMode:rule.mode, depositFixedAmount:rule.amount };
+  });
+  const [depositError,setDepositError] = useState('');
   const set = (field, value) => setRecord(current=>({ ...current, [field]:value }));
   const single = record.offers.find(item=>item.kind==='single') || {};
   const pack = record.offers.find(item=>item.kind==='package') || {};
@@ -110,13 +118,30 @@ function ServiceEditor({ service, branches, providers, onSave, onCancel, saving 
     ];
     const min=record.durationMin?Number(record.durationMin):null, max=record.durationMax?Number(record.durationMax):min;
     const status=min&&offers.length&&offers.every(item=>item.currency!=='UNRESOLVED')?'ready':'setup_needed';
-    onSave({ ...record, code:record.code||`custom-${crypto.randomUUID()}`, durationMin:min, durationMax:max, offers, status });
+    try {
+      const depositFixedAmount = record.depositMode === 'fixed' ? parseFixedDeposit(record.depositFixedAmount) : null;
+      setDepositError('');
+      onSave({ ...record, code:record.code||`custom-${crypto.randomUUID()}`, durationMin:min, durationMax:max, offers, status, depositFixedAmount });
+    } catch (error) { setDepositError(error.message); }
   };
   return <form className="clinic-service-editor" onSubmit={save}>
     <div className="clinic-service-editor-heading"><div><h3>{service.id?'Editar servicio':'Nuevo servicio'}</h3><p>La moneda y duración se guardan por separado. Deja el dato vacío si está por confirmar.</p></div><button type="button" className="button secondary compact" onClick={onCancel}>Cerrar</button></div>
     <div className="clinic-service-editor-grid"><label>Nombre<input required maxLength="180" value={record.name} onChange={event=>set('name',event.target.value)}/></label><label>Categoría<select value={record.category} onChange={event=>set('category',event.target.value)}>{serviceCategories.map(value=><option key={value}>{value}</option>)}</select></label><label>Duración mínima<input type="number" min="15" max="720" step="15" placeholder="Por definir" value={record.durationMin??''} onChange={event=>set('durationMin',event.target.value)}/></label><label>Duración máxima<input type="number" min="15" max="720" step="15" placeholder="Igual a la mínima" value={record.durationMax??''} onChange={event=>set('durationMax',event.target.value)}/></label></div>
     <label>Descripción<input maxLength="500" value={record.description||''} onChange={event=>set('description',event.target.value)} placeholder="Descripción opcional"/></label>
     <div className="clinic-service-editor-grid"><fieldset><legend>Sesión individual</legend><div className="clinic-service-money"><input aria-label="Precio por sesión" type="number" min="0.01" step="0.01" placeholder="Por cotizar" value={single.amount??''} onChange={event=>set('offers',[{...single,kind:'single',amount:event.target.value,currency:single.currency||'MXN'},...record.offers.filter(item=>item.kind!=='single')])}/><select aria-label="Moneda de sesión" value={single.currency||'MXN'} onChange={event=>set('offers',[{...single,kind:'single',currency:event.target.value},...record.offers.filter(item=>item.kind!=='single')])}><option value="MXN">MXN</option><option value="USD">USD</option><option value="UNRESOLVED">Por confirmar</option></select></div></fieldset><fieldset><legend>Paquete</legend><div className="clinic-service-money"><input aria-label="Precio del paquete" type="number" min="0.01" step="0.01" placeholder="No publicado" value={pack.amount??''} onChange={event=>set('offers',[...record.offers.filter(item=>item.kind!=='package'),{...pack,kind:'package',amount:event.target.value,currency:pack.currency||'MXN'}])}/><select aria-label="Moneda del paquete" value={pack.currency||'MXN'} onChange={event=>set('offers',[...record.offers.filter(item=>item.kind!=='package'),{...pack,kind:'package',currency:event.target.value}])}><option value="MXN">MXN</option><option value="USD">USD</option><option value="UNRESOLVED">Por confirmar</option></select><input aria-label="Sesiones por paquete" type="number" min="1" step="1" placeholder="Sesiones" value={pack.sessions??''} onChange={event=>set('offers',[...record.offers.filter(item=>item.kind!=='package'),{...pack,kind:'package',sessions:event.target.value?Number(event.target.value):null}])}/></div></fieldset></div>
+    <fieldset><legend>Anticipo para agendar</legend>
+      <div className="clinic-service-editor-grid">
+        <label>Regla de anticipo<select value={record.depositMode} onChange={event=>set('depositMode',event.target.value)}>
+          <option value="tier">Según el precio de la sesión</option>
+          <option value="fixed">Monto fijo en MXN</option>
+          <option value="full">Pago total de la sesión</option>
+          <option value="manual">Captura manual</option>
+        </select></label>
+        {record.depositMode==='fixed'&&<label>Anticipo fijo (MXN)<input type="number" min="0.01" max="9999999999.99" step="0.01" required value={record.depositFixedAmount??''} onChange={event=>set('depositFixedAmount',event.target.value)}/></label>}
+      </div>
+      <small>Por precio en MXN se sugieren $200 desde $500, $500 al superar $1,000 y $1,000 al superar $3,000.</small>
+      {depositError&&<p role="alert">{depositError}</p>}
+    </fieldset>
     <fieldset className="clinic-service-branch-picker"><legend>Sucursales donde se ofrece</legend><small>Sin seleccionar significa todas las sucursales activas.</small>{branches.length?branches.map(branch=><label key={branch.id}><input type="checkbox" checked={(record.branchIds||[]).includes(branch.id)} onChange={event=>{const next=event.target.checked?[...(record.branchIds||[]),branch.id]:(record.branchIds||[]).filter(id=>id!==branch.id);set('branchIds',next);if(next.length)set('providerIds',(record.providerIds||[]).filter(id=>providers.some(provider=>provider.id===id&&provider.branchIds?.some(branchId=>next.includes(branchId)))))}}/>{branch.name}</label>):<span>No hay sucursales activas para asignar.</span>}</fieldset>
     <fieldset className="clinic-service-branch-picker"><legend>Profesionales autorizados</legend><small>Sin seleccionar significa todos los profesionales con acceso a la sucursal elegida.</small>{providers.filter(provider=>!(record.branchIds||[]).length||record.branchIds.some(id=>provider.branchIds?.includes(id))).length?providers.filter(provider=>!(record.branchIds||[]).length||record.branchIds.some(id=>provider.branchIds?.includes(id))).map(provider=><label key={provider.id}><input type="checkbox" checked={(record.providerIds||[]).includes(provider.id)} onChange={event=>set('providerIds',event.target.checked?[...(record.providerIds||[]),provider.id]:(record.providerIds||[]).filter(id=>id!==provider.id))}/>{provider.name}</label>):<span>Primero asigna una sucursal con profesionales activos.</span>}</fieldset>
     <label>Variantes y opciones<input value={(record.variants||[]).join(', ')} onChange={event=>set('variants',event.target.value.split(',').map(value=>value.trim()).filter(Boolean))} placeholder="Separadas por comas: área, producto, unidades"/></label>
