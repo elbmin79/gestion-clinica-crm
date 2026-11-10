@@ -800,7 +800,9 @@ html[data-theme="light"] .search-shortcut,
 html[data-theme="light"] .search-shortcut kbd,
 html[data-theme="light"] .input-search kbd{color:#5d4b56}
 html[data-theme="light"] .nav-item{color:#5d4b56}
-html[data-theme="light"] .nav-item.active{color:#71364f}
+html[data-theme="light"] .nav-item.active{background:rgb(141 63 100 / 82%);color:#fffafc}
+html[data-theme="light"] .nav-item.active svg{color:inherit}
+html[data-theme="light"] .nav-item.active .nav-count{background:#f7e8ef;border-color:transparent;color:#71364f}
 html[data-theme="light"] .metric-change,
 html[data-theme="light"] .overview-dashboard .metric-change{color:#47634d}
 html[data-theme="light"] .metric-change.attention,
@@ -1919,3 +1921,47 @@ html[data-theme="dark"] .patient-search-options button small,html[data-theme="da
 .expense-archive > div { display: flex; align-items: center; gap: 8px; margin-top: 5px; }
 .exchange-rate-preview { display: grid; justify-items: start; gap: 6px; }
 .exchange-rate-preview strong { display: block; margin-bottom: 3px; }
+
+@media screen and (forced-colors: none) {
+  .app-shell {
+    --shell-rose-wash: color-mix(in srgb, var(--green) 17%, transparent);
+    --shell-ink-wash: color-mix(in srgb, var(--ink) 9%, transparent);
+    --shell-paper-wash: color-mix(in srgb, var(--paper) 72%, transparent);
+  }
+
+  .app-shell .main-shell {
+    /* Uneven washes overlap at different scales, with a quieter center. */
+    background-image:
+      radial-gradient(ellipse 76% 420px at 17% 160px, var(--shell-paper-wash), transparent 76%),
+      radial-gradient(ellipse 62% 540px at 98% 95px, var(--shell-rose-wash), transparent 83%),
+      radial-gradient(ellipse 48% 64% at 0 65%, var(--shell-rose-wash), transparent 86%),
+      radial-gradient(ellipse 58% 46% at 102% 83%, var(--shell-ink-wash), transparent 84%),
+      linear-gradient(115deg, var(--shell-ink-wash), var(--shell-paper-wash) 62%, var(--shell-rose-wash));
+  }
+
+  html .app-shell .topbar {
+    /* Blend a fine monochrome paper grain into each theme's tinted surface. */
+    background-color: color-mix(in srgb, var(--paper) 96%, var(--green));
+    background-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22192%22%20height%3D%22192%22%3E%3Cfilter%20id%3D%22grain%22%20x%3D%220%22%20y%3D%220%22%20width%3D%22100%25%22%20height%3D%22100%25%22%20color-interpolation-filters%3D%22sRGB%22%3E%3CfeTurbulence%20type%3D%22fractalNoise%22%20baseFrequency%3D%22.67%20.46%22%20numOctaves%3D%223%22%20seed%3D%2218%22%20stitchTiles%3D%22stitch%22%2F%3E%3CfeColorMatrix%20type%3D%22saturate%22%20values%3D%220%22%2F%3E%3C%2Ffilter%3E%3Crect%20width%3D%22100%25%22%20height%3D%22100%25%22%20filter%3D%22url(%23grain)%22%20opacity%3D%22.49%22%2F%3E%3C%2Fsvg%3E");
+    background-blend-mode: soft-light;
+  }
+}
+
+@media screen and (prefers-reduced-motion: no-preference) and (forced-colors: none) {
+  @supports (animation-timeline: scroll(root block)) {
+    .app-shell .main-shell {
+      /* Give the upper and lower washes room to drift in opposite directions. */
+      background-size:
+        100% calc(100% + 32svh), 100% calc(100% + 56svh),
+        100% calc(100% + 44svh), 100% calc(100% + 28svh), 100% 100%;
+      background-repeat: no-repeat;
+      animation: workspace-wash-parallax auto linear both;
+      animation-timeline: scroll(root block);
+    }
+  }
+}
+
+@keyframes workspace-wash-parallax {
+  from { background-position-y: 0%, 0%, 100%, 100%, 0%; }
+  to { background-position-y: 100%, 100%, 0%, 0%, 0%; }
+}
