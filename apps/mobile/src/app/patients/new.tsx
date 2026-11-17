@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Switch, View } from 'react-native';
 import { CrmText as Text, CrmTextInput as TextInput } from '@/components/crm-text';
 
 import { useCrmColorScheme as useColorScheme } from '@/providers/crm-theme-provider';
@@ -22,6 +22,7 @@ export default function NewPatientScreen() {
   const { session, loading: authLoading } = useAuth();
   const [catalog, setCatalog] = useState(emptyCatalog);
   const [name, setName] = useState('');
+  const [firstVisit, setFirstVisit] = useState(false);
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [treatment, setTreatment] = useState('');
@@ -41,7 +42,7 @@ export default function NewPatientScreen() {
     setLoading(true); setError('');
     try {
       if (email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) throw new Error('Revisa el correo electrónico.');
-      const saved = await createClinicPatient(clinic, { name: name.trim(), email: email.trim(), phone: phone.trim(), treatment: treatment.trim(), branchId, providerId });
+      const saved = await createClinicPatient(clinic, { name: name.trim(), email: email.trim(), phone: phone.trim(), treatment: treatment.trim(), branchId, providerId, firstVisit });
       router.replace({ pathname: '/patients/[id]', params: { id: saved.id } });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'No se pudo crear el expediente.');
@@ -57,6 +58,7 @@ export default function NewPatientScreen() {
     {!canCreate ? <Text style={[styles.error, { color: palette.danger }]}>Tu cuenta no tiene permiso para crear pacientes.</Text> : <View style={[styles.card, { backgroundColor: palette.backgroundElement, borderColor: palette.line }]}>
       <Field label="Nombre completo" value={name} onChangeText={setName} placeholder="Ej. Andrea García" palette={palette} />
       <View style={styles.row}><Field label="Correo electrónico (opcional)" value={email} onChangeText={setEmail} placeholder="correo@ejemplo.com" keyboardType="email-address" palette={palette} /><Field label="Teléfono (opcional)" value={phone} onChangeText={setPhone} placeholder="Teléfono de contacto" keyboardType="phone-pad" palette={palette} /></View>
+      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}><Text style={[styles.label, { color: palette.text }]}>Primera vez</Text><Switch accessibilityLabel="Primera vez" value={firstVisit} onValueChange={setFirstVisit} /></View>
       <Field label="Tratamiento o servicio" value={treatment} onChangeText={setTreatment} placeholder="Por definir" palette={palette} />
       <Choice title="Sucursal de referencia" value={branchId} items={catalog.branches.map(item => ({ id: item.id, name: item.name }))} onChange={setBranchId} palette={palette} />
       <Choice title="Profesional de referencia" value={providerId} items={catalog.providers} onChange={setProviderId} palette={palette} />

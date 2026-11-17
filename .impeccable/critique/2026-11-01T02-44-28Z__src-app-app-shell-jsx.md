@@ -10,6 +10,7 @@ target_fingerprint: "sha256:638a642d0f5a9583276c3040b4c6ed7ca0adb0ff6a3e3861f12b
 target_path: "D:\\BandIA\\MedicalCRM\\src\\app\\app-shell.jsx"
 timestamp: 2026-11-01T02-44-28Z
 slug: src-app-app-shell-jsx
+closed: true
 ---
 # CRM Frontend Review
 

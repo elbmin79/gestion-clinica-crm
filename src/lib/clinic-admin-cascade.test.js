@@ -25,3 +25,50 @@ test('last-admin guard protects existing clinics but permits whole-clinic cascad
  await db.exec("delete from public.clinics where id='10000000-0000-0000-0000-000000000001'");
  assert.equal((await db.query('select count(*)::int n from public.clinic_memberships')).rows[0].n,0);
 });
+
+test('Auth deletion can remove an admin account while a clinic still has another admin', async t => {
+  const db = new PGlite();
+  t.after(() => db.close());
+  const loadMigration = name => readFile(new URL(`../../supabase/migrations/${name}.sql`, import.meta.url), 'utf8');
+  const [lastAdminGuard, permissions, fix] = await Promise.all([
+    loadMigration('20261030204811_allow_clinic_delete_admin_cascade'),
+    loadMigration('20261031074344_custom_clinic_permissions'),
+    loadMigration('20261110043652_allow_auth_admin_account_deletion'),
+  ]);
+  const clinic = '10000000-0000-0000-0000-000000000001';
+  const departing = '20000000-0000-0000-0000-000000000001';
+  const remaining = '20000000-0000-0000-0000-000000000002';
+  await db.exec(`
+    create schema auth;
+    create schema private;
+    create table auth.users(id uuid primary key);
+    create table public.clinics(id uuid primary key);
+    create table public.clinic_memberships(
+      clinic_id uuid references public.clinics(id),
+      user_id uuid references auth.users(id) on delete cascade,
+      role text,
+      permissions jsonb default '{}',
+      primary key (clinic_id, user_id)
+    );
+    ${lastAdminGuard}
+    create trigger prevent_last_clinic_admin_removal
+    before delete or update of role on public.clinic_memberships
+    for each row execute function private.prevent_last_clinic_admin_removal();
+    ${permissions.slice(permissions.indexOf('create or replace function private.prevent_clinic_admin_membership_changes()'), permissions.indexOf('for each row execute function private.prevent_clinic_admin_membership_changes();') + 'for each row execute function private.prevent_clinic_admin_membership_changes();'.length)}
+    insert into auth.users values ('${departing}'), ('${remaining}');
+    insert into public.clinics values ('${clinic}');
+    insert into public.clinic_memberships(clinic_id, user_id, role)
+    values ('${clinic}', '${departing}', 'admin'), ('${clinic}', '${remaining}', 'admin');
+  `);
+  const deleteAuthUser = id => db.query('delete from auth.users where id = $1', [id]);
+  await assert.rejects(deleteAuthUser(departing), /No se puede revocar/);
+  await db.exec(fix);
+  await assert.rejects(db.query('delete from public.clinic_memberships where user_id = $1', [departing]), /No se puede revocar/);
+  await assert.rejects(db.query("update public.clinic_memberships set permissions = '{\"changed\":true}' where user_id = $1", [departing]), /no se pueden modificar/);
+  await deleteAuthUser(departing);
+  const memberships = () => db.query('select user_id from public.clinic_memberships');
+  assert.deepEqual((await memberships()).rows, [{user_id: remaining}]);
+  await assert.rejects(deleteAuthUser(remaining), /clinic_must_keep_admin/);
+  assert.deepEqual((await memberships()).rows, [{user_id: remaining}]);
+  assert.deepEqual((await db.query('select id from auth.users')).rows, [{id: remaining}]);
+});

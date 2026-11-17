@@ -386,7 +386,7 @@ export async function loadAppointmentCatalog(clinic: ClinicMembership, options: 
   };
 }
 
-export async function createClinicPatient(clinic: ClinicMembership, input: { name: string; email?: string; phone?: string; treatment?: string; branchId?: string; providerId?: string }) {
+export async function createClinicPatient(clinic: ClinicMembership, input: { name: string; email?: string; phone?: string; treatment?: string; branchId?: string; providerId?: string; firstVisit?: boolean }) {
   if (!hasClinicPermission(clinic.role, clinic.permissions, 'patients.create')) throw new Error('Tu cuenta no tiene permiso para crear pacientes.');
   return createPatientDirectoryStore().create(clinic.clinicId, input);
 }

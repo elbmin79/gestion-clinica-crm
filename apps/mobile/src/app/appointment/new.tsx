@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, View, type LayoutChangeEvent } from 'react-native';
+import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Switch, View, type LayoutChangeEvent } from 'react-native';
 import { CrmText as Text, CrmTextInput as TextInput } from '@/components/crm-text';
 
 import { useCrmColorScheme as useColorScheme } from '@/providers/crm-theme-provider';
@@ -55,6 +55,7 @@ export default function NewAppointmentScreen() {
   const [patientName, setPatientName] = useState('');
   const [patientEmail, setPatientEmail] = useState('');
   const [patientPhone, setPatientPhone] = useState('');
+  const [firstVisit, setFirstVisit] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -126,10 +127,10 @@ export default function NewAppointmentScreen() {
     setSaving(true); setError('');
     try {
       if (patientEmail.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(patientEmail.trim())) throw new Error('Revisa el correo electrónico del paciente.');
-      const saved = await createClinicPatient(clinic, { name: patientName.trim(), email: patientEmail.trim(), phone: patientPhone.trim(), treatment: '', branchId: '' });
+      const saved = await createClinicPatient(clinic, { name: patientName.trim(), email: patientEmail.trim(), phone: patientPhone.trim(), firstVisit, treatment: '', branchId: '' });
       const newPatient: PatientListItem = { id: saved.id, databaseId: saved.id, recordNumber: saved.record_number, name: patientName.trim(), service: 'Por definir', status: 'Nuevo' };
       setPatients(current => [newPatient, ...current.filter(item => item.id !== newPatient.id)]);
-      setPatientId(newPatient.id); setPatientSearch(''); setPatientName(''); setPatientEmail(''); setPatientPhone(''); setCreatingPatient(false);
+      setPatientId(newPatient.id); setPatientSearch(''); setPatientName(''); setPatientEmail(''); setPatientPhone(''); setFirstVisit(false); setCreatingPatient(false);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'No se pudo crear el expediente.');
     } finally { setSaving(false); }
@@ -220,6 +221,7 @@ export default function NewAppointmentScreen() {
                   {creatingPatient && <Animated.View entering={patientResultsEntrance} exiting={patientResultsExit} onLayout={createPanel.onLayout} style={styles.patientList}><View style={[styles.quickCreate, { backgroundColor: palette.background, borderColor: palette.line }]}><Text style={[styles.quickTitle, { color: palette.text }]}>Expediente nuevo</Text><Text style={[styles.help, { color: palette.textSecondary }]}>La cita se conservará y seleccionaremos el expediente al guardarlo.</Text>
                 <Field label="Nombre completo" value={patientName} onChangeText={setPatientName} placeholder="Ej. Andrea García" palette={palette} />
                 <View style={styles.twoCol}><Field label="Correo (opcional)" value={patientEmail} onChangeText={setPatientEmail} placeholder="correo@ejemplo.com" keyboardType="email-address" palette={palette} /><Field label="Teléfono (opcional)" value={patientPhone} onChangeText={setPatientPhone} placeholder="Teléfono" keyboardType="phone-pad" palette={palette} /></View>
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}><Text style={{ color: palette.text }}>Primera vez</Text><Switch accessibilityLabel="Primera vez" value={firstVisit} onValueChange={setFirstVisit} /></View>
                 <Pressable accessibilityRole="button" disabled={saving || !patientName.trim()} onPress={() => void savePatient()} style={[styles.primaryButton, { backgroundColor: palette.primary, opacity: saving || !patientName.trim() ? 0.5 : 1 }]}>{saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryText}>Crear y seleccionar paciente</Text>}</Pressable>
                   </View></Animated.View>}
                 </Animated.View>

@@ -3,6 +3,11 @@ import { createClient } from './client.js';
 import { fetchAllPages } from './paged-query.js';
 
 export function createPatientPackageStore({ clientFactory = createClient } = {}) {
+  const mapBalance = (row, patientId = row.patient_id) => packageBalance({
+    id: row.id, patientId, serviceId: row.service_id, serviceName: row.service_name, createdAt: row.created_at,
+    totalSessions: row.sessions_total, agreedAmount: Number(row.agreed_amount),
+    completedSessions: row.completed_sessions, reservedSessions: row.reserved_sessions, paidAmount: Number(row.paid_amount),
+  });
   return {
     async load(clinicId, patientId) {
       const client = clientFactory();
@@ -13,11 +18,17 @@ export function createPatientPackageStore({ clientFactory = createClient } = {})
         .order('created_at', { ascending: false })
         .order('id')
         .range(from, to));
-      return rows.map(row => packageBalance({
-        id: row.id, patientId, serviceId: row.service_id, serviceName: row.service_name, createdAt: row.created_at,
-        totalSessions: row.sessions_total, agreedAmount: Number(row.agreed_amount),
-        completedSessions: row.completed_sessions, reservedSessions: row.reserved_sessions, paidAmount: Number(row.paid_amount),
-      }));
+      return rows.map(row => mapBalance(row, patientId));
+    },
+    async listForClinic(clinicId) {
+      const client = clientFactory();
+      const rows = await fetchAllPages(({ from, to, includeCount }) => client.from('patient_package_balances')
+        .select('id, patient_id, service_id, service_name, sessions_total, agreed_amount, created_at, completed_sessions, reserved_sessions, paid_amount', includeCount ? { count: 'exact' } : undefined)
+        .eq('clinic_id', clinicId)
+        .order('created_at', { ascending: false })
+        .order('id')
+        .range(from, to));
+      return rows.map(row => mapBalance(row));
     },
     async create(clinicId, patientId, purchase) {
       const client = clientFactory();

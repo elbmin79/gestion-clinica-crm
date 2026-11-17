@@ -2,12 +2,15 @@
 
 import React, { useEffect, useMemo, useRef, useState, useId } from 'react';
 import Image from 'next/image';
+import { procedureAnatomy, procedureFaceZoom } from './procedure-anatomy';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { isSupabaseConfigured } from '../lib/supabase/config';
 import { createPatientDirectoryStore } from '../lib/supabase/patient-directory';
 import { createClinicAgendaStore } from '../lib/supabase/clinic-agenda';
 import { createClinicPaymentsStore } from '../lib/supabase/clinic-payments';
+import { createPatientPackageStore } from '../lib/supabase/patient-packages';
+import { buildPatientRecallQueue } from '../lib/patient-recall';
 import ClinicServicesSettings from './clinic-services-settings';
 import ClinicPromotionsSettings from './clinic-promotions-settings';
 import ClinicExpenseLedger from './clinic-expense-ledger';
@@ -140,9 +143,18 @@ function migrateDemoBranches(items) {
 }
 const consentLibrary = [
   { title: 'Consentimiento informado', type: 'Documento clínico', version: 'demo', uses: 'Muestra de flujo', content: 'MUESTRA DE FLUJO — NO ES UN CONSENTIMIENTO REAL. No describe procedimientos, riesgos ni alternativas. Sustituye íntegramente este texto por la versión revisada y aprobada por la clínica antes de solicitar una firma.', isDemoPlaceholder: true, initials: 'CI', color: 'lavender' },
+  { title: 'Consentimiento · Toxina botulínica', type: 'Procedimiento estético', version: 'demo', uses: 'Muestra de flujo', content: 'MUESTRA DE FLUJO — NO ES UN CONSENTIMIENTO REAL. Sustituye por el documento específico de toxina botulínica revisado y aprobado por la clínica.', isDemoPlaceholder: true, initials: 'TB', color: 'lavender' },
+  { title: 'Consentimiento · Relleno con ácido hialurónico', type: 'Procedimiento estético', version: 'demo', uses: 'Muestra de flujo', content: 'MUESTRA DE FLUJO — NO ES UN CONSENTIMIENTO REAL. Sustituye por el documento específico de relleno con ácido hialurónico revisado y aprobado por la clínica.', isDemoPlaceholder: true, initials: 'AH', color: 'peach' },
+  { title: 'Consentimiento · Endolift', type: 'Procedimiento estético', version: 'demo', uses: 'Muestra de flujo', content: 'MUESTRA DE FLUJO — NO ES UN CONSENTIMIENTO REAL. Sustituye por el documento específico de Endolift revisado y aprobado por la clínica.', isDemoPlaceholder: true, initials: 'EL', color: 'mint' },
   { title: 'Aviso de privacidad', type: 'Protección de datos', version: 'demo', uses: 'Muestra de flujo', content: 'MUESTRA DE FLUJO — NO ES UN AVISO DE PRIVACIDAD. No describe tratamientos de datos ni derechos. Sustituye íntegramente este texto por el aviso revisado y aprobado por la clínica antes de solicitar una firma.', isDemoPlaceholder: true, initials: 'AP', color: 'mint' },
   { title: 'Autorización de uso de imagen', type: 'Autorización', version: 'demo', uses: 'Muestra de flujo', content: 'MUESTRA DE FLUJO — NO ES UNA AUTORIZACIÓN. No concede permiso para captar ni usar imágenes. Sustituye íntegramente este texto por el formato revisado y aprobado por la clínica antes de solicitar una firma.', isDemoPlaceholder: true, initials: 'AI', color: 'peach' },
 ];
+const clinicalHistoryPrompts = [
+  ['allergies','Alergias'],['chronicConditions','Enfermedades crónicas'],['medications','Medicamentos actuales'],
+  ['surgeries','Cirugías / hospitalizaciones'],['priorTreatments','Tratamientos estéticos previos'],['familyHistory','Antecedentes familiares'],
+  ['tobaccoAlcohol','Tabaco, alcohol u otras sustancias'],['exercise','Actividad física'],['reproductiveHistory','Antecedentes ginecoobstétricos'],
+];
+const clinicalHistoryStateLabels = { not_asked:'Sin preguntar', reports:'Paciente refiere', denies:'Paciente niega', unknown:'No lo sabe', not_applicable:'No aplica' };
 const initialContractTemplates = [{
   id: 'contract-template-demo-services',
   title: 'Prestación de servicios · muestra',
@@ -158,6 +170,7 @@ const pageRoutes = {
   agenda: "/agenda",
   payments: "/pagos",
   reminders: "/recordatorios",
+  recall: "/seguimiento",
   whatsapp: "/whatsapp",
   patients: "/pacientes",
   consents: "/consentimientos",
@@ -206,11 +219,13 @@ function usePersistentList(key, initialValue, enabled = true, migrateStoredValue
 }
 
 function migrateDemoConsentTemplates(templates) {
-  return templates.map(template => {
+  const migrated=templates.map(template => {
     const demoSample = consentLibrary.find(seed => seed.title === template.title);
     if (template.content?.trim() || !demoSample) return template;
     return { ...template, content: demoSample.content, version: 'demo', uses: 'Muestra de flujo', isDemoPlaceholder: true };
   });
+  const existingTitles=new Set(migrated.map(template=>template.title.trim().toLocaleLowerCase('es-MX')));
+  return [...migrated,...consentLibrary.filter(template=>!existingTitles.has(template.title.trim().toLocaleLowerCase('es-MX')))];
 }
 
 function migrateDemoContractTemplates(templates) {
@@ -241,6 +256,7 @@ function dateKeyInTimeZone(date, timeZone) {
   const parts = new Intl.DateTimeFormat('en-US', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(date);
   return `${parts.find(part => part.type === 'year')?.value}-${parts.find(part => part.type === 'month')?.value}-${parts.find(part => part.type === 'day')?.value}`;
 }
+
 function createCurrentDemoAppointments() {
   const date = dateKeyInTimeZone(new Date(), 'America/Tijuana');
   return initialAppointments.map(appointment => ({
@@ -360,6 +376,19 @@ function App({ children }) {
   const promotionData = sharedMode
     ? sharedPromotions && sharedPromotions.clinicId === promotionClinicId ? sharedPromotions : { status: 'loading', rows: [] }
     : { status: 'ready', rows: demoPromotions };
+  const [sharedRecallPackageState, setSharedRecallPackageState] = useState({ clinicId: '', status: 'idle', rows: [] });
+  const [sharedRecallReload, setSharedRecallReload] = useState(0);
+  useEffect(() => {
+    if (!sharedMode) { setSharedRecallPackageState({ clinicId: '', status: 'idle', rows: [] }); return; }
+    if (sharedDirectory.status !== 'ready' || !sharedDirectory.clinicId) { setSharedRecallPackageState({ clinicId: sharedDirectory.clinicId || '', status: 'loading', rows: [] }); return; }
+    let active = true;
+    setSharedRecallPackageState({ clinicId: sharedDirectory.clinicId, status: 'loading', rows: [] });
+    createPatientPackageStore().listForClinic(sharedDirectory.clinicId).then(
+      rows => { if (active) setSharedRecallPackageState({ clinicId: sharedDirectory.clinicId, status: 'ready', rows }); },
+      () => { if (active) setSharedRecallPackageState({ clinicId: sharedDirectory.clinicId, status: 'error', rows: [] }); },
+    );
+    return () => { active = false; };
+  }, [sharedMode, sharedDirectory.status, sharedDirectory.clinicId, sharedRecallReload]);
   const [clinicProfileName, setClinicProfileName] = useState('Mi clínica');
   const [clinicProfileLoaded, setClinicProfileLoaded] = useState(false);
   const [theme, setTheme] = useState('light');
@@ -507,7 +536,9 @@ function App({ children }) {
   const [contractTemplates, setContractTemplates] = usePersistentList('crm-demo-contract-templates-v1', sharedMode ? [] : initialContractTemplates, !sharedMode && !isStandaloneRoute, migrateDemoContractTemplates);
   const [demoPatientActivities, setDemoPatientActivities] = usePersistentList('crm-demo-patient-activities-v1', [], !sharedMode && !isStandaloneRoute);
   const [demoClinicalHistory, setDemoClinicalHistory] = usePersistentList('crm-demo-clinical-history-v1', [], !sharedMode && !isStandaloneRoute);
+  const [demoClinicalBackgrounds, setDemoClinicalBackgrounds] = usePersistentList('crm-demo-clinical-backgrounds-v1', [], !sharedMode && !isStandaloneRoute);
   const [demoBotoxTreatments, setDemoBotoxTreatments] = usePersistentList('crm-demo-botox-treatments-v1', [], !sharedMode && !isStandaloneRoute);
+  const [demoProcedures, setDemoProcedures] = usePersistentList('crm-demo-procedures-v1', [], !sharedMode && !isStandaloneRoute);
   const [demoRecordFiles, setDemoRecordFiles] = usePersistentList('crm-demo-record-files-v1', [], !sharedMode && !isStandaloneRoute);
   const patients = sharedMode ? sharedDirectory.patients : demoPatients;
   const setPatients = setDemoPatients;
@@ -551,7 +582,7 @@ function App({ children }) {
     setAppointmentDefaults(current => ({ ...current, date: today }));
     setPaymentDefaults(current => ({ ...current, date: today }));
   }, [clinicTimeZone]);
-  const [appointmentDefaults, setAppointmentDefaults] = useState({ date: '2026-10-26', time: '17:00', patientId: '', providerId: '' });
+  const [appointmentDefaults, setAppointmentDefaults] = useState({ date: '2026-10-26', time: '17:00', patientId: '', providerId: '', packageId: '', serviceId: '', serviceName: '' });
   const [paymentDefaults, setPaymentDefaults] = useState({ date: '2026-10-26', appointmentId: '' });
   const [contractDefaults, setContractDefaults] = useState({ patientId: '' });
   const [consentDefaults, setConsentDefaults] = useState({ patientId: '', templateId: '' });
@@ -586,6 +617,10 @@ function App({ children }) {
   const workspaceProviders = useMemo(() => filterByWorkspace(providers, activeWorkspaceSelection, branches), [providers, activeWorkspaceSelection.businessId, activeWorkspaceSelection.branchId, branches]);
   const workspacePatients = useMemo(() => filterByWorkspace(patients, activeWorkspaceSelection, branches), [patients, activeWorkspaceSelection.businessId, activeWorkspaceSelection.branchId, branches]);
   const workspaceAppointments = useMemo(() => filterByWorkspace(appointments, activeWorkspaceSelection, branches), [appointments, activeWorkspaceSelection.businessId, activeWorkspaceSelection.branchId, branches]);
+  const demoRecallPackages = useMemo(() => workspacePatients.flatMap(patient => demoPackageBalances(demoPackages, patient.id, workspaceAppointments, demoPayments)), [workspacePatients, demoPackages, workspaceAppointments, demoPayments]);
+  const recallPackages = sharedMode
+    ? sharedRecallPackageState.clinicId === sharedDirectory.clinicId && sharedRecallPackageState.status === 'ready' ? sharedRecallPackageState.rows : []
+    : demoRecallPackages;
   const workspacePayments = useMemo(() => filterByWorkspace(payments, activeWorkspaceSelection, branches), [payments, activeWorkspaceSelection.businessId, activeWorkspaceSelection.branchId, branches]);
   const workspaceReminders = useMemo(() => filterByWorkspace(reminders, activeWorkspaceSelection, branches), [reminders, activeWorkspaceSelection.businessId, activeWorkspaceSelection.branchId, branches]);
   const workspacePaymentPatients = useMemo(() => filterByWorkspace(paymentPatients, activeWorkspaceSelection, branches), [paymentPatients, activeWorkspaceSelection.businessId, activeWorkspaceSelection.branchId, branches]);
@@ -598,6 +633,8 @@ function App({ children }) {
   const notificationScope = sharedMode ? `${userProfile.userId}:${sharedDirectory.clinicId || 'pending'}` : 'demo';
   const notificationFeed = useNotificationFeed(notificationScope, sharedMode ? sharedDirectory.clinicId : null);
   const [selectedPatient, setSelectedPatient] = useState(null);
+  const [patientRecordTab,setPatientRecordTab]=useState('overview');
+  const patientRecordReturnTab=useRef('overview');
   const [selectedProvider, setSelectedProvider] = useState(null);
   const [selectedBranchRecord, setSelectedBranchRecord] = useState(null);
   const [selectedAppointment, setSelectedAppointment] = useState(null);
@@ -634,15 +671,23 @@ function App({ children }) {
   const [selectedConsentRecordId, setSelectedConsentRecordId] = useState('');
   const [selectedContractRecordId, setSelectedContractRecordId] = useState('');
   const [modalReturn, setModalReturn] = useState(null);
+  const openPatientRecordModal = (nextModal) => {
+    patientRecordReturnTab.current = patientRecordTab;
+    setModal(nextModal);
+  };
+  const returnToPatientRecord = () => {
+    setPatientRecordTab(patientRecordReturnTab.current);
+    setModal('patient');
+  };
   useEffect(() => {
     if (!isStandaloneRoute) return;
     setModal(null);
     setModalReturn(null);
   }, [isStandaloneRoute]);
 
-  const openNewAppointment = (date = agendaDate, time = '17:00', patientId = '', providerId = '') => {
+  const openNewAppointment = (date = agendaDate, time = '17:00', patientId = '', providerId = '', packageId = '', serviceId = '', serviceName = '') => {
     if (!can('agenda.create')) { notify('No tienes permiso para crear citas.'); return; }
-    setAppointmentDefaults({ date, time, patientId, providerId });
+    setAppointmentDefaults({ date, time, patientId, providerId, packageId, serviceId, serviceName });
     setModal('new-appointment');
   };
   const openPaymentModal = (appointmentId = '') => {
@@ -652,11 +697,13 @@ function App({ children }) {
     setModal('new-payment');
   };
   const openContractPreparation = (patientId = '', returnTo = null) => {
+    if (returnTo === 'patient') patientRecordReturnTab.current = patientRecordTab;
     setContractDefaults({ patientId });
     setModalReturn(returnTo);
     setModal('new-contract');
   };
   const openConsentPreparation = (patientId = '', returnTo = null, templateId = '') => {
+    if (returnTo === 'patient') patientRecordReturnTab.current = patientRecordTab;
     setConsentDefaults({ patientId, templateId });
     setModalReturn(returnTo);
     setConsentTemplateReturn(returnTo);
@@ -729,7 +776,7 @@ function App({ children }) {
       try {
         await createPatientDirectoryStore().addActivity(sharedDirectory.clinicId, patient, { type: String(form.get('type') || 'Otro'), note });
         sharedDirectory.refresh();
-        setModal('patient');
+        returnToPatientRecord();
         notify('Nota guardada en el expediente compartido');
       } catch {
         notify('No se pudo guardar la nota. Revisa tus permisos e inténtalo de nuevo.');
@@ -740,8 +787,31 @@ function App({ children }) {
     setPatientActivities(items => [activity, ...items]);
     setPatients(items => items.map(item => item.id === patientId ? { ...item, last: 'Actividad registrada hace un momento' } : item));
     setSelectedPatient(current => current?.id === patientId ? { ...current, last: 'Actividad registrada hace un momento' } : current);
-    setModal('patient');
+    returnToPatientRecord();
     notify('Nota de seguimiento guardada');
+  };
+  const savePatientClinicalHistory = async (event) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const patient = selectedPatient;
+    if (!patient) return;
+    const answers = Object.fromEntries(clinicalHistoryPrompts.map(([key]) => [key, {
+      state: String(form.get(`state-${key}`) || 'not_asked'), detail: String(form.get(`detail-${key}`) || '').trim(),
+    }]));
+    try {
+      let saved = { answers, updatedAt: new Date().toISOString() };
+      if (sharedMode) {
+        const result = await createPatientDirectoryStore().saveClinicalHistory(sharedDirectory.clinicId, patient, answers);
+        saved = { ...saved, id: result.id, updatedAt: result.updated_at };
+        sharedDirectory.refresh();
+      } else {
+        saved.id = `clinical-background-${Date.now()}`;
+        setDemoClinicalBackgrounds(items => [{ patientId: patient.id, ...saved }, ...items.filter(item => item.patientId !== patient.id)]);
+      }
+      setSelectedPatient(current => current?.id === patient.id ? { ...current, clinicalBackground: saved } : current);
+      returnToPatientRecord();
+      notify('Antecedentes clínicos guardados');
+    } catch (error) { notify(error?.message || 'No se pudieron guardar los antecedentes clínicos.'); }
   };
   const addClinicalEncounter = async (event) => {
     event.preventDefault();
@@ -757,6 +827,10 @@ function App({ children }) {
       examination: String(form.get('examination') || '').trim(),
       assessment: String(form.get('assessment') || '').trim(),
       plan: String(form.get('plan') || '').trim(),
+      prognosis: String(form.get('prognosis') || '').trim(),
+      evolution: String(form.get('evolution') || '').trim(),
+      vitals: Object.fromEntries(['weight','height','temperature','pulse','bloodPressure','oxygen'].map(key => [key, String(form.get(key) || '').trim()]).filter(([,value]) => value)),
+      physicalExam: Object.fromEntries(['skin','face','neck','cardiovascular','respiratory','neurological'].map(key => [key, String(form.get(`exam-${key}`) || 'not_recorded') ])),
     };
     try {
       if (sharedMode) {
@@ -767,7 +841,7 @@ function App({ children }) {
         const record = { ...entry, id: `encounter-${Date.now()}` };
         setDemoClinicalHistory(items => [record, ...items]);
       }
-      setModal('patient');
+      returnToPatientRecord();
       notify('Consulta agregada a la historia clínica');
     } catch (error) {
       notify(error?.message || 'No se pudo guardar la consulta.');
@@ -801,11 +875,35 @@ function App({ children }) {
         setDemoBotoxTreatments(items => [savedRecord, ...items]);
       }
       setSelectedPatient(current => current?.id === patient.id ? { ...current, botoxTreatments: [savedRecord, ...(current.botoxTreatments || [])] } : current);
-      setModal('patient');
+      returnToPatientRecord();
       notify('Sesión de Botox agregada al expediente');
     } catch (error) {
       notify(error?.message || 'No se pudo guardar la sesión de Botox.');
     }
+  };
+  const addProcedure = async (event, zones) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const patient = selectedPatient;
+    if (!patient) return;
+    const record = {
+      patientId: patient.id, appointmentId: String(form.get('appointmentId') || ''),
+      performedAt: new Date(String(form.get('performedAt') || new Date().toISOString())).toISOString(),
+      procedureType: String(form.get('procedureType') || '').trim(), product: String(form.get('product') || '').trim(),
+      lotNumber: String(form.get('lotNumber') || '').trim(), zones, followUp: String(form.get('followUp') || '').trim(),
+      consentDocumentId: String(form.get('consentReference') || '').replace(/^document:/, ''),
+    };
+    try {
+      let saved = { ...record, id: `procedure-${Date.now()}` };
+      if (sharedMode) {
+        const result = await createPatientDirectoryStore().createProcedure(sharedDirectory.clinicId, patient, record);
+        saved = { ...saved, id: result.id };
+        sharedDirectory.refresh();
+      } else setDemoProcedures(items => [saved, ...items]);
+      setSelectedPatient(current => current?.id === patient.id ? { ...current, procedures: [saved, ...(current.procedures || [])] } : current);
+      returnToPatientRecord();
+      notify('Procedimiento agregado al expediente');
+    } catch (error) { notify(error?.message || 'No se pudo guardar el procedimiento.'); }
   };
   const attachPatientFile = async (event) => {
     event.preventDefault();
@@ -831,7 +929,7 @@ function App({ children }) {
         const metadata = { id, patientId: selectedPatient.id, title: input.title, kind: input.kind, signedAt: input.signedAt, mimeType: file.type, byteSize: file.size, createdAt: new Date().toISOString(), demoOnly: true };
         setDemoRecordFiles(items => [metadata, ...items]);
       }
-      setModal('patient');
+      returnToPatientRecord();
       notify('Archivo agregado al expediente');
     } catch (error) {
       notify(error?.message || 'No se pudo guardar el archivo.');
@@ -898,7 +996,7 @@ function App({ children }) {
   }), [workspaceAppointments, providerFilter, branchFilter, businessFilter, branches, providers, businesses]);
   const pendingDocs = workspacePatients.reduce((total, patient) => total + Number(patient.contract === 'Pendiente') + Number(patient.consent === 'Pendiente'), 0);
 
-  const createAppointmentPatient = async ({ name, email = '', phone = '', treatment = '', branchId = '' }) => {
+  const createAppointmentPatient = async ({ name, email = '', phone = '', treatment = '', branchId = '', firstVisit = false }) => {
     const cleanedName = String(name || '').trim();
     const cleanedEmail = String(email || '').trim();
     const cleanedPhone = String(phone || '').trim();
@@ -918,10 +1016,10 @@ function App({ children }) {
       }
       try {
         const saved = await createPatientDirectoryStore().create(sharedDirectory.clinicId, {
-          name: cleanedName, email: cleanedEmail, phone: cleanedPhone, treatment: cleanedTreatment, branchId: assignedBranchId,
+          name: cleanedName, email: cleanedEmail, phone: cleanedPhone, treatment: cleanedTreatment, branchId: assignedBranchId, firstVisit,
         });
         const patient = {
-          id: saved.record_number, databaseId: saved.id, name: cleanedName, initials, treatment: cleanedTreatment,
+          id: saved.record_number, databaseId: saved.id, name: cleanedName, initials, treatment: cleanedTreatment, firstVisit,
           email: cleanedEmail, phone: cleanedPhone, whatsappOptIn: false, whatsappOptInAt: null,
           whatsappOptInSource: '', branch: branch?.name || 'Sin sucursal asignada', branchId: assignedBranchId,
           clinician: 'Sin profesional asignado', providerId: '', status: 'Nuevo', contract: 'Por preparar',
@@ -941,7 +1039,7 @@ function App({ children }) {
     }
     const patient = {
       id: `CN-${2482 + patients.length - initialPatients.length}`, name: cleanedName, initials,
-      email: cleanedEmail, phone: cleanedPhone, treatment: cleanedTreatment,
+      email: cleanedEmail, phone: cleanedPhone, treatment: cleanedTreatment, firstVisit,
       branch: branch?.name || 'Sin sucursal asignada', branchId: assignedBranchId,
       clinician: 'Sin profesional asignado', providerId: '', last: 'Recién agregado', status: 'Nuevo',
       contract: 'Por preparar', consent: 'Por preparar', tone: 'blue',
@@ -954,6 +1052,7 @@ function App({ children }) {
   const addPatient = async (event) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
+    const firstVisit = form.has('firstVisit');
     const name = String(form.get('name') || '').trim();
     const email = String(form.get('email') || '').trim();
     const phone = String(form.get('phone') || '').trim();
@@ -964,7 +1063,7 @@ function App({ children }) {
     if (sharedMode) {
       if (sharedDirectory.status !== 'ready' || !sharedDirectory.clinicId) { notify('El directorio compartido no está listo. Actualiza la página e inténtalo de nuevo.'); return; }
       try {
-        await createPatientDirectoryStore().create(sharedDirectory.clinicId, { name, email, phone, treatment, branchId });
+        await createPatientDirectoryStore().create(sharedDirectory.clinicId, { name, email, phone, treatment, branchId, firstVisit });
         sharedDirectory.refresh();
         setModal(null); setQuery(''); setPage('patients');
         notify('Expediente guardado en el directorio compartido');
@@ -975,7 +1074,7 @@ function App({ children }) {
     }
     const parts = name.split(/\s+/);
     const initials = parts.slice(0, 2).map(v => v[0]).join('').toUpperCase();
-    const p = { id: `CN-${2482 + patients.length - initialPatients.length}`, name, initials, email, phone, treatment, branch: branch?.name || 'Sin sucursal asignada', branchId, clinician: 'Sin profesional asignado', providerId: '', last: 'Recién agregado', status: 'Nuevo', contract: 'Por preparar', consent: 'Por preparar', tone: 'blue' };
+    const p = { id: `CN-${2482 + patients.length - initialPatients.length}`, name, initials, email, phone, treatment, firstVisit, branch: branch?.name || 'Sin sucursal asignada', branchId, clinician: 'Sin profesional asignado', providerId: '', last: 'Recién agregado', status: 'Nuevo', contract: 'Por preparar', consent: 'Por preparar', tone: 'blue' };
     setPatients(prev => [p, ...prev]); setModal(null); setQuery(''); setPage('patients'); notify('Paciente agregado al directorio');
   };
   const updatePatient = async (event) => {
@@ -1004,7 +1103,7 @@ function App({ children }) {
         await createPatientDirectoryStore().update(sharedDirectory.clinicId, previous, update);
         sharedDirectory.refresh();
         setSelectedPatient(current => current?.id === id ? { ...current, ...update } : current);
-        setModal('patient');
+        returnToPatientRecord();
         notify('Expediente actualizado en la base compartida');
       } catch {
         notify('No se pudo actualizar el expediente. Revisa tus permisos e inténtalo de nuevo.');
@@ -1014,7 +1113,7 @@ function App({ children }) {
     setPatients(current => current.map(patient => patient.id === id ? { ...patient, ...update } : patient));
     setAppointments(current => current.map(appointment => appointment.patientId === id || (!appointment.patientId && appointment.patient === previous.name) ? { ...appointment, patient: name, initials } : appointment));
     setSelectedPatient(current => current?.id === id ? { ...current, ...update } : current);
-    setModal('patient'); notify('Expediente actualizado');
+    returnToPatientRecord(); notify('Expediente actualizado');
   };
   const createAppointment = async (event) => {
     event.preventDefault(); const form = new FormData(event.currentTarget);
@@ -1291,7 +1390,7 @@ function App({ children }) {
   const openPatientFromAppointment = () => {
     const patient = patients.find(item => item.id === selectedAppointment?.patientId || item.name === selectedAppointment?.patient);
     if (!patient) { notify('No se encontró el expediente vinculado.'); return; }
-    setSelectedAppointment(null); setSelectedPatient(patient); setModal('patient');
+    setSelectedAppointment(null); setSelectedPatient(patient); setPatientRecordTab('overview'); setModal('patient');
   };
   const createBusiness = async (event) => {
     event.preventDefault();
@@ -1423,6 +1522,9 @@ function App({ children }) {
     if (!patientRecord) return;
     const template = consentTemplatesForPage.find(item => String(item.id || item.title) === templateId);
     const document = template?.title || '';
+    const imageUseRaw=String(form.get('imageUseAuthorized')||'');
+    const imageUseAuthorized=imageUseRaw==='true'?true:imageUseRaw==='false'?false:null;
+    if(/imagen/i.test(document)&&imageUseAuthorized===null){notify('Registra si la persona autoriza o no el uso de su imagen.');return;}
     if (!template?.content?.trim()) {
       notify('Agrega el texto oficial aprobado por la clínica antes de preparar una solicitud.');
       return;
@@ -1430,8 +1532,8 @@ function App({ children }) {
     if (sharedMode) {
       if (!can('documents.create')) { notify('No tienes permiso para preparar documentos clínicos.'); return; }
       try {
-        const result = await createPatientDirectoryStore().createPatientDocument(sharedDirectory.clinicId, patientRecord, { kind: 'consent', template });
-        const consentRecord = { id: result.id, title: result.title || document, type: template.type || 'Consentimiento informado', templateVersion: String(result.templateVersion || ''), createdByLabel: result.createdByLabel, contentSnapshot: result.contentSnapshot, status: 'Pendiente', requestedAt: result.requestedAt || requestedAt, signedAt: null };
+        const result = await createPatientDirectoryStore().createPatientDocument(sharedDirectory.clinicId, patientRecord, { kind: 'consent', template, imageUseAuthorized });
+        const consentRecord = { id: result.id, title: result.title || document, type: template.type || 'Consentimiento informado', templateVersion: String(result.templateVersion || ''), createdByLabel: result.createdByLabel, contentSnapshot: result.contentSnapshot, imageUseAuthorized: result.imageUseAuthorized ?? imageUseAuthorized, status: 'Pendiente', requestedAt: result.requestedAt || requestedAt, signedAt: null };
         const update = { consent: 'Pendiente', consentDocument: consentRecord.title, consentRequestedAt: consentRecord.requestedAt, consentContentSnapshot: consentRecord.contentSnapshot, consentHistory: [...documentHistory(patientRecord, 'consent').map(record => record.status === 'Pendiente' ? { ...record, status: 'Reemplazado', replacedAt: consentRecord.requestedAt, replacedBy: consentRecord.id } : record), consentRecord] };
         setSelectedPatient({ ...patientRecord, ...update });
         setSelectedConsent(document); setSelectedConsentRecordId(consentRecord.id); setModal('consent-view');
@@ -1442,7 +1544,7 @@ function App({ children }) {
       }
       return;
     }
-    const consentRecord = { id: `consent-${Date.now()}`, title: document, type: template.type || 'Consentimiento informado', templateVersion: String(template.version || '').match(/\d+(?:\.\d+)?/)?.[0] || '', createdByLabel: 'Equipo clínico · demostración', contentSnapshot: template.content, status: 'Pendiente', requestedAt, signedAt: null };
+    const consentRecord = { id: `consent-${Date.now()}`, title: document, type: template.type || 'Consentimiento informado', templateVersion: String(template.version || '').match(/\d+(?:\.\d+)?/)?.[0] || '', createdByLabel: 'Equipo clínico · demostración', contentSnapshot: template.content, imageUseAuthorized, status: 'Pendiente', requestedAt, signedAt: null };
     const consentHistory = [...documentHistory(patientRecord, 'consent').map(record => record.status === 'Pendiente' ? { ...record, status: 'Reemplazado', replacedAt: requestedAt, replacedBy: consentRecord.id } : record), consentRecord];
     const update = { consent: 'Pendiente', consentDocument: document, consentRequestedAt: requestedAt, consentContentSnapshot: consentRecord.contentSnapshot, consentHistory };
     setSelectedPatient({ ...patientRecord, ...update });
@@ -1504,7 +1606,7 @@ function App({ children }) {
     if (!summary) { notify('Agrega un resumen clínico antes de aceptar el diagnóstico.'); return; }
     const currentDiagnosisSummary = String(selectedPatient.diagnosisSummary || (!sharedMode && selectedPatient.diagnosisAccepted ? 'Diagnóstico de demostración aceptado' : '')).trim();
     if (selectedPatient.diagnosisAccepted && summary === currentDiagnosisSummary) {
-      setModal('patient');
+      returnToPatientRecord();
       notify('El diagnóstico no tuvo cambios; no se creó una versión duplicada.');
       return;
     }
@@ -1556,6 +1658,7 @@ function App({ children }) {
     notify(kind === 'contract' ? 'Firma de contrato simulada; no tiene validez legal.' : 'Firma de consentimiento simulada; no tiene validez legal.');
   };
   const openPatientDocument = (patient, kind, returnTo = null) => {
+    if (returnTo === 'patient') patientRecordReturnTab.current = patientRecordTab;
     setSelectedPatient(patient);
     setModalReturn(returnTo);
     const record = latestDocumentRecord(patient, kind);
@@ -1569,6 +1672,7 @@ function App({ children }) {
   };
   const openPatientDocumentRecord = (patient, record, returnTo = 'patient') => {
     if (!patient || !record || !['contract', 'consent'].includes(record.kind)) return;
+    if (returnTo === 'patient') patientRecordReturnTab.current = patientRecordTab;
     setSelectedPatient(patient);
     setModalReturn(returnTo);
     if (record.kind === 'consent') {
@@ -1601,7 +1705,7 @@ function App({ children }) {
 
   const nav = [
     { section: 'PRINCIPAL', links: [{ id: 'overview', label: 'Resumen', icon: LayoutDashboard }, { id: 'agenda', label: 'Agenda', icon: CalendarDays, count: String(workspaceAppointments.filter(a => !a.date || a.date === agendaDate).length) }, { id: 'patients', label: 'Pacientes', icon: UsersRound }] },
-    { section: 'OPERACIÓN', links: [{ id: 'payments', label: 'Pagos', icon: DollarSign }, { id: 'reminders', label: 'Recordatorios', icon: Bell }, ...(can('whatsapp.view') ? [{ id: 'whatsapp', label: 'WhatsApp', icon: MessageCircle }] : [])] },
+    { section: 'OPERACIÓN', links: [{ id: 'payments', label: 'Pagos', icon: DollarSign }, { id: 'recall', label: 'Seguimiento', icon: Activity, count: String(buildPatientRecallQueue(workspacePatients, workspaceAppointments, recallPackages, clinicTimeZone).length) }, { id: 'reminders', label: 'Recordatorios', icon: Bell }, ...(can('whatsapp.view') ? [{ id: 'whatsapp', label: 'WhatsApp', icon: MessageCircle }] : [])] },
     { section: 'GESTIÓN CLÍNICA', links: [{ id: 'consents', label: 'Consentimientos', icon: FileCheck2, count: String(workspacePatients.filter(p => p.consent === 'Pendiente').length) }, { id: 'contracts', label: 'Contratos', icon: FileText }, { id: 'team', label: 'Equipo y sucursales', icon: UserRound }] },
   ];
 
@@ -1627,13 +1731,13 @@ function App({ children }) {
     </aside>
     {mobileNavOpen&&<button className="mobile-nav-backdrop" aria-label="Cerrar navegación" onClick={()=>setMobileNavOpen(false)}/>}
     <main className="main-shell">
-      <header className="topbar"><button className="mobile-menu-button" aria-label="Abrir navegación" aria-expanded={mobileNavOpen} onClick={()=>setMobileNavOpen(open=>!open)}><Menu size={18}/></button><div className="breadcrumbs"><span>{activeClinicName}</span><ChevronRight size={14}/><strong>{({overview:'Resumen',agenda:'Agenda',payments:'Pagos',reminders:'Recordatorios',whatsapp:'WhatsApp',patients:'Pacientes',consents:'Consentimientos',contracts:'Contratos',team:'Equipo y sucursales',settings:'Configuración',profile:'Mi perfil'})[page]}</strong></div><div className="topbar-actions"><button className="search-shortcut" onClick={openPatientSearch}><Search size={15}/><span>Buscar</span><kbd>⌘ K</kbd></button><span className="topbar-divider"/><IconButton className="theme-toggle-button" aria-label={theme==='dark'?'Activar modo claro':'Activar modo oscuro'} aria-pressed={theme==='dark'} title={theme==='dark'?'Cambiar a modo claro':'Cambiar a modo oscuro'} onClick={()=>setTheme(current=>current==='dark'?'light':'dark')}>{theme==='dark'?<Sun size={18}/>:<Moon size={18}/>}</IconButton><IconButton className="mobile-install-button" type="button" aria-label="Instalar app para Android" title="Instalar app para Android" onClick={()=>setModal('install-app')}><Smartphone size={18}/></IconButton><NotificationCenter key={notificationScope} {...notificationFeed}/><button type="button" className="topbar-profile-button" aria-label="Abrir mi perfil" onClick={()=>setPage('profile')}><Avatar initials={profileInitials(displayUserName)} tone="navy" imageUrl={userProfile.avatarUrl}/></button></div>{sharedPageStatus === 'loading' && <div className="clinic-loading-track" role="progressbar" aria-label="Cargando datos de la clínica" />}</header>
+      <header className="topbar"><button className="mobile-menu-button" aria-label="Abrir navegación" aria-expanded={mobileNavOpen} onClick={()=>setMobileNavOpen(open=>!open)}><Menu size={18}/></button><div className="breadcrumbs"><span>{activeClinicName}</span><ChevronRight size={14}/><strong>{({overview:'Resumen',agenda:'Agenda',payments:'Pagos',recall:'Seguimiento',reminders:'Recordatorios',whatsapp:'WhatsApp',patients:'Pacientes',consents:'Consentimientos',contracts:'Contratos',team:'Equipo y sucursales',settings:'Configuración',profile:'Mi perfil'})[page]}</strong></div><div className="topbar-actions"><button className="search-shortcut" onClick={openPatientSearch}><Search size={15}/><span>Buscar</span><kbd>⌘ K</kbd></button><span className="topbar-divider"/><IconButton className="theme-toggle-button" aria-label={theme==='dark'?'Activar modo claro':'Activar modo oscuro'} aria-pressed={theme==='dark'} title={theme==='dark'?'Cambiar a modo claro':'Cambiar a modo oscuro'} onClick={()=>setTheme(current=>current==='dark'?'light':'dark')}>{theme==='dark'?<Sun size={18}/>:<Moon size={18}/>}</IconButton><IconButton className="mobile-install-button" type="button" aria-label="Instalar app para Android" title="Instalar app para Android" onClick={()=>setModal('install-app')}><Smartphone size={18}/></IconButton><NotificationCenter key={notificationScope} {...notificationFeed}/><button type="button" className="topbar-profile-button" aria-label="Abrir mi perfil" onClick={()=>setPage('profile')}><Avatar initials={profileInitials(displayUserName)} tone="navy" imageUrl={userProfile.avatarUrl}/></button></div>{sharedPageStatus === 'loading' && <div className="clinic-loading-track" role="progressbar" aria-label="Cargando datos de la clínica" />}</header>
     <div className="content-area">
         {!sharedMode && <div className="demo-storage-banner" role="status"><ShieldCheck size={15}/> Modo de demostración: usa solo datos ficticios. Los cambios se guardan en este navegador; no es un sistema seguro para información real de pacientes. Conecta el proyecto Supabase de la clínica antes de usarlo en operación.</div>}
         {sharedMode && <SharedDataStatus status={sharedPageStatus} memberships={sharedDirectory.memberships} chooseClinic={sharedDirectory.chooseClinic} retry={sharedPageRetry}/>}
         <div className="shared-page-content" aria-busy={sharedMode && page !== 'profile' && sharedPageStatus === 'loading'} inert={sharedMode && page !== 'profile' && sharedPageStatus !== 'ready'}>
-        {page==='overview' && <Overview sharedMode={sharedMode} canCreateAppointment={can('agenda.create')} timeZone={clinicTimeZone} patients={workspacePatients} appointments={workspaceAppointments} patientActivities={workspacePatientActivities} pendingDocs={pendingDocs} setPage={setPage} setModal={setModal} notify={notify} onNewAppointment={openNewAppointment} onOpenPatient={patient=>{setSelectedPatient(patient);setModalReturn(null);setModal('patient')}} onOpenDocument={openPatientDocument}/>}
-        {page==='patients' && <PatientsPage key={`${activeWorkspaceSelection.businessId}:${activeWorkspaceSelection.branchId}`} patients={filteredPatients} allPatients={workspacePatients} query={query} setQuery={setQuery} searchRef={patientSearchRef} setModal={setModal} canCreatePatient={can('patients.create')} onOpen={p=>{setSelectedPatient(p);setModalReturn(null);setModal('patient')}}/>}
+        {page==='overview' && <Overview sharedMode={sharedMode} canCreateAppointment={can('agenda.create')} timeZone={clinicTimeZone} patients={workspacePatients} appointments={workspaceAppointments} patientActivities={workspacePatientActivities} pendingDocs={pendingDocs} setPage={setPage} setModal={setModal} notify={notify} onNewAppointment={openNewAppointment} onOpenPatient={patient=>{setSelectedPatient(patient);setPatientRecordTab('overview');setModalReturn(null);setModal('patient')}} onOpenDocument={openPatientDocument}/>}
+        {page==='patients' && <PatientsPage key={`${activeWorkspaceSelection.businessId}:${activeWorkspaceSelection.branchId}`} patients={filteredPatients} allPatients={workspacePatients} query={query} setQuery={setQuery} searchRef={patientSearchRef} setModal={setModal} canCreatePatient={can('patients.create')} onOpen={p=>{setSelectedPatient(p);setPatientRecordTab('overview');setModalReturn(null);setModal('patient')}}/>}
         {!sharedMode&&page==='agenda' && <AgendaPage currentAccountProviderId={providers.find(provider=>provider.userId&&provider.userId===userProfile.userId)?.id||''} accountReady={profileLoaded&&sharedDirectory.status==='ready'} listEnd={agendaListEnd} setListEnd={setAgendaListEnd} timeZone={clinicTimeZone} appointments={filteredAppointments} payments={workspacePayments} providerFilter={providerFilter} setProviderFilter={setProviderFilter} providerOptions={providerOptions} branchFilter={branchFilter} setBranchFilter={updateAgendaBranchFilter} branchOptions={branchOptions} businessFilter={businessFilter} setBusinessFilter={updateAgendaBusinessFilter} businessOptions={businessOptions} period={period} setPeriod={setPeriod} onNewAppointment={openNewAppointment} canCreateAppointment onEditAppointment onCancelAppointment notify={notify} agendaDate={agendaDate} setAgendaDate={setAgendaDate} onOpenAppointment={appointment=>{setSelectedAppointment(appointment);setModal('appointment')}}/>}
         {sharedMode&&page==='agenda'&&<AgendaPage currentAccountProviderId={providers.find(provider=>provider.userId&&provider.userId===userProfile.userId)?.id||''} accountReady={profileLoaded&&sharedDirectory.status==='ready'} listEnd={agendaListEnd} setListEnd={setAgendaListEnd} timeZone={clinicTimeZone} appointments={filteredAppointments} payments={[]} sharedMode providerFilter={providerFilter} setProviderFilter={setProviderFilter} providerOptions={providerOptions} branchFilter={branchFilter} setBranchFilter={updateAgendaBranchFilter} branchOptions={branchOptions} businessFilter={businessFilter} setBusinessFilter={updateAgendaBusinessFilter} businessOptions={businessOptions} period={period} setPeriod={setPeriod} onNewAppointment={openNewAppointment} canCreateAppointment={can('agenda.create')} canEditAppointment={can('agenda.edit')} canCancelAppointment={can('agenda.cancel')} notify={notify} agendaDate={agendaDate} setAgendaDate={setAgendaDate} onOpenAppointment={appointment=>{setSelectedAppointment(appointment);setModal('appointment')}}/>}
         {page==='payments' && <FinanceWorkspace expenses={<ClinicExpenseLedger clinicId={sharedDirectory.clinicId} sharedMode={sharedMode}
@@ -1646,6 +1750,7 @@ function App({ children }) {
         </FinanceWorkspace>}
         {!sharedMode&&page==='reminders'&&<RemindersPage reminders={workspaceReminders}/>}
         {sharedMode&&page==='reminders'&&<RemindersPage sharedMode reminders={workspaceReminders}/>}
+        {page==='recall'&&<PatientRecallPage patients={workspacePatients} appointments={workspaceAppointments} packages={recallPackages} packageStatus={sharedMode ? sharedRecallPackageState.status : 'ready'} timeZone={clinicTimeZone} onRetryPackages={()=>setSharedRecallReload(value=>value+1)} onOpenPatient={patient=>{setSelectedPatient(patient);setPatientRecordTab('overview');setModalReturn(null);setModal('patient')}} onNewAppointment={(patient,purchase)=>openNewAppointment(agendaDate,'17:00',patient.id,'',purchase?.id||'',purchase?.serviceId||'',purchase?.serviceName||'')}/>}
       {page==='consents'&&<ConsentsPage patients={workspacePatients} templates={consentTemplatesForPage} notify={notify} onOpenDocument={openPatientDocument} onPrepareConsent={template=>openConsentPreparation('',null,template?.id||template?.title||'')} onNewTemplate={()=>openConsentTemplateCreation()} onNewVersion={template=>openConsentTemplateCreation(null, template)} sharedMode={sharedMode} canPrepare={can('documents.create')} canManageTemplates={can('documents.manage_templates')}/>}
         {page==='contracts'&&<ContractsPage patients={workspacePatients} templates={contractTemplatesForPage} setModal={setModal} notify={notify} onOpenDocument={openPatientDocument} onNewContract={()=>openContractPreparation()} onNewTemplate={()=>openContractTemplateCreation()} sharedMode={sharedMode} canPrepare={can('documents.create')} canManageTemplates={can('documents.manage_templates')}/>}
         {!sharedMode&&page==='team' && <TeamPage businesses={businesses} branches={branches} providers={providers} setModal={setModal} notify={notify} onEditBranch={branch=>{setSelectedBranchRecord(branch);setModal('edit-branch')}} onEditProvider={provider=>{setSelectedProvider(provider);setModal('edit-provider')}}/>}
@@ -1658,25 +1763,27 @@ function App({ children }) {
     </main>
     {modal==='install-app' && <Modal className="mobile-install-modal" title="Instalar Elixir Clinic para Android" subtitle="Escanea el código con tu teléfono o copia el enlace." close={()=>setModal(null)}><MobileInstallLink /></Modal>}
     {modal==='confirm-logout'&&<Modal title="Cerrar sesión" subtitle="¿Quieres salir de tu cuenta en este dispositivo?" close={()=>setModal(null)}><div className="modal-actions"><button type="button" className="button secondary" onClick={()=>setModal(null)}>Cancelar</button><form action={async formData=>{await unlinkPushOnSignOut(formData);await signOut(formData)}}><button type="submit" className="button primary">Cerrar sesión</button></form></div></Modal>}
-    {modal==='patient' && selectedPatient && <PatientModal patient={selectedPatient} packagePanel={<PatientPackagePanel key={selectedPatient.id} patient={selectedPatient} clinicId={sharedDirectory.clinicId} sharedMode={sharedMode} timeZone={clinicTimeZone} canCreate={can('payments.create')} services={serviceCatalog} promotions={promotionData.rows} demoPurchases={demoPackages} appointments={demoAppointments} payments={demoPayments} onDemoPurchase={purchase=>setDemoPackages(items=>[purchase,...items.filter(item=>item.id!==purchase.id)])}/>} appointments={workspaceAppointments} activities={workspacePatientActivities.filter(activity=>activity.patientId===selectedPatient.id)} clinicalHistory={sharedMode?(selectedPatient.clinicalHistory||[]):demoClinicalHistory.filter(item=>item.patientId===selectedPatient.id)} botoxTreatments={sharedMode?(selectedPatient.botoxTreatments||[]):demoBotoxTreatments.filter(item=>item.patientId===selectedPatient.id)} recordFiles={sharedMode?(selectedPatient.recordFiles||[]):demoRecordFiles.filter(item=>item.patientId===selectedPatient.id)} sharedMode={sharedMode} canEditPatient={can('patients.edit')} canDiagnose={can('clinical.edit')} canWriteClinical={can('clinical.create')} canPrepareContract={can('documents.create')} canPrepareConsent={can('documents.create')} canCreateAppointment={can('agenda.create')} close={()=>setModal(null)} notify={notify} onAddActivity={()=>setModal('new-patient-activity')} onNewEncounter={()=>setModal('new-clinical-encounter')} onNewBotoxTreatment={()=>setModal('new-botox-treatment')} onAddRecordFile={()=>setModal('new-patient-file')} onOpenRecordFile={openPatientFile} onEdit={()=>setModal('edit-patient')} onDiagnosis={()=>setModal('diagnosis')} onNewAppointment={()=>openNewAppointment(agendaDate,'17:00',selectedPatient.id)} onPrepareContract={()=>openContractPreparation(selectedPatient.id,'patient')} onPrepareConsent={()=>openConsentPreparation(selectedPatient.id,'patient')} onOpenContract={()=>openPatientDocument(selectedPatient,'contract','patient')} onOpenConsent={()=>openPatientDocument(selectedPatient,'consent','patient')} onOpenDocumentRecord={record=>openPatientDocumentRecord(selectedPatient,record,'patient')}/>}
+    {modal==='patient' && selectedPatient && <PatientModal patient={selectedPatient} activeRecordTab={patientRecordTab} setActiveRecordTab={setPatientRecordTab} clinicalBackground={sharedMode?selectedPatient.clinicalBackground:demoClinicalBackgrounds.find(item=>item.patientId===selectedPatient.id)||selectedPatient.clinicalBackground} packagePanel={<PatientPackagePanel key={selectedPatient.id} patient={selectedPatient} clinicId={sharedDirectory.clinicId} sharedMode={sharedMode} timeZone={clinicTimeZone} canCreate={can('payments.create')} services={serviceCatalog} promotions={promotionData.rows} demoPurchases={demoPackages} appointments={demoAppointments} payments={demoPayments} onDemoPurchase={purchase=>setDemoPackages(items=>[purchase,...items.filter(item=>item.id!==purchase.id)])}/>} appointments={workspaceAppointments} activities={workspacePatientActivities.filter(activity=>activity.patientId===selectedPatient.id)} clinicalHistory={sharedMode?(selectedPatient.clinicalHistory||[]):demoClinicalHistory.filter(item=>item.patientId===selectedPatient.id)} botoxTreatments={sharedMode?(selectedPatient.botoxTreatments||[]):demoBotoxTreatments.filter(item=>item.patientId===selectedPatient.id)} procedures={sharedMode?(selectedPatient.procedures||[]):demoProcedures.filter(item=>item.patientId===selectedPatient.id)} recordFiles={sharedMode?(selectedPatient.recordFiles||[]):demoRecordFiles.filter(item=>item.patientId===selectedPatient.id)} sharedMode={sharedMode} canEditPatient={can('patients.edit')} canDiagnose={can('clinical.edit')} canWriteClinical={can('clinical.create')} canPrepareContract={can('documents.create')} canPrepareConsent={can('documents.create')} canCreateAppointment={can('agenda.create')} close={()=>setModal(null)} notify={notify} onAddActivity={()=>openPatientRecordModal('new-patient-activity')} onClinicalBackground={()=>openPatientRecordModal('patient-clinical-background')} onNewEncounter={()=>openPatientRecordModal('new-clinical-encounter')} onNewBotoxTreatment={()=>openPatientRecordModal('new-botox-treatment')} onNewProcedure={()=>openPatientRecordModal('new-patient-procedure')} onAddRecordFile={()=>openPatientRecordModal('new-patient-file')} onOpenRecordFile={openPatientFile} onEdit={()=>openPatientRecordModal('edit-patient')} onDiagnosis={()=>openPatientRecordModal('diagnosis')} onNewAppointment={()=>openNewAppointment(agendaDate,'17:00',selectedPatient.id)} onPrepareContract={()=>openContractPreparation(selectedPatient.id,'patient')} onPrepareConsent={()=>openConsentPreparation(selectedPatient.id,'patient')} onOpenContract={()=>openPatientDocument(selectedPatient,'contract','patient')} onOpenConsent={()=>openPatientDocument(selectedPatient,'consent','patient')} onOpenDocumentRecord={record=>openPatientDocumentRecord(selectedPatient,record,'patient')}/>}
     {modal==='appointment' && selectedAppointment && <AppointmentModal serviceCatalog={serviceCatalog} timeZone={clinicTimeZone} onRecordArrival={recordAppointmentArrival} sharedMode={sharedMode} canEditAppointment={can('agenda.edit')} canCancelAppointment={can('agenda.cancel')} canCreatePayment={can('payments.create')} canManagePayments={!sharedMode||can('payments.create')} paymentDataReady={!sharedMode||sharedPaymentWorkspace.status==='ready'} appointment={selectedAppointment} businesses={workspaceBusinesses} branches={workspaceBranches} providers={workspaceProviders} payments={workspacePayments.filter(payment=>payment.appointmentId===selectedAppointment.id)} close={()=>{setModal(null);setSelectedAppointment(null)}} onSubmit={updateAppointment} onCancelAppointment={()=>cancelAppointment(selectedAppointment)} onOpenPatient={openPatientFromAppointment} onAddPayment={()=>openPaymentModal(selectedAppointment.id)}/>}
     {modal==='new-payment' && <PaymentModal sharedMode={sharedMode} clinicId={sharedDirectory.clinicId} demoPurchases={demoPackages} demoAppointments={demoAppointments} demoPayments={demoPayments} close={()=>{setModal(modalReturn==='appointment'?'appointment':null);setModalReturn(null)}} onSubmit={createPayment} canRefund={can('payments.refund')} defaultDate={paymentDefaults.date} defaultAppointmentId={paymentDefaults.appointmentId} patients={workspacePaymentPatients} appointments={selectedAppointment?[...workspacePaymentAppointments.filter(item=>item.id!==selectedAppointment.id),selectedAppointment]:workspacePaymentAppointments} payments={workspacePayments}/>}
-    {modal==='new-patient-activity' && selectedPatient && <Modal title="Registrar seguimiento" subtitle={`${selectedPatient.name} · Expediente ${selectedPatient.id}`} close={()=>setModal('patient')}><form onSubmit={addPatientActivity} className="form-stack"><input type="hidden" name="patientId" value={selectedPatient.id}/><label>Tipo de actividad<select name="type" defaultValue="Seguimiento"><option>Seguimiento</option><option>Llamada</option><option>Mensaje</option><option>Administrativa</option><option>Otro</option></select></label><label>Nota<textarea name="note" rows="4" maxLength="1000" placeholder="Resumen de llamada, acuerdo o pendiente. No agregues datos clínicos sensibles." required autoFocus/></label><div className="form-note"><ShieldCheck size={15}/> {sharedMode?'Nota guardada en la base compartida del consultorio.':'Nota interna de demostración, guardada solo en este navegador.'}</div><div className="modal-actions"><button type="button" className="button secondary" onClick={()=>setModal('patient')}>Cancelar</button><button className="button primary" type="submit"><Check size={15}/> Guardar nota</button></div></form></Modal>}
-    {modal==='new-clinical-encounter' && selectedPatient && <ClinicalEncounterModal patient={selectedPatient} appointments={workspaceAppointments.filter(item=>item.patientId===selectedPatient.id||item.patient===selectedPatient.name)} sharedMode={sharedMode} close={()=>setModal('patient')} onSubmit={addClinicalEncounter}/>}
-    {modal==='new-botox-treatment' && selectedPatient && <BotoxTreatmentModal patient={selectedPatient} appointments={workspaceAppointments.filter(item=>item.patientId===selectedPatient.id||item.patient===selectedPatient.name)} sharedMode={sharedMode} close={()=>setModal('patient')} onSubmit={addBotoxTreatment}/>}
-    {modal==='new-patient-file' && selectedPatient && <PatientFileModal patient={selectedPatient} sharedMode={sharedMode} close={()=>setModal('patient')} onSubmit={attachPatientFile}/>}
-    {modal==='diagnosis' && selectedPatient && <DiagnosisModal patient={selectedPatient} sharedMode={sharedMode} close={()=>setModal('patient')} onAccept={acceptDiagnosis}/>}
-    {modal==='contract-prompt' && selectedPatient && <ContractPromptModal patient={selectedPatient} close={()=>setModal('patient')} onViewContract={()=>{setSelectedContractRecordId(latestDocumentRecord(selectedPatient,'contract')?.id || '');setModal('contract-view')}} onPrepareContract={()=>openContractPreparation(selectedPatient.id, 'patient')}/>}
-    {modal==='contract-view' && selectedPatient && <ContractViewerModal sharedMode={sharedMode} patient={viewedContractPatient || selectedPatient} close={()=>setModal(modalReturn || null)} onPrint={()=>window.print()} onDiagnosis={()=>setModal('diagnosis')} onSign={()=>simulateSignature('contract')} onPrepare={()=>openContractPreparation(selectedPatient.id, modalReturn)}/>}
-    {modal==='consent-view' && selectedPatient && <ConsentViewerModal sharedMode={sharedMode} patient={selectedPatient} document={selectedConsent} content={selectedConsentRecord?.contentSnapshot ?? ''} status={selectedConsentRecord?.status || selectedPatient.consent} signedAt={selectedConsentRecord?.signedAt || null} close={()=>setModal(modalReturn || null)} onPrint={()=>window.print()} onSign={()=>simulateSignature('consent')}/>}
-    {modal==='new-patient' && <Modal title="Agregar paciente" subtitle="Crea el expediente; el profesional se elige en cada cita." close={()=>setModal(null)}><form onSubmit={addPatient} className="form-stack"><label>Nombre completo<input name="name" autoFocus placeholder="Ej. Andrea García" required/></label><div className="form-grid"><label>Correo electrónico<input name="email" type="email" placeholder="correo@ejemplo.com"/></label><label>Teléfono<input name="phone" placeholder="Teléfono de contacto"/></label></div><label>Tratamiento o servicio<input name="treatment" placeholder="Por definir"/></label><label>Sucursal<select name="branchId" defaultValue={activeWorkspaceSelection.branchId || workspaceBranches.find(item=>item.active)?.id || ''}><option value="">Sin asignar</option>{workspaceBranches.filter(item=>item.active).map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</select></label><div className="form-note"><ShieldCheck size={15}/> {sharedMode?"Se guardará en el directorio compartido del consultorio.":"Prototipo de demostración: no ingreses datos reales de pacientes."}</div><div className="modal-actions"><button type="button" className="button secondary" onClick={()=>setModal(null)}>Cancelar</button><button className="button primary" type="submit"><Plus size={16}/> Crear expediente</button></div></form></Modal>}
-    {modal==='edit-patient' && selectedPatient && <Modal title="Editar expediente" subtitle={`${selectedPatient.id} · Actualiza sus datos de contacto y atención.`} close={()=>setModal('patient')}><form onSubmit={updatePatient} className="form-stack"><input type="hidden" name="id" value={selectedPatient.id}/><label>Nombre completo<input name="name" defaultValue={selectedPatient.name} autoFocus required/></label><div className="form-grid"><label>Correo electrónico<input name="email" type="email" defaultValue={selectedPatient.email||''} placeholder="correo@ejemplo.com"/></label><label>Teléfono<input name="phone" defaultValue={selectedPatient.phone||''} placeholder="Teléfono de contacto"/></label></div><label>Tratamiento o servicio<input name="treatment" defaultValue={selectedPatient.treatment||''} placeholder="Por definir"/></label><div className="form-grid"><label>Sucursal<select name="branchId" defaultValue={workspaceBranches.find(item=>item.name===selectedPatient.branch)?.id||selectedPatient.branchId||''}><option value="">Sin asignar</option>{workspaceBranches.filter(item=>item.active).map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label>Profesional de referencia<select name="providerId" defaultValue={workspaceProviders.find(item=>item.name===selectedPatient.clinician)?.id||selectedPatient.providerId||''}><option value="">Sin asignar</option>{workspaceProviders.filter(item=>item.active).map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</select></label></div><div className="form-note"><ShieldCheck size={15}/> Este profesional solo se sugiere al agendar; cada cita puede tener otro.</div><label>Estado<select name="status" defaultValue={selectedPatient.status}><option>Activo</option><option>Seguimiento</option><option>Nuevo</option><option>Inactivo</option></select></label><label className="whatsapp-opt-in"><input type="checkbox" name="whatsappOptIn" defaultChecked={Boolean(selectedPatient.whatsappOptIn)}/> Autoriza avisos de citas por WhatsApp</label><label>Origen de la autorización<select name="whatsappOptInSource" defaultValue={selectedPatient.whatsappOptInSource||''}><option value="">Seleccionar si autoriza…</option><option value="written">Consentimiento escrito</option><option value="verbal">Autorización verbal</option><option value="electronic">Consentimiento electrónico</option></select></label><div className="form-note"><ShieldCheck size={15}/> Registra solo una autorización ya otorgada por el paciente. Esto no envía mensajes.</div><div className="form-note"><ShieldCheck size={15}/> {sharedMode?"Cambios guardados en el directorio compartido.":"Datos guardados solo en este navegador de demostración."}</div><div className="modal-actions"><button type="button" className="button secondary" onClick={()=>setModal('patient')}>Cancelar</button><button className="button primary" type="submit"><Check size={15}/> Guardar cambios</button></div></form></Modal>}    {modal==='new-appointment' && <NewAppointmentModal serviceCatalog={serviceCatalog} promotions={promotionData.rows} sharedMode={sharedMode} clinicId={sharedDirectory.clinicId} timeZone={clinicTimeZone} historyAppointments={demoAppointments} demoPurchases={demoPackages} demoPayments={demoPayments} canCreatePatient={can('patients.create')} onCreatePatient={createAppointmentPatient} close={()=>setModal(null)} onSubmit={createAppointment} defaultDate={appointmentDefaults.date} defaultTime={appointmentDefaults.time} defaultPatientId={appointmentDefaults.patientId} defaultProviderId={appointmentDefaults.providerId} defaultBusinessId={activeWorkspaceSelection.businessId} defaultBranchId={activeWorkspaceSelection.branchId} patients={workspacePatients} businesses={workspaceBusinesses} branches={workspaceBranches} providers={workspaceProviders} appointments={workspaceAppointments}/>}
+    {modal==='new-patient-activity' && selectedPatient && <Modal title="Registrar seguimiento" subtitle={`${selectedPatient.name} · Expediente ${selectedPatient.id}`} close={returnToPatientRecord}><form onSubmit={addPatientActivity} className="form-stack"><input type="hidden" name="patientId" value={selectedPatient.id}/><label>Tipo de actividad<select name="type" defaultValue="Seguimiento"><option>Seguimiento</option><option>Llamada</option><option>Mensaje</option><option>Administrativa</option><option>Otro</option></select></label><label>Nota<textarea name="note" rows="4" maxLength="1000" placeholder="Resumen de llamada, acuerdo o pendiente. No agregues datos clínicos sensibles." required autoFocus/></label><div className="form-note"><ShieldCheck size={15}/> {sharedMode?'Nota guardada en la base compartida del consultorio.':'Nota interna de demostración, guardada solo en este navegador.'}</div><div className="modal-actions"><button type="button" className="button secondary" onClick={returnToPatientRecord}>Cancelar</button><button className="button primary" type="submit"><Check size={15}/> Guardar nota</button></div></form></Modal>}
+    {modal==='patient-clinical-background' && selectedPatient && <ClinicalBackgroundModal patient={selectedPatient} clinicalBackground={sharedMode?selectedPatient.clinicalBackground:demoClinicalBackgrounds.find(item=>item.patientId===selectedPatient.id)||selectedPatient.clinicalBackground} sharedMode={sharedMode} close={returnToPatientRecord} onSubmit={savePatientClinicalHistory}/>}
+    {modal==='new-clinical-encounter' && selectedPatient && <ClinicalEncounterModal patient={selectedPatient} appointments={workspaceAppointments.filter(item=>item.patientId===selectedPatient.id||item.patient===selectedPatient.name)} sharedMode={sharedMode} close={returnToPatientRecord} onSubmit={addClinicalEncounter}/>}
+    {modal==='new-botox-treatment' && selectedPatient && <BotoxTreatmentModal patient={selectedPatient} appointments={workspaceAppointments.filter(item=>item.patientId===selectedPatient.id||item.patient===selectedPatient.name)} sharedMode={sharedMode} close={returnToPatientRecord} onSubmit={addBotoxTreatment}/>}
+    {modal==='new-patient-procedure' && selectedPatient && <ProcedureModal patient={selectedPatient} appointments={workspaceAppointments.filter(item=>item.patientId===selectedPatient.id||item.patient===selectedPatient.name)} sharedMode={sharedMode} close={returnToPatientRecord} onSubmit={addProcedure}/>}
+    {modal==='new-patient-file' && selectedPatient && <PatientFileModal patient={selectedPatient} sharedMode={sharedMode} close={returnToPatientRecord} onSubmit={attachPatientFile}/>}
+    {modal==='diagnosis' && selectedPatient && <DiagnosisModal patient={selectedPatient} sharedMode={sharedMode} close={returnToPatientRecord} onAccept={acceptDiagnosis}/>}
+    {modal==='contract-prompt' && selectedPatient && <ContractPromptModal patient={selectedPatient} close={returnToPatientRecord} onViewContract={()=>{setSelectedContractRecordId(latestDocumentRecord(selectedPatient,'contract')?.id || '');setModal('contract-view')}} onPrepareContract={()=>openContractPreparation(selectedPatient.id, 'patient')}/>}
+    {modal==='contract-view' && selectedPatient && <ContractViewerModal sharedMode={sharedMode} patient={viewedContractPatient || selectedPatient} close={()=>modalReturn==='patient'?returnToPatientRecord():setModal(modalReturn || null)} onPrint={()=>window.print()} onDiagnosis={()=>openPatientRecordModal('diagnosis')} onSign={()=>simulateSignature('contract')} onPrepare={()=>openContractPreparation(selectedPatient.id, modalReturn)}/>}
+    {modal==='consent-view' && selectedPatient && <ConsentViewerModal sharedMode={sharedMode} patient={selectedPatient} document={selectedConsent} content={selectedConsentRecord?.contentSnapshot ?? ''} status={selectedConsentRecord?.status || selectedPatient.consent} signedAt={selectedConsentRecord?.signedAt || null} close={()=>modalReturn==='patient'?returnToPatientRecord():setModal(modalReturn || null)} onPrint={()=>window.print()} onSign={()=>simulateSignature('consent')}/>}
+    {modal==='new-patient' && <Modal title="Agregar paciente" subtitle="Crea el expediente; el profesional se elige en cada cita." close={()=>setModal(null)}><form onSubmit={addPatient} className="form-stack"><label className="whatsapp-opt-in"><input type="checkbox" name="firstVisit"/> Primera vez</label><label>Nombre completo<input name="name" autoFocus placeholder="Ej. Andrea García" required/></label><div className="form-grid"><label>Correo electrónico<input name="email" type="email" placeholder="correo@ejemplo.com"/></label><label>Teléfono<input name="phone" placeholder="Teléfono de contacto"/></label></div><label>Tratamiento o servicio<input name="treatment" placeholder="Por definir"/></label><label>Sucursal<select name="branchId" defaultValue={activeWorkspaceSelection.branchId || workspaceBranches.find(item=>item.active)?.id || ''}><option value="">Sin asignar</option>{workspaceBranches.filter(item=>item.active).map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</select></label><div className="form-note"><ShieldCheck size={15}/> {sharedMode?"Se guardará en el directorio compartido del consultorio.":"Prototipo de demostración: no ingreses datos reales de pacientes."}</div><div className="modal-actions"><button type="button" className="button secondary" onClick={()=>setModal(null)}>Cancelar</button><button className="button primary" type="submit"><Plus size={16}/> Crear expediente</button></div></form></Modal>}
+    {modal==='edit-patient' && selectedPatient && <Modal title="Editar expediente" subtitle={`${selectedPatient.id} · Actualiza sus datos de contacto y atención.`} close={returnToPatientRecord}><form onSubmit={updatePatient} className="form-stack"><input type="hidden" name="id" value={selectedPatient.id}/><label>Nombre completo<input name="name" defaultValue={selectedPatient.name} autoFocus required/></label><div className="form-grid"><label>Correo electrónico<input name="email" type="email" defaultValue={selectedPatient.email||''} placeholder="correo@ejemplo.com"/></label><label>Teléfono<input name="phone" defaultValue={selectedPatient.phone||''} placeholder="Teléfono de contacto"/></label></div><label>Tratamiento o servicio<input name="treatment" defaultValue={selectedPatient.treatment||''} placeholder="Por definir"/></label><div className="form-grid"><label>Sucursal<select name="branchId" defaultValue={workspaceBranches.find(item=>item.name===selectedPatient.branch)?.id||selectedPatient.branchId||''}><option value="">Sin asignar</option>{workspaceBranches.filter(item=>item.active).map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label>Profesional de referencia<select name="providerId" defaultValue={workspaceProviders.find(item=>item.name===selectedPatient.clinician)?.id||selectedPatient.providerId||''}><option value="">Sin asignar</option>{workspaceProviders.filter(item=>item.active).map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</select></label></div><div className="form-note"><ShieldCheck size={15}/> Este profesional solo se sugiere al agendar; cada cita puede tener otro.</div><label>Estado<select name="status" defaultValue={selectedPatient.status}><option>Activo</option><option>Seguimiento</option><option>Nuevo</option><option>Inactivo</option></select></label><label className="whatsapp-opt-in"><input type="checkbox" name="whatsappOptIn" defaultChecked={Boolean(selectedPatient.whatsappOptIn)}/> Autoriza avisos de citas por WhatsApp</label><label>Origen de la autorización<select name="whatsappOptInSource" defaultValue={selectedPatient.whatsappOptInSource||''}><option value="">Seleccionar si autoriza…</option><option value="written">Consentimiento escrito</option><option value="verbal">Autorización verbal</option><option value="electronic">Consentimiento electrónico</option></select></label><div className="form-note"><ShieldCheck size={15}/> Registra solo una autorización ya otorgada por el paciente. Esto no envía mensajes.</div><div className="form-note"><ShieldCheck size={15}/> {sharedMode?"Cambios guardados en el directorio compartido.":"Datos guardados solo en este navegador de demostración."}</div><div className="modal-actions"><button type="button" className="button secondary" onClick={returnToPatientRecord}>Cancelar</button><button className="button primary" type="submit"><Check size={15}/> Guardar cambios</button></div></form></Modal>}    {modal==='new-appointment' && <NewAppointmentModal serviceCatalog={serviceCatalog} promotions={promotionData.rows} sharedMode={sharedMode} clinicId={sharedDirectory.clinicId} timeZone={clinicTimeZone} historyAppointments={demoAppointments} demoPurchases={demoPackages} demoPayments={demoPayments} canCreatePatient={can('patients.create')} onCreatePatient={createAppointmentPatient} close={()=>setModal(null)} onSubmit={createAppointment} defaultDate={appointmentDefaults.date} defaultTime={appointmentDefaults.time} defaultPatientId={appointmentDefaults.patientId} defaultProviderId={appointmentDefaults.providerId} defaultPackageId={appointmentDefaults.packageId} defaultServiceId={appointmentDefaults.serviceId} defaultServiceName={appointmentDefaults.serviceName} defaultBusinessId={activeWorkspaceSelection.businessId} defaultBranchId={activeWorkspaceSelection.branchId} patients={workspacePatients} businesses={workspaceBusinesses} branches={workspaceBranches} providers={workspaceProviders} appointments={workspaceAppointments}/>}
     {modal==='new-business' && <Modal title="Agregar negocio" subtitle="Crea un negocio para organizar sus sucursales y agenda." close={()=>setModal(null)}><form className="form-stack" onSubmit={createBusiness}><label>Nombre del negocio<input name="name" placeholder={sharedMode?'Nombre del negocio':'Nombre de demostración'} required autoFocus/></label><div className="form-note"><ShieldCheck size={15}/> {sharedMode?'Se guardará en el catálogo compartido.':'Solo se guarda en este navegador de demostración.'}</div><div className="modal-actions"><button type="button" className="button secondary" onClick={()=>setModal(null)}>Cancelar</button><button className="button primary"><Plus size={15}/> Agregar negocio</button></div></form></Modal>}
     {modal==='new-branch' && <Modal title="Agregar sucursal" subtitle="Asigna la nueva ubicación a uno de tus negocios." close={()=>setModal(null)}><form className="form-stack" onSubmit={createBranch}><label>Negocio<select name="businessId" required defaultValue=""><option value="" disabled>Seleccionar negocio…</option>{businesses.filter(item=>item.active).map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label>Nombre de sucursal<input name="name" placeholder={sharedMode?'Nombre de sucursal':'Nombre de demostración'} required/></label><label>Dirección<input name="address" placeholder={sharedMode?'Dirección de la sucursal':'Dirección de demostración'}/></label><label>Teléfono<input name="phone" placeholder="686 308 6854"/></label><label>Horario de atención<input name="hours" placeholder="Lunes a sábados, 9:00 a.m. a 7:00 p.m."/></label><div className="form-note"><ShieldCheck size={15}/> {sharedMode?'Se guardará en el catálogo compartido.':'Solo se guarda en este navegador de demostración.'}</div><div className="modal-actions"><button type="button" className="button secondary" onClick={()=>setModal(null)}>Cancelar</button><button className="button primary" type="submit" disabled={!businesses.some(item=>item.active)}><Plus size={15}/> Agregar sucursal</button></div></form></Modal>}
     {modal==='edit-branch' && selectedBranchRecord && <Modal title="Editar sucursal" subtitle={`${businesses.find(item=>item.id===selectedBranchRecord.businessId)?.name||'Negocio'} · La sucursal seguirá asociada a este negocio.`} close={()=>{setModal(null);setSelectedBranchRecord(null)}}><form className="form-stack" onSubmit={updateBranch}><label>Nombre de sucursal<input name="name" defaultValue={selectedBranchRecord.name} required autoFocus/></label><label>Dirección<input name="address" defaultValue={selectedBranchRecord.address||''} placeholder="Dirección de la sucursal"/></label><label>Teléfono<input name="phone" defaultValue={selectedBranchRecord.phone||''} placeholder="686 308 6854"/></label><label>Horario de atención<input name="hours" defaultValue={selectedBranchRecord.hours||''} placeholder="Lunes a sábados, 9:00 a.m. a 7:00 p.m."/></label><div className="form-note"><ShieldCheck size={15}/> {sharedMode?'El cambio se guarda en el catálogo compartido.':'El cambio se guarda en este navegador de demostración.'}</div><div className="modal-actions"><button type="button" className="button secondary" onClick={()=>{setModal(null);setSelectedBranchRecord(null)}}>Cancelar</button><button className="button primary"><Check size={15}/> Guardar cambios</button></div></form></Modal>}
     {(modal==='new-provider'||modal==='edit-provider') && <ProfessionalEditor key={`${sharedDirectory.clinicId || 'demo'}:${modal}:${selectedProvider?.id || 'new'}`} Modal={Modal} provider={modal==='edit-provider'?selectedProvider:null} providers={providers} branches={branches} sharedMode={sharedMode} clinicId={sharedDirectory.clinicId} onSave={saveProfessional} onSelectExisting={provider=>{setSelectedProvider(provider);setModal('edit-provider')}} close={()=>{setModal(null);setSelectedProvider(null)}}/>}
     {modal==='new-consent-template' && <Modal title={consentTemplateDraft?'Nueva versión de consentimiento':'Crear formato de consentimiento'} subtitle={consentTemplateDraft?'Actualiza el texto aprobado; los documentos ya preparados conservan su copia y versión.':'Agrega el texto oficial que proporcione y valide la clínica.'} close={closeConsentTemplateCreation}><form className="form-stack" onSubmit={createConsentTemplate}><label>Nombre del formato<input name="title" defaultValue={consentTemplateDraft?.title||''} placeholder="Ej. Consentimiento para tratamiento" required autoFocus/></label><label>Tipo<select name="type" defaultValue={consentTemplateDraft?.type||'Documento clínico'}><option>Documento clínico</option><option>Protección de datos</option><option>Autorización</option></select></label><label>Contenido del documento<textarea name="content" defaultValue={consentTemplateDraft?.content||''} rows="8" placeholder="Pega aquí el texto revisado por la clínica. No agregues datos de pacientes." required/></label><div className="form-note"><ShieldCheck size={15}/> {sharedMode?'El formato se comparte con el equipo clínico y queda versionado.':'El formato queda guardado solo en este navegador.'}</div><div className="modal-actions"><button type="button" className="button secondary" onClick={closeConsentTemplateCreation}>Cancelar</button><button className="button primary" disabled={!can('documents.manage_templates')}><Plus size={15}/> {consentTemplateDraft?'Guardar nueva versión':'Guardar formato'}</button></div></form></Modal>}
-    {modal==='send-consent' && <Modal title="Preparar consentimiento" subtitle="Guarda una copia del documento en el expediente. La firma electrónica requiere una integración posterior." close={closeConsentPreparation}><form className="form-stack" onSubmit={prepareConsent}><label>Paciente<SearchablePatientSelect patients={patients} defaultValue={consentDefaults.patientId}/></label><label>Documento<select name="templateId" required defaultValue={consentDefaults.templateId}><option value="" disabled>Seleccionar formato…</option>{consentTemplatesForPage.filter(template=>template.content?.trim()).map(template=><option key={template.id||template.title} value={template.id||template.title}>{template.title}{template.version?` · ${template.version}`:''}</option>)}</select></label>{!consentTemplatesForPage.some(template=>template.content?.trim())&&<div className="form-note"><FileText size={15}/> No hay formatos con texto oficial. Agrega el documento validado por la clínica antes de solicitar una firma. <button type="button" className="text-link" onClick={()=>openConsentTemplateCreation('send-consent')}>Crear formato</button></div>}<div className="form-note"><ShieldCheck size={15}/> El contenido se guarda como copia inmutable en el expediente; no se envía para firma.</div><div className="modal-actions"><button type="button" className="button secondary" onClick={closeConsentPreparation}>Cancelar</button><button className="button primary" disabled={!consentTemplatesForPage.some(template=>template.content?.trim())||!can('documents.create')}><FileCheck2 size={16}/> Preparar documento</button></div></form></Modal>}
+    {modal==='send-consent' && <Modal title="Preparar consentimiento" subtitle="Guarda una copia del documento en el expediente. La firma electrónica requiere una integración posterior." close={closeConsentPreparation}><form className="form-stack" onSubmit={prepareConsent}><label>Paciente<SearchablePatientSelect patients={patients} defaultValue={consentDefaults.patientId}/></label><label>Documento<select name="templateId" required defaultValue={consentDefaults.templateId}><option value="" disabled>Seleccionar formato…</option>{consentTemplatesForPage.filter(template=>template.content?.trim()).map(template=><option key={template.id||template.title} value={template.id||template.title}>{template.title}{template.version?` · ${template.version}`:''}</option>)}</select></label><label>Si es un consentimiento de uso de imagen, registra la decisión<select name="imageUseAuthorized" defaultValue=""><option value="">Sin decisión / no aplica</option><option value="true">Sí autoriza el uso de imagen</option><option value="false">No autoriza el uso de imagen</option></select></label>{!consentTemplatesForPage.some(template=>template.content?.trim())&&<div className="form-note"><FileText size={15}/> No hay formatos con texto oficial. Agrega el documento validado por la clínica antes de solicitar una firma. <button type="button" className="text-link" onClick={()=>openConsentTemplateCreation('send-consent')}>Crear formato</button></div>}<div className="form-note"><ShieldCheck size={15}/> El contenido se guarda como copia inmutable en el expediente; no se envía para firma.</div><div className="modal-actions"><button type="button" className="button secondary" onClick={closeConsentPreparation}>Cancelar</button><button className="button primary" disabled={!consentTemplatesForPage.some(template=>template.content?.trim())||!can('documents.create')}><FileCheck2 size={16}/> Preparar documento</button></div></form></Modal>}
     {modal==='new-contract-template' && <Modal title="Crear formato de contrato" subtitle="Agrega el texto oficial que proporcione y valide la clínica." close={closeContractTemplateCreation}><form className="form-stack" onSubmit={createContractTemplate}><label>Nombre del formato<input name="title" placeholder="Ej. Prestación de servicios" required autoFocus/></label><label>Tipo<select name="type"><option>Prestación de servicios</option><option>Plan de tratamiento</option><option>Otro</option></select></label><label>Contenido del contrato<textarea name="content" rows="10" placeholder="Pega el texto oficial revisado por la clínica." required/></label><div className="form-note"><ShieldCheck size={15}/> {sharedMode?'El formato se comparte con el equipo clínico y queda versionado.':'Se guarda localmente. La plantilla no añade ni valida cláusulas legales.'}</div><div className="modal-actions"><button type="button" className="button secondary" onClick={closeContractTemplateCreation}>Cancelar</button><button className="button primary" disabled={!can('documents.manage_templates')}><FilePlus2 size={15}/> Guardar formato</button></div></form></Modal>}
     {modal==='new-contract' && <NewContractModal sharedMode={sharedMode} canPrepare={can('documents.create')} close={closeContractPreparation} onSubmit={prepareContract} onReviewDiagnosis={patientId=>{const patient=patients.find(item=>item.id===patientId);if(patient){setSelectedPatient(patient);setModalReturn('new-contract');setModal('diagnosis')}}} onAddTemplate={()=>openContractTemplateCreation('new-contract')} patients={patients} templates={contractTemplatesForPage} defaultPatientId={contractDefaults.patientId} canManageTemplates={can('documents.manage_templates')}/>}
     {toast&&<div className="toast"><CheckCircle2 size={17}/>{toast}<button onClick={()=>setToast('')} aria-label="Cerrar"><X size={15}/></button></div>}
@@ -2261,13 +2368,13 @@ function AppointmentModal({appointment,payments,businesses,branches,providers,se
     </form>
   </Modal>;
 }
-function NewAppointmentModal({serviceCatalog=[],promotions=[],close,onSubmit,onCreatePatient,canCreatePatient=true,defaultDate,defaultTime,defaultPatientId='',defaultProviderId='',defaultBusinessId='',defaultBranchId='',patients,businesses,branches,providers,appointments=[],sharedMode=false,clinicId,timeZone,historyAppointments=[],demoPurchases=[],demoPayments=[]}) {
+function NewAppointmentModal({serviceCatalog=[],promotions=[],close,onSubmit,onCreatePatient,canCreatePatient=true,defaultDate,defaultTime,defaultPatientId='',defaultProviderId='',defaultPackageId='',defaultServiceId='',defaultServiceName='',defaultBusinessId='',defaultBranchId='',patients,businesses,branches,providers,appointments=[],sharedMode=false,clinicId,timeZone,historyAppointments=[],demoPurchases=[],demoPayments=[]}) {
   const [date,setDate]=useState(defaultDate);
   const [time,setTime]=useState(defaultTime);
   const [durationMinutes,setDurationMinutes]=useState('45');
-  const [service,setService]=useState('');
-  const [serviceId,setServiceId]=useState('');
-  const [serviceIds,setServiceIds]=useState([]);
+  const [service,setService]=useState(defaultServiceName);
+  const [serviceId,setServiceId]=useState(defaultServiceId);
+  const [serviceIds,setServiceIds]=useState(defaultServiceId?[defaultServiceId]:[]);
   const [depositOverride,setDepositOverride]=useState(null);
   const updateDuration=next=>{setDurationMinutes(next);if(Number(next)>0&&timeToMinutes(time)>timeToMinutes(latestAppointmentStart(next)))setTime(latestAppointmentStart(next))};
   const [patientId,setPatientId]=useState(defaultPatientId);
@@ -2290,6 +2397,7 @@ function NewAppointmentModal({serviceCatalog=[],promotions=[],close,onSubmit,onC
   const [quickPatientEmail,setQuickPatientEmail]=useState('');
   const [quickPatientPhone,setQuickPatientPhone]=useState('');
   const [quickPatientSaving,setQuickPatientSaving]=useState(false);
+  const [quickFirstVisit,setQuickFirstVisit]=useState(false);
   const [quickCreatedPatients,setQuickCreatedPatients]=useState([]);
   const patientsForAppointment=useMemo(()=>[
     ...quickCreatedPatients,
@@ -2301,7 +2409,7 @@ function NewAppointmentModal({serviceCatalog=[],promotions=[],close,onSubmit,onC
   const quote = quoteSessionPrice(quotedServices, promotions, date);
   const { amount: suggestedDeposit, subtotal: depositSubtotal, pending: pendingDeposits } = calculateServiceDeposit(quotedServices, promotions, date);
   const historyTreatments = selectedServices.length ? selectedServices : service.trim() ? [{ name: service.trim() }] : [];
-  const [packageId,setPackageId] = useState('');
+  const [packageId,setPackageId] = useState(defaultPackageId);
   const packageRows = usePatientPackages({ patient:selectedPatient, clinicId, sharedMode, demoPurchases, appointments:historyAppointments, payments:demoPayments });
   const packageOptions = serviceIds.length === 1 ? (packageRows?.rows || []).filter(item => item.serviceId === serviceIds[0] && item.availableSessions > 0) : [];
   const selectedPackage = packageOptions.find(item => item.id === packageId);
@@ -2309,12 +2417,12 @@ function NewAppointmentModal({serviceCatalog=[],promotions=[],close,onSubmit,onC
     if(quickPatientSaving||!quickPatientName.trim()) return;
     setQuickPatientSaving(true);
     try {
-      const patient=await onCreatePatient({name:quickPatientName,email:quickPatientEmail,phone:quickPatientPhone});
+      const patient=await onCreatePatient({name:quickPatientName,email:quickPatientEmail,phone:quickPatientPhone,firstVisit:quickFirstVisit});
       if(!patient) return;
       setQuickCreatedPatients(current=>[patient,...current.filter(item=>item.id!==patient.id)]);
       setPatientId(patient.id);
       setQuickPatientOpen(false);
-      setQuickPatientName('');setQuickPatientEmail('');setQuickPatientPhone('');
+      setQuickPatientName('');setQuickPatientEmail('');setQuickPatientPhone('');setQuickFirstVisit(false);
     } finally { setQuickPatientSaving(false); }
   };
   const servicePresetsByName=new Map();
@@ -2329,6 +2437,7 @@ function NewAppointmentModal({serviceCatalog=[],promotions=[],close,onSubmit,onC
   });
   const servicePresets=[...servicePresetsByName.values()];
   const applyServicePreset=value=>{
+    setPackageId('');
     const catalogService=branchServices.find(item=>item.name.toLocaleLowerCase('es-MX')===String(value||'').trim().toLocaleLowerCase('es-MX'));
     if(catalogService){setServiceId(catalogService.id);updateDuration(String(catalogService.durationMax||catalogService.durationMin));return;}
     setServiceId('');
@@ -2354,10 +2463,10 @@ function NewAppointmentModal({serviceCatalog=[],promotions=[],close,onSubmit,onC
     <form onSubmit={onSubmit} className="form-stack">
       <input type="hidden" name="serviceId" value={serviceId}/>
       <input type="hidden" name="serviceIds" value={JSON.stringify(serviceIds)}/>
-      <div className="appointment-patient-field"><label>Paciente<SearchablePatientSelect patients={patientsForAppointment} name="patientId" value={patientId} onChange={setPatientId}/></label>{canCreatePatient&&<button type="button" className="button outline compact appointment-add-patient" onClick={()=>setQuickPatientOpen(open=>!open)} aria-expanded={quickPatientOpen}><Plus size={14}/>{quickPatientOpen?'Cerrar':'Nuevo paciente'}</button>}</div>
-      {quickPatientOpen&&<section className="appointment-quick-patient" aria-label="Crear paciente para esta cita"><div className="appointment-quick-patient-heading"><strong>Nuevo expediente</strong><span>Se agregará a esta cita al guardarlo.</span></div><label>Nombre completo<input autoFocus value={quickPatientName} onChange={event=>setQuickPatientName(event.target.value)} placeholder="Ej. Andrea García" maxLength="160"/></label><div className="form-grid"><label>Correo electrónico<input type="text" inputMode="email" value={quickPatientEmail} onChange={event=>setQuickPatientEmail(event.target.value)} placeholder="correo@ejemplo.com" maxLength="254"/></label><label>Teléfono<input type="tel" value={quickPatientPhone} onChange={event=>setQuickPatientPhone(event.target.value)} placeholder="Teléfono de contacto" maxLength="40"/></label></div><div className="appointment-quick-patient-actions"><button type="button" className="button secondary compact" onClick={()=>setQuickPatientOpen(false)}>Cancelar</button><button type="button" className="button primary compact" onClick={createAndSelectPatient} disabled={!quickPatientName.trim()||quickPatientSaving}><Plus size={14}/>{quickPatientSaving?'Guardando…':'Crear y seleccionar'}</button></div></section>}
+      <div className="appointment-patient-field"><label>Paciente<SearchablePatientSelect patients={patientsForAppointment} name="patientId" value={patientId} onChange={id=>{setPatientId(id);setPackageId('')}}/></label>{canCreatePatient&&<button type="button" className="button outline compact appointment-add-patient" onClick={()=>setQuickPatientOpen(open=>!open)} aria-expanded={quickPatientOpen}><Plus size={14}/>{quickPatientOpen?'Cerrar':'Nuevo paciente'}</button>}</div>
+      {quickPatientOpen&&<section className="appointment-quick-patient" aria-label="Crear paciente para esta cita"><div className="appointment-quick-patient-heading"><strong>Nuevo expediente</strong><span>Se agregará a esta cita al guardarlo.</span></div><label>Nombre completo<input autoFocus value={quickPatientName} onChange={event=>setQuickPatientName(event.target.value)} placeholder="Ej. Andrea García" maxLength="160"/></label><div className="form-grid"><label>Correo electrónico<input type="text" inputMode="email" value={quickPatientEmail} onChange={event=>setQuickPatientEmail(event.target.value)} placeholder="correo@ejemplo.com" maxLength="254"/></label><label>Teléfono<input type="tel" value={quickPatientPhone} onChange={event=>setQuickPatientPhone(event.target.value)} placeholder="Teléfono de contacto" maxLength="40"/></label></div><label className="whatsapp-opt-in"><input type="checkbox" checked={quickFirstVisit} onChange={event=>setQuickFirstVisit(event.target.checked)}/> Primera vez</label><div className="appointment-quick-patient-actions"><button type="button" className="button secondary compact" onClick={()=>setQuickPatientOpen(false)}>Cancelar</button><button type="button" className="button primary compact" onClick={createAndSelectPatient} disabled={!quickPatientName.trim()||quickPatientSaving}><Plus size={14}/>{quickPatientSaving?'Guardando…':'Crear y seleccionar'}</button></div></section>}
       <div className="form-grid"><label>Fecha<input name="date" type="date" value={date} onChange={event=>setDate(event.target.value)} required/></label><label>Hora<input name="time" type="time" value={time} onChange={event=>setTime(event.target.value)} min="06:00" max={latestAppointmentStart(durationMinutes)} step="900" required/></label></div>
-      <AppointmentServicePicker onCloseManual={()=>{setService('');setServiceId('')}} manualField={<><label>Servicio manual<input autoFocus name="service" value={service} onChange={event=>setService(event.target.value)} onBlur={event=>applyServicePreset(event.target.value)} list="clinic-service-new-suggestions" placeholder="Captura un servicio manual" maxLength="120" required/></label><datalist id="clinic-service-new-suggestions">{[...new Set(['Consulta de valoración','Limpieza facial','Tratamiento facial','Seguimiento',...servicePresets.map(appointment=>appointment.service),...branchServices.map(item=>item.name)].filter(Boolean))].map(name=><option key={name} value={name}/>)}</datalist></>} services={serviceCatalog} selectedIds={serviceIds} providers={providersForBranch} branchId={branchId} providerId={providerId} onChange={(next, nextProviderId)=>{if(nextProviderId)setProviderId(nextProviderId);setServiceIds(next);setServiceId(next[0]||'');setService(next.map(id=>serviceCatalog.find(option=>option.id===id)?.name).filter(Boolean).join(' + '));const selected=next.map(id=>serviceCatalog.find(option=>option.id===id));if(selected.length&&selected.every(option=>option?.durationMin))updateDuration(String(selected.reduce((total,option)=>total+Number(option.durationMax||option.durationMin),0)));}}/>
+      <AppointmentServicePicker onCloseManual={()=>{setService('');setServiceId('');setPackageId('')}} manualField={<><label>Servicio manual<input autoFocus name="service" value={service} onChange={event=>setService(event.target.value)} onBlur={event=>applyServicePreset(event.target.value)} list="clinic-service-new-suggestions" placeholder="Captura un servicio manual" maxLength="120" required/></label><datalist id="clinic-service-new-suggestions">{[...new Set(['Consulta de valoración','Limpieza facial','Tratamiento facial','Seguimiento',...servicePresets.map(appointment=>appointment.service),...branchServices.map(item=>item.name)].filter(Boolean))].map(name=><option key={name} value={name}/>)}</datalist></>} services={serviceCatalog} selectedIds={serviceIds} providers={providersForBranch} branchId={branchId} providerId={providerId} onChange={(next, nextProviderId)=>{if(nextProviderId)setProviderId(nextProviderId);setServiceIds(next);setServiceId(next[0]||'');setService(next.map(id=>serviceCatalog.find(option=>option.id===id)?.name).filter(Boolean).join(' + '));setPackageId('');const selected=next.map(id=>serviceCatalog.find(option=>option.id===id));if(selected.length&&selected.every(option=>option?.durationMin))updateDuration(String(selected.reduce((total,option)=>total+Number(option.durationMax||option.durationMin),0)));}}/>
       {selectedPatient && <AppointmentHistory key={`${clinicId || 'demo'}:${patientId}`} patient={selectedPatient} sharedMode={sharedMode}
         clinicId={clinicId} appointments={historyAppointments} treatments={historyTreatments} date={date} time={time} timeZone={timeZone}/>}
       <label>Duración (minutos)<input name="durationMinutes" type="number" min="15" max="720" step="15" value={durationMinutes} onChange={event=>updateDuration(event.target.value)}/></label>
@@ -2442,6 +2551,35 @@ function PaymentModal({close,onSubmit,defaultDate,defaultAppointmentId,patients,
   return <Modal title="Registrar movimiento" subtitle="Guarda un ingreso o reembolso como un registro independiente." close={close}><form onSubmit={submit} className="form-stack"><label>Paciente<SearchablePatientSelect patients={patients} name="patientId" value={patientId} onChange={id=>{setPatientId(id);setAppointmentId('');setPackageId('')}}/></label><label>Cita vinculada<select name="appointmentId" value={appointmentId} onChange={event=>{setAppointmentId(event.target.value);setPackageId('')}}><option value="">Sin cita vinculada</option>{appointmentOptions.map(item=><option key={item.id} value={item.id}>{item.date} · {item.time} · {item.service}</option>)}</select></label>{!appointmentId&&packageOptions.length>0&&<label>Paquete vinculado<select name="packageId" value={purchase?.id||''} onChange={event=>setPackageId(event.target.value)}><option value="">Sin paquete</option>{packageOptions.map(item=><option key={item.id} value={item.id}>{item.serviceName} · {item.outstandingAmount?formatCurrencyMXN(item.outstandingAmount)+' pendientes':'Liquidado'} · {item.id.slice(-6)}</option>)}</select></label>}<div className="form-grid"><label>Tipo<select name="direction" value={direction} onChange={event=>setDirection(event.target.value)}><option>Ingreso</option>{canRefund&&<option>Reembolso</option>}</select></label><label>Moneda del movimiento<select value={currency} onChange={event=>{setCurrency(event.target.value);setAmount('')}}><option>MXN</option><option>USD</option></select></label><label>{`Monto (${currency})`}<input name="amount" type="number" min="0.01" max={currency==='USD'?9999999999.99:direction==='Reembolso'?refundAvailability.available:purchase?.outstandingAmount} step="0.01" placeholder="0.00" required value={amount} onChange={event=>setAmount(event.target.value)}/></label></div><div className="form-grid"><label>Fecha<input name="date" type="date" value={transactionDate} onChange={event=>setTransactionDate(event.target.value)} required/></label><label>Método<select name="method" defaultValue="Transferencia"><option>Efectivo</option><option>Tarjeta</option><option>Transferencia</option><option>Otro</option></select></label></div>{currency==='USD'&&<ExchangeRatePreview rate={rate} amount={amount} currency={currency} disabled={!transactionDate || saving}/>}<label>Nota opcional<input name="note" maxLength="240" placeholder="Referencia, concepto o motivo"/></label>{direction==='Reembolso'&&patient&&<div className="form-note"><CalendarDays size={15}/>{purchase?`Saldo del paquete ${purchase.serviceName}`:linkedAppointment?`${linkedAppointment.service} · ${linkedAppointment.date}`:`Saldo del expediente de ${patient.name}`} · Saldo: {formatCurrencyMXN(refundAvailability.balance)} · Anticipos reservados: {formatCurrencyMXN(refundAvailability.protectedDeposits)} · Disponible para reembolso: {formatCurrencyMXN(refundAvailability.available)}</div>}<div className="form-note"><ShieldCheck size={15}/> Los movimientos se conservan en el historial. Para corregir un ingreso registra un reembolso, no edites el movimiento.</div><div className="modal-actions"><button type="button" className="button secondary" onClick={close}>Cancelar</button><button className="button primary" type="submit" disabled={saving || (currency==='USD' && !rate.quote)}><DollarSign size={15}/>{saving?'Guardando…':'Guardar movimiento'}</button></div></form></Modal>;
 }
 
+function PatientRecallPage({patients,appointments,packages=[],packageStatus='ready',timeZone,onRetryPackages,onOpenPatient,onNewAppointment}) {
+  const queue = useMemo(() => buildPatientRecallQueue(patients, appointments, packages, timeZone), [patients, appointments, packages, timeZone]);
+  const patientCount = new Set(queue.map(item => item.patient.id)).size;
+  const packageCount = queue.filter(item => item.kind === 'package').length;
+  return <div className="patient-recall-page">
+    <PageTitle eyebrow="CONTINUIDAD DE ATENCIÓN" title="Seguimiento de pacientes" description="Retoma tratamientos faciales y ayuda a cada paciente a completar las sesiones disponibles de sus paquetes."/>
+    <div className="reminder-summary-grid">
+      <div className="reminder-summary-card"><span>Personas por contactar</span><strong>{patientCount}</strong></div>
+      <div className="reminder-summary-card"><span>Sesiones de paquete por agendar</span><strong>{packageCount}</strong></div>
+      <div className="reminder-summary-card"><span>Seguimientos</span><strong>Retorno · facial · paquetes</strong></div>
+    </div>
+    <section className="panel reminder-ledger">
+      <div className="panel-heading"><div><div className="panel-title">Lista de regreso</div><p className="panel-subtitle">Incluye pacientes marcados para seguimiento, visitas estéticas completadas hace 30 días o más y paquetes con sesiones sin cita reservada.</p></div></div>
+      <div className="table-wrap"><table><thead><tr><th>PACIENTE</th><th>MOTIVO</th><th>ÚLTIMA VISITA</th><th>ESTADO</th><th></th></tr></thead><tbody>
+        {queue.map(({kind,patient,purchase,lastVisit,daysSince,reason}) => <tr key={patient.id + ':' + kind + ':' + (purchase?.id || 'return')}>
+          <td><div className="patient-cell"><Avatar initials={patient.initials} tone={patient.tone}/><div><strong>{patient.name}</strong><span>{patient.id} · {patient.treatment}</span></div></div></td>
+          <td>{reason}</td>
+          <td>{lastVisit ? formatRecordDate(lastVisit.date) + (daysSince !== null ? ' · hace ' + daysSince + ' días' : '') : purchase?.createdAt ? 'Paquete del ' + formatRecordDate(purchase.createdAt) : 'Sin visita completada registrada'}</td>
+          <td><span className="reminder-status pending"><i/>{kind === 'package' ? 'Sesión disponible' : 'Sin cita futura'}</span></td>
+          <td><div className="recall-actions"><button className="button outline compact" onClick={() => onOpenPatient(patient)}>Ver expediente</button><button className="button primary compact" onClick={() => onNewAppointment(patient,purchase)}><CalendarPlus size={14}/> Agendar</button></div></td>
+        </tr>)}
+      </tbody></table>
+        {queue.length === 0 && packageStatus === 'loading' && <div className="empty-state"><Activity size={20}/><strong>Cargando paquetes y seguimientos…</strong><span>Estamos revisando las sesiones disponibles y las citas futuras.</span></div>}
+        {queue.length === 0 && packageStatus === 'error' && <div className="empty-state" role="alert"><Activity size={20}/><strong>No se pudieron cargar los paquetes</strong><span>Revisa la conexión e inténtalo de nuevo.</span><button className="button outline compact" onClick={onRetryPackages}>Reintentar</button></div>}
+        {queue.length === 0 && packageStatus === 'ready' && <div className="empty-state"><Activity size={20}/><strong>No hay pacientes pendientes de regreso</strong><span>Aquí aparecerán seguimientos, retornos faciales y paquetes con sesiones disponibles.</span></div>}
+      </div>
+    </section>
+  </div>;
+}
 function RemindersPage({ reminders, sharedMode = false }) {
   const [statusFilter, setStatusFilter] = useState('Todos');
   const [kindFilter, setKindFilter] = useState('Todos');
@@ -2716,7 +2854,8 @@ function TeamPage({businesses,branches,providers,setModal,notify,onEditBranch,on
   return <><PageTitle title="Equipo y sucursales" description="Administra los negocios, ubicaciones y profesionales que aparecen en la agenda."/><div className="team-layout"><section className="panel team-panel"><div className="panel-heading padded"><div><div className="panel-title">Equipo clínico</div><p className="panel-subtitle">{providers.filter(item=>item.active).length} profesionales activos</p></div>{canManageProviders&&<button className="more-button" onClick={()=>setModal('new-provider')} aria-label="Agregar profesional"><Plus size={18}/></button>}</div><div className="team-list">{accountDirectory.error&&<p className="professional-error" role="alert">{accountDirectory.error} <button className="button outline compact" onClick={accountDirectory.reload}>Reintentar</button></p>}{providers.filter(item=>item.active).map(provider=><div className="team-member" key={provider.id}><Avatar initials={provider.initials||provider.name.split(/\s+/).slice(0,2).map(part=>part[0]).join('').toUpperCase()} tone={provider.tone||'blue'} imageUrl={accountFor(provider)?.avatarUrl} size="large"/><div className="team-person"><div className="professional-name-line"><strong>{professionalName(provider)}</strong>{provider.userId&&<span className="professional-link-icon" role="img" aria-label="Cuenta vinculada" title={accountFor(provider)?.email?`Cuenta vinculada: ${accountFor(provider).email}`:'Cuenta vinculada'}><Link2 size={14}/></span>}</div><span>{provider.role}</span><small><Activity size={12}/>{branchNamesForProvider(provider)}</small></div><span className="team-presence"><i/> Activo</span>{canManageProviders&&<button className="row-more" onClick={()=>onEditProvider(provider)} aria-label={`Editar profesional ${professionalName(provider)}`}><MoreHorizontal size={17}/></button>}</div>)}</div></section><section className="panel team-panel branch-panel"><div className="panel-heading padded"><div><div className="panel-title">Sucursales</div><p className="panel-subtitle">{branches.filter(item=>item.active).length} ubicaciones habilitadas</p></div>{canManageBusinesses&&<button className="icon-button outline" onClick={()=>setModal('new-branch')} aria-label="Agregar sucursal"><Plus size={16}/></button>}</div>{branches.filter(item=>item.active).map((branch,index)=><div className="branch-row" key={branch.id}><div className={`branch-icon branch-${index%3}`}><Activity size={16}/></div><div><strong>{branch.name}</strong><span>{branch.address||'Dirección pendiente'}</span>{branch.phone&&<small>{branch.phone}</small>}{branch.hours&&<small>{branch.hours}</small>}</div><span className="branch-active"><i/>Activa</span>{canManageBusinesses&&<button className="row-more" onClick={()=>onEditBranch(branch)} aria-label={`Editar sucursal ${branch.name}`}><Settings2 size={15}/></button>}</div>)}</section><section className="panel team-panel business-panel"><div className="panel-heading padded"><div><div className="panel-title">Negocios</div><p className="panel-subtitle">Agendas y sucursales agrupadas por negocio</p></div>{canManageBusinesses&&<button className="button outline compact" onClick={()=>setModal('new-business')}><Plus size={15}/> Agregar negocio</button>}</div><div className="business-list">{businesses.filter(item=>item.active).map(business=>{const count=branches.filter(branch=>branch.active&&branch.businessId===business.id).length;return <div className="business-row" key={business.id}><div className="branch-icon"><Building2 size={16}/></div><div><strong>{business.name}</strong><span>{count} {count===1?'sucursal activa':'sucursales activas'}</span></div><Badge variant="active"><span className="badge-dot"/>Activo</Badge></div>})}{businesses.filter(item=>item.active).length===0&&<div className="empty-inline">Aún no hay negocios. Agrega uno para empezar.</div>}</div></section></div></>;
 }
 
-function PatientModal({patient,packagePanel,appointments,activities,clinicalHistory=[],botoxTreatments=[],recordFiles=[],sharedMode=false,canEditPatient=true,canCreateAppointment=true,canDiagnose=true,canWriteClinical=true,canPrepareContract=true,canPrepareConsent=true,close,notify,onAddActivity,onNewEncounter,onNewBotoxTreatment,onAddRecordFile,onOpenRecordFile,onEdit,onDiagnosis,onNewAppointment,onPrepareContract,onPrepareConsent,onOpenContract,onOpenConsent,onOpenDocumentRecord}) {
+function PatientModal({patient,activeRecordTab,setActiveRecordTab,clinicalBackground=null,packagePanel,appointments,activities,clinicalHistory=[],botoxTreatments=[],procedures=[],recordFiles=[],sharedMode=false,canEditPatient=true,canCreateAppointment=true,canDiagnose=true,canWriteClinical=true,canPrepareContract=true,canPrepareConsent=true,close,notify,onAddActivity,onClinicalBackground,onNewEncounter,onNewBotoxTreatment,onNewProcedure,onAddRecordFile,onOpenRecordFile,onEdit,onDiagnosis,onNewAppointment,onPrepareContract,onPrepareConsent,onOpenContract,onOpenConsent,onOpenDocumentRecord}) {
+  const selectRecordTab=(event,tab)=>{setActiveRecordTab(tab);event.currentTarget.closest('.modal')?.scrollTo({top:0,behavior:'instant'});};
   const patientAppointments=appointments.filter(appointment=>appointment.patientId===patient.id||appointment.patient===patient.name).sort((a,b)=>`${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`));
   const sortedActivities=[...activities].sort((a,b)=>b.createdAt.localeCompare(a.createdAt));
   const documentRecords=[...documentHistory(patient,'contract').map(record=>({...record,kind:'contract'})),...documentHistory(patient,'consent').map(record=>({...record,kind:'consent'}))].sort((a,b)=>(b.requestedAt||'').localeCompare(a.requestedAt||''));
@@ -2728,21 +2867,58 @@ function PatientModal({patient,packagePanel,appointments,activities,clinicalHist
   const contractStatus=contractReady?'Pendiente de firma':contractSignedCurrent?'Firmado':patient.contract==='Firmado'?(diagnosisAccepted?'Versión anterior':'Histórico firmado'):'Por preparar';
   const contractDescription=contractReady?'Hay un contrato preparado para esta valoración.':patient.contract==='Firmado'&&!contractSignedCurrent?(diagnosisAccepted?'El contrato firmado corresponde a una valoración anterior. Prepara la versión actual.':'El contrato firmado se conserva en el historial; acepta un diagnóstico para continuar.'):diagnosisAccepted?'Prepara el contrato con el formato de servicios de la clínica.':'Disponible después de aceptar el diagnóstico.';
   const consentReady=patient.consent==='Pendiente'&&Boolean(patient.consentContentSnapshot?.trim());
-  return <Modal title={patient.name} subtitle={`Expediente ${patient.id} · ${patient.status}`} close={close} className="patient-record-modal"><div className="patient-modal-profile"><Avatar initials={patient.initials} tone={patient.tone} size="large"/><div><strong>{patient.treatment}</strong><span>Última actividad: {patient.last}</span><small>{patient.clinician} · {patient.branch}</small><small>{patient.phone||'Sin teléfono'}{patient.email?` · ${patient.email}`:''}</small><small>Avisos por WhatsApp: {patient.whatsappOptIn?'Autorizados':'No autorizados'}{patient.whatsappOptInAt?' · '+formatRecordDate(patient.whatsappOptInAt):''}</small></div>{canCreateAppointment&&<button className="button outline compact" onClick={onNewAppointment}><CalendarPlus size={14}/> Agendar cita</button>}{canEditPatient&&<button className="button outline compact" onClick={onEdit}><Settings2 size={14}/> Editar</button>}{canDiagnose&&<button className="button outline compact" onClick={onDiagnosis}><ClipboardCheck size={14}/> Diagnóstico</button>}</div>
+  const backgroundAnswers=clinicalBackground?.answers||{};
+  const imageConsent=(patient.consentHistory||[]).find(record=>/imagen/i.test(record.title||''));
+  const imageDecision=typeof imageConsent?.imageUseAuthorized==='boolean'?(imageConsent.imageUseAuthorized?'Sí autoriza':'No autoriza'):'decisión no estructurada';
+  const imageConsentLabel=!imageConsent?'Sin registro · decisión no documentada':imageConsent.status==='Firmado'?`Firmado · ${imageDecision}`:imageConsent.status==='Pendiente'?`Pendiente de firma · ${imageDecision}`:`${imageConsent.status} · ${imageDecision}`;
+  return <Modal title={patient.name} subtitle={`Expediente ${patient.id} · ${patient.status} · ${patient.firstVisit ? "Primera vez" : "Paciente recurrente"}`} close={close} className="patient-record-modal patient-record-overview-modal"><div className="patient-modal-profile"><Avatar initials={patient.initials} tone={patient.tone} size="large"/><div><strong>{patient.treatment}</strong><span>Última actividad: {patient.last}</span><small>{patient.clinician} · {patient.branch}</small><small>{patient.phone||'Sin teléfono'}{patient.email?` · ${patient.email}`:''}</small><small>Avisos por WhatsApp: {patient.whatsappOptIn?'Autorizados':'No autorizados'}{patient.whatsappOptInAt?' · '+formatRecordDate(patient.whatsappOptInAt):''}</small><small>Uso de imagen: {imageConsentLabel}{imageConsent?.signedAt?` · ${formatRecordDate(imageConsent.signedAt)}`:''}{imageConsent?.signedByLabel?` · ${imageConsent.signedByLabel}`:''}</small></div>{canCreateAppointment&&<button className="button outline compact" onClick={onNewAppointment}><CalendarPlus size={14}/> Agendar cita</button>}{canEditPatient&&<button className="button outline compact" onClick={onEdit}><Settings2 size={14}/> Editar</button>}{canDiagnose&&<button className="button outline compact" onClick={onDiagnosis}><ClipboardCheck size={14}/> Diagnóstico</button>}</div>
   <section className="patient-workflow-progress" aria-label="Progreso de diagnóstico y documentos">
     <article className={diagnosisAccepted?'complete':''}><div><span className="patient-workflow-number">1</span><strong>Diagnóstico</strong><Badge variant={diagnosisAccepted?'confirmed':'pending'}><span className="badge-dot"/>{diagnosisAccepted?'Aceptado':'Pendiente'}</Badge></div><p>{diagnosisAccepted?'El expediente tiene un diagnóstico vigente.':'Registra y acepta el diagnóstico para habilitar el contrato.'}{canDiagnose&&<button type="button" className="text-link" onClick={onDiagnosis}>{diagnosisAccepted?'Revisar':'Registrar diagnóstico'}</button>}</p></article>
     <article className={contractReady||contractSignedCurrent?'complete':''}><div><span className="patient-workflow-number">2</span><strong>Contrato</strong><Badge variant={contractReady?'pending':contractSignedCurrent?'confirmed':patient.contract==='Firmado'?'new':'pending'}><span className="badge-dot"/>{contractStatus}</Badge></div><p>{contractDescription}{canPrepareContract&&diagnosisAccepted&&<button type="button" className="text-link" onClick={contractReady?onOpenContract:onPrepareContract}>{contractReady?'Revisar contrato':'Preparar contrato'}</button>}</p></article>
     <article className={consentReady?'complete':''}><div><span className="patient-workflow-number">3</span><strong>Consentimiento</strong><Badge variant={patient.consent==='Firmado'?'confirmed':consentReady?'pending':'pending'}><span className="badge-dot"/>{patient.consent==='Firmado'?'Firmado':consentReady?'Pendiente de firma':'Por preparar'}</Badge></div><p>{consentReady?'Hay un consentimiento preparado para este expediente.':'Prepara el consentimiento informado que corresponda.'}{canPrepareConsent&&<button type="button" className="text-link" onClick={consentReady?onOpenConsent:onPrepareConsent}>{consentReady?'Revisar consentimiento':'Preparar consentimiento'}</button>}</p></article>
   </section>
+
+  <div className="patient-record-tabs" role="tablist" aria-label="Secciones del expediente" onKeyDown={event=>{const tabs=[...event.currentTarget.querySelectorAll('[role="tab"]')];const index=tabs.indexOf(event.target);const next=event.key==='ArrowRight'?(index+1)%tabs.length:event.key==='ArrowLeft'?(index-1+tabs.length)%tabs.length:event.key==='Home'?0:event.key==='End'?tabs.length-1:index;if(next!==index){event.preventDefault();tabs[next].focus();tabs[next].click();}}}>
+   <button type="button" role="tab" id="patient-record-tab-overview" aria-controls="patient-record-panel-overview" aria-selected={activeRecordTab==='overview'} tabIndex={activeRecordTab==='overview'?0:-1} className={activeRecordTab==='overview'?'is-active':''} onClick={event=>selectRecordTab(event,'overview')}>Resumen</button>
+   <button type="button" role="tab" id="patient-record-tab-clinical" aria-controls="patient-record-panel-clinical" aria-selected={activeRecordTab==='clinical'} tabIndex={activeRecordTab==='clinical'?0:-1} className={activeRecordTab==='clinical'?'is-active':''} onClick={event=>selectRecordTab(event,'clinical')}>Historia clínica <span>{clinicalHistory.length+diagnosisRecords.length}</span></button>
+   <button type="button" role="tab" id="patient-record-tab-procedures" aria-controls="patient-record-panel-procedures" aria-selected={activeRecordTab==='procedures'} tabIndex={activeRecordTab==='procedures'?0:-1} className={activeRecordTab==='procedures'?'is-active':''} onClick={event=>selectRecordTab(event,'procedures')}>Procedimientos <span>{botoxTreatments.length+procedures.length}</span></button>
+   <button type="button" role="tab" id="patient-record-tab-documents" aria-controls="patient-record-panel-documents" aria-selected={activeRecordTab==='documents'} tabIndex={activeRecordTab==='documents'?0:-1} className={activeRecordTab==='documents'?'is-active':''} onClick={event=>selectRecordTab(event,'documents')}>Documentos <span>{recordFiles.length+documentRecords.length}</span></button>
+   <button type="button" role="tab" id="patient-record-tab-follow-up" aria-controls="patient-record-panel-follow-up" aria-selected={activeRecordTab==='follow-up'} tabIndex={activeRecordTab==='follow-up'?0:-1} className={activeRecordTab==='follow-up'?'is-active':''} onClick={event=>selectRecordTab(event,'follow-up')}>Seguimiento <span>{sortedActivities.length}</span></button>
+  </div>
+  <div className="patient-record-panel" role="tabpanel" id="patient-record-panel-overview" aria-labelledby="patient-record-tab-overview" tabIndex={0} hidden={activeRecordTab!=='overview'}>
+   <section className="patient-activity-box medical-background-box"><div className="panel-title"><span>Antecedentes clínicos</span><div className="record-actions"><span>{clinicalBackground?.updatedAt?`Actualizado ${formatRecordDate(clinicalBackground.updatedAt)}`:'Sin completar'}</span>{canWriteClinical&&<button className="button outline compact" onClick={onClinicalBackground}><Plus size={13}/> Completar antecedentes</button>}</div></div><div className="medical-history-summary">{clinicalHistoryPrompts.slice(0,6).map(([key,label])=>{const answer=backgroundAnswers[key]||{state:'not_asked',detail:''};return <div key={key}><span>{label}</span><strong>{clinicalHistoryStateLabels[answer.state]||'Sin preguntar'}</strong>{answer.detail&&<small>{answer.detail}</small>}</div>})}</div></section>
    {packagePanel}
    <section className="patient-appointments"><div className="panel-title">Citas del expediente <span>{patientAppointments.length}</span></div>{patientAppointments.map(appointment=><div className="patient-appointment-row" key={`${appointment.date}-${appointment.time}-${appointment.patient}`}><div><strong>{appointment.time}</strong><span>{appointment.date?new Intl.DateTimeFormat('es-MX',{day:'2-digit',month:'short',year:'numeric'}).format(new Date(`${appointment.date}T12:00:00`)):'Fecha pendiente'}</span></div><div><strong>{appointment.service}</strong><span>{appointment.clinician} · {appointment.branch}</span></div><Badge variant={appointment.status==='Confirmada'?'confirmed':'pending'}><span className="badge-dot"/>{appointment.status}</Badge></div>)}{patientAppointments.length===0&&<div className="empty-inline">Este expediente aún no tiene citas.</div>}</section>
-   <section className="patient-activity-box clinical-history-box"><div className="panel-title"><span>Historia clínica</span><div className="record-actions"><span>{clinicalHistory.length} consultas</span>{canWriteClinical&&<button className="button outline compact" onClick={onNewEncounter}><Plus size={13}/> Nueva consulta</button>}</div></div>{clinicalHistory.map(record=><article className="patient-activity-row clinical-encounter" key={record.id}><div className="patient-activity-meta"><strong>Consulta clínica</strong><time dateTime={record.occurredAt}>{record.occurredAt?new Intl.DateTimeFormat('es-MX',{dateStyle:'medium',timeStyle:'short'}).format(new Date(record.occurredAt)):'Fecha no registrada'}</time></div><p><b>Motivo:</b> {record.chiefComplaint}</p>{record.history&&<p><b>Antecedentes:</b> {record.history}</p>}{record.examination&&<p><b>Exploración:</b> {record.examination}</p>}{record.assessment&&<p><b>Valoración:</b> {record.assessment}</p>}{record.plan&&<p><b>Plan:</b> {record.plan}</p>}</article>)}{clinicalHistory.length===0&&<div className="empty-inline">Aún no hay consultas clínicas registradas.</div>}</section>
-   <section className="patient-activity-box botox-treatment-box"><div className="panel-title"><span>Tratamientos de Botox</span><div className="record-actions"><span>{botoxTreatments.length} sesiones</span>{canWriteClinical&&<button className="button outline compact" onClick={onNewBotoxTreatment}><Plus size={13}/> Registrar sesión</button>}</div></div>{botoxTreatments.map(record=><article className="patient-activity-row clinical-encounter" key={record.id}><div className="patient-activity-meta"><strong>{record.product}</strong><time dateTime={record.performedAt}>{record.performedAt?new Intl.DateTimeFormat('es-MX',{dateStyle:'medium',timeStyle:'short'}).format(new Date(record.performedAt)):'Fecha no registrada'}</time></div><div className="botox-record-facts"><span><b>Lote:</b> {record.lotNumber}</span><span><b>Unidades totales:</b> {record.totalUnits}</span>{record.expirationDate&&<span><b>Caducidad:</b> {formatRecordDate(record.expirationDate)}</span>}</div><p><b>Áreas y unidades por área:</b> {record.treatmentAreas}</p>{record.followUp&&<p><b>Seguimiento:</b> {record.followUp}</p>}{record.consentDocumentId&&<p><b>Consentimiento vinculado:</b> {(patient.consentHistory||[]).find(item=>item.id===record.consentDocumentId)?.title||'Documento firmado'}</p>}{record.consentFileId&&<p><b>Consentimiento vinculado:</b> {(patient.recordFiles||[]).find(item=>item.id===record.consentFileId)?.title||'Archivo firmado'}</p>}</article>)}{botoxTreatments.length===0&&<div className="empty-inline">Aún no hay sesiones registradas.</div>}</section>
-   <section className="patient-activity-box patient-files-box"><div className="panel-title"><span>Archivos firmados</span><div className="record-actions"><span>{recordFiles.length} archivos</span>{canWriteClinical&&<button className="button outline compact" onClick={onAddRecordFile}><Plus size={13}/> Adjuntar documento</button>}</div></div>{recordFiles.map(file=><article className="patient-record-file" key={file.id}><div><strong>{file.title}</strong><span>{file.kind==='consent'?'Consentimiento':file.kind==='contract'?'Contrato':'Otro documento'}{file.signedAt?` · Firmado ${formatRecordDate(file.signedAt)}`:''} · {(file.byteSize/1024).toFixed(0)} KB</span></div><button type="button" className="button outline compact" onClick={()=>onOpenRecordFile(file)}><ArrowUpRight size={14}/> Abrir</button></article>)}{recordFiles.length===0&&<div className="empty-inline">Los consentimientos y contratos firmados que adjuntes aparecerán aquí.</div>}</section>
+  </div>
+  <div className="patient-record-panel" role="tabpanel" id="patient-record-panel-clinical" aria-labelledby="patient-record-tab-clinical" tabIndex={0} hidden={activeRecordTab!=='clinical'}>
+   <section className="patient-activity-box clinical-history-box"><div className="panel-title"><span>Consultas y notas de evolución</span><div className="record-actions"><span>{clinicalHistory.length} consultas</span>{canWriteClinical&&<button className="button outline compact" onClick={onNewEncounter}><Plus size={13}/> Nueva consulta</button>}</div></div>{clinicalHistory.map(record=><article className="patient-activity-row clinical-encounter" key={record.id}><div className="patient-activity-meta"><strong>Consulta clínica</strong><time dateTime={record.occurredAt}>{record.occurredAt?new Intl.DateTimeFormat('es-MX',{dateStyle:'medium',timeStyle:'short'}).format(new Date(record.occurredAt)):'Fecha no registrada'}</time></div><p><b>Motivo:</b> {record.chiefComplaint}</p>{record.history&&<p><b>Antecedentes:</b> {record.history}</p>}{record.vitals&&Object.keys(record.vitals).length>0&&<p><b>Signos vitales:</b> {Object.entries(record.vitals).map(([key,value])=>`${({weight:'Peso',height:'Estatura',temperature:'Temperatura',pulse:'Pulso',bloodPressure:'Presión',oxygen:'SpO₂'})[key]||key}: ${value}`).join(' · ')}</p>}{record.physicalExam&&Object.keys(record.physicalExam).filter(key=>record.physicalExam[key]!=='not_recorded').length>0&&<p><b>Exploración:</b> {Object.entries(record.physicalExam).filter(([,value])=>value!=='not_recorded').map(([key,value])=>`${({skin:'Piel',face:'Cara',neck:'Cuello',cardiovascular:'Cardiovascular',respiratory:'Respiratorio',neurological:'Neurológico'})[key]}: ${{normal:'Sin hallazgos relevantes',finding:'Hallazgo documentado',not_applicable:'No aplica'}[value]||value}`).join(' · ')}</p>}{record.examination&&<p><b>Hallazgos:</b> {record.examination}</p>}{record.assessment&&<p><b>Valoración:</b> {record.assessment}</p>}{record.prognosis&&<p><b>Pronóstico:</b> {record.prognosis}</p>}{record.plan&&<p><b>Plan:</b> {record.plan}</p>}{record.evolution&&<p><b>Evolución / comentarios:</b> {record.evolution}</p>}</article>)}{clinicalHistory.length===0&&<div className="empty-inline">Aún no hay consultas clínicas registradas.</div>}</section>
   {canDiagnose&&<section className="patient-activity-box"><div className="panel-title"><span>Historial de diagnósticos</span><span>{diagnosisRecords.length}</span></div>{diagnosisRecords.map(record=><article className="patient-activity-row" key={record.id}><div className="patient-activity-meta"><strong>{record.status==='accepted'?'Vigente':record.status==='superseded'?'Sustituido':'Borrador'}</strong><time dateTime={record.acceptedAt||record.createdAt}>{(record.acceptedAt||record.createdAt)?new Intl.DateTimeFormat('es-MX',{dateStyle:'medium',timeStyle:'short'}).format(new Date(record.acceptedAt||record.createdAt)):'Fecha no registrada'}</time></div><p>{record.summary}</p><small>Aceptado por: {record.acceptedByLabel||'Usuario no identificado'}</small></article>)}{diagnosisRecords.length===0&&<div className="empty-inline">Aún no hay diagnósticos en el historial.</div>}</section>}
-  <section className="patient-activity-box"><div className="panel-title"><span>Seguimiento</span><button className="button outline compact" onClick={onAddActivity}><Plus size={13}/> Agregar nota</button></div>{sortedActivities.slice(0,8).map(activity=><article className="patient-activity-row" key={activity.id}><div className="patient-activity-meta"><strong>{activity.type}</strong><time dateTime={activity.createdAt}>{new Intl.DateTimeFormat('es-MX',{dateStyle:'medium',timeStyle:'short'}).format(new Date(activity.createdAt))}</time></div><p>{activity.note}</p><small>{activity.author}</small></article>)}{sortedActivities.length===0&&<div className="empty-inline">Aún no hay seguimientos registrados.</div>}</section>
-  <section className="patient-document-history"><div className="panel-title"><span>Historial de documentos</span><span>{documentRecords.length}</span></div>{documentRecords.map(record=><details className="patient-document-record" key={record.id}><summary><span><strong>{record.kind==='contract'?'Contrato':'Consentimiento'} · {record.title}</strong><small>{record.templateVersion?`Formato v${record.templateVersion} · `:''}{record.requestedAt?formatRecordDate(record.requestedAt):'Fecha anterior no registrada'}{record.legacy?' · Registro anterior':''}</small></span><DocStatus status={record.status}/></summary><div className="patient-document-record-content">{record.service&&<p><strong>Servicio:</strong> {record.service}</p>}{record.createdByLabel&&<p><strong>Preparado por:</strong> {record.createdByLabel}</p>}{record.signedByLabel&&<p><strong>Firmado por:</strong> {record.signedByLabel}</p>}{record.contentSnapshot?<div className="template-content">{record.contentSnapshot}</div>:<p>Este documento anterior no tenía texto de plantilla guardado.</p>}{record.signedAt&&<small>{sharedMode?"Firma registrada":"Firma simulada registrada"} · {new Intl.DateTimeFormat('es-MX',{dateStyle:'medium',timeStyle:'short'}).format(new Date(record.signedAt))}</small>}<button type="button" className="button outline compact" onClick={()=>onOpenDocumentRecord?.(record)}><ArrowUpRight size={14}/> Abrir esta versión</button></div></details>)}{documentRecords.length===0&&<div className="empty-inline">Aún no hay documentos preparados.</div>}</section><div className={sharedMode?"patient-doc-box shared-readonly-docs":"patient-doc-box"}><div className="panel-title">Documentación del expediente</div><div><FileText size={16}/><span><strong>{patient.contractTemplateTitle||patient.contractType||'Contrato de prestación de servicios'}</strong><small>Contrato de servicios</small></span><DocStatus status={patient.contract}/><button className="icon-button" aria-label={documentHistory(patient,'contract').length?'Ver contrato':'Contrato aún no preparado'} disabled={!documentHistory(patient,'contract').length} onClick={onOpenContract}><ArrowUpRight size={15}/></button></div><div><FileCheck2 size={16}/><span><strong>{patient.consentDocument||'Consentimiento informado'}</strong><small>Documento clínico</small></span><DocStatus status={patient.consent}/><button className="icon-button" aria-label={documentHistory(patient,'consent').length?'Ver consentimiento':'Consentimiento aún no preparado'} disabled={!documentHistory(patient,'consent').length} onClick={onOpenConsent}><ArrowUpRight size={15}/></button></div></div><div className="modal-actions"><button className="button secondary" onClick={close}>Cerrar</button></div></Modal>;
+  </div>
+  <div className="patient-record-panel" role="tabpanel" id="patient-record-panel-procedures" aria-labelledby="patient-record-tab-procedures" tabIndex={0} hidden={activeRecordTab!=='procedures'}>
+   <section className="patient-activity-box botox-treatment-box"><div className="panel-title"><span>Tratamientos de Botox</span><div className="record-actions"><span>{botoxTreatments.length} sesiones</span>{canWriteClinical&&<button className="button outline compact" onClick={onNewBotoxTreatment}><Plus size={13}/> Registrar sesión</button>}</div></div>{botoxTreatments.map(record=><article className="patient-activity-row clinical-encounter" key={record.id}><div className="patient-activity-meta"><strong>{record.product}</strong><time dateTime={record.performedAt}>{record.performedAt?new Intl.DateTimeFormat('es-MX',{dateStyle:'medium',timeStyle:'short'}).format(new Date(record.performedAt)):'Fecha no registrada'}</time></div><div className="botox-record-facts"><span><b>Lote:</b> {record.lotNumber}</span><span><b>Unidades totales:</b> {record.totalUnits}</span>{record.expirationDate&&<span><b>Caducidad:</b> {formatRecordDate(record.expirationDate)}</span>}</div><p><b>Áreas y unidades por área:</b> {record.treatmentAreas}</p>{record.followUp&&<p><b>Seguimiento:</b> {record.followUp}</p>}{record.consentDocumentId&&<p><b>Consentimiento vinculado:</b> {(patient.consentHistory||[]).find(item=>item.id===record.consentDocumentId)?.title||'Documento firmado'}</p>}{record.consentFileId&&<p><b>Consentimiento vinculado:</b> {(patient.recordFiles||[]).find(item=>item.id===record.consentFileId)?.title||'Archivo firmado'}</p>}</article>)}{botoxTreatments.length===0&&<div className="empty-inline">Aún no hay sesiones registradas.</div>}</section>
+   <section className="patient-activity-box procedure-record-box"><div className="panel-title"><span>Notas post procedimiento</span><div className="record-actions"><span>{procedures.length} registros</span>{canWriteClinical&&<button className="button outline compact" onClick={onNewProcedure}><Plus size={13}/> Registrar procedimiento</button>}</div></div>{procedures.map(record=><article className="patient-activity-row clinical-encounter" key={record.id}><div className="patient-activity-meta"><strong>{record.procedureType}{record.product?` · ${record.product}`:''}</strong><time dateTime={record.performedAt}>{record.performedAt?new Intl.DateTimeFormat('es-MX',{dateStyle:'medium',timeStyle:'short'}).format(new Date(record.performedAt)):'Fecha no registrada'}</time></div>{record.lotNumber&&<p><b>Lote:</b> {record.lotNumber}</p>}<div className="procedure-zone-list">{(record.zones||[]).map((zone,index)=><span key={`${zone.name}-${index}`}>{zone.name}{zone.dose?` · ${zone.dose}`:''}</span>)}</div>{record.followUp&&<p><b>Indicaciones y seguimiento:</b> {record.followUp}</p>}</article>)}{procedures.length===0&&<div className="empty-inline">Registra el procedimiento, las zonas tratadas y las indicaciones posteriores.</div>}</section>
+  </div>
+  <div className="patient-record-panel" role="tabpanel" id="patient-record-panel-documents" aria-labelledby="patient-record-tab-documents" tabIndex={0} hidden={activeRecordTab!=='documents'}>
+   <section className="patient-activity-box patient-files-box"><div className="panel-title"><span>Documentos, estudios y fotografías</span><div className="record-actions"><span>{recordFiles.length} archivos</span>{canWriteClinical&&<button className="button outline compact" onClick={onAddRecordFile}><Plus size={13}/> Adjuntar archivo</button>}</div></div>{recordFiles.map(file=><article className="patient-record-file" key={file.id}><div><strong>{file.title}</strong><span>{file.kind==='consent'?'Consentimiento':file.kind==='contract'?'Contrato':file.kind==='study'?'Estudio':file.kind==='clinical_photo'?'Foto clínica':'Otro documento'}{file.signedAt?` · Firmado ${formatRecordDate(file.signedAt)}`:''} · {(file.byteSize/1024).toFixed(0)} KB</span></div><button type="button" className="button outline compact" onClick={()=>onOpenRecordFile(file)}><ArrowUpRight size={14}/> Abrir</button></article>)}{recordFiles.length===0&&<div className="empty-inline">Aquí aparecen consentimientos firmados, estudios y fotos clínicas privadas.</div>}</section>
+
+
+  <section className="patient-document-history"><div className="panel-title"><span>Historial de documentos</span><span>{documentRecords.length}</span></div>{documentRecords.map(record=><details className="patient-document-record" key={record.id}><summary><span><strong>{record.kind==='contract'?'Contrato':'Consentimiento'} · {record.title}</strong><small>{record.templateVersion?`Formato v${record.templateVersion} · `:''}{record.requestedAt?formatRecordDate(record.requestedAt):'Fecha anterior no registrada'}{record.legacy?' · Registro anterior':''}</small></span><DocStatus status={record.status}/></summary><div className="patient-document-record-content">{record.service&&<p><strong>Servicio:</strong> {record.service}</p>}{record.createdByLabel&&<p><strong>Preparado por:</strong> {record.createdByLabel}</p>}{record.signedByLabel&&<p><strong>Firmado por:</strong> {record.signedByLabel}</p>}{record.contentSnapshot?<div className="template-content">{record.contentSnapshot}</div>:<p>Este documento anterior no tenía texto de plantilla guardado.</p>}{record.signedAt&&<small>{sharedMode?"Firma registrada":"Firma simulada registrada"} · {new Intl.DateTimeFormat('es-MX',{dateStyle:'medium',timeStyle:'short'}).format(new Date(record.signedAt))}</small>}<button type="button" className="button outline compact" onClick={()=>onOpenDocumentRecord?.(record)}><ArrowUpRight size={14}/> Abrir esta versión</button></div></details>)}{documentRecords.length===0&&<div className="empty-inline">Aún no hay documentos preparados.</div>}</section><div className={sharedMode?"patient-doc-box shared-readonly-docs":"patient-doc-box"}><div className="panel-title">Documentación del expediente</div><div><FileText size={16}/><span><strong>{patient.contractTemplateTitle||patient.contractType||'Contrato de prestación de servicios'}</strong><small>Contrato de servicios</small></span><DocStatus status={patient.contract}/><button className="icon-button" aria-label={documentHistory(patient,'contract').length?'Ver contrato':'Contrato aún no preparado'} disabled={!documentHistory(patient,'contract').length} onClick={onOpenContract}><ArrowUpRight size={15}/></button></div><div><FileCheck2 size={16}/><span><strong>{patient.consentDocument||'Consentimiento informado'}</strong><small>Documento clínico</small></span><DocStatus status={patient.consent}/><button className="icon-button" aria-label={documentHistory(patient,'consent').length?'Ver consentimiento':'Consentimiento aún no preparado'} disabled={!documentHistory(patient,'consent').length} onClick={onOpenConsent}><ArrowUpRight size={15}/></button></div></div>
+  </div>
+  <div className="patient-record-panel" role="tabpanel" id="patient-record-panel-follow-up" aria-labelledby="patient-record-tab-follow-up" tabIndex={0} hidden={activeRecordTab!=='follow-up'}>
+     <section className="patient-activity-box"><div className="panel-title"><span>Seguimiento</span><button className="button outline compact" onClick={onAddActivity}><Plus size={13}/> Agregar nota</button></div>{sortedActivities.slice(0,8).map(activity=><article className="patient-activity-row" key={activity.id}><div className="patient-activity-meta"><strong>{activity.type}</strong><time dateTime={activity.createdAt}>{new Intl.DateTimeFormat('es-MX',{dateStyle:'medium',timeStyle:'short'}).format(new Date(activity.createdAt))}</time></div><p>{activity.note}</p><small>{activity.author}</small></article>)}{sortedActivities.length===0&&<div className="empty-inline">Aún no hay seguimientos registrados.</div>}</section>
+  </div>
+  <div className="modal-actions"><button className="button secondary" onClick={close}>Cerrar</button></div></Modal>;
  }
+
+function ClinicalBackgroundModal({patient,clinicalBackground,sharedMode,close,onSubmit}) {
+  const answers=clinicalBackground?.answers||{};
+  return <Modal title="Antecedentes clínicos" subtitle={`${patient.name} · Expediente ${patient.id}`} close={close} className="patient-record-modal"><form className="form-stack clinical-background-form" onSubmit={onSubmit}>
+    <div className="form-note"><ShieldCheck size={15}/> Registra lo preguntado: distingue entre lo que la persona niega, desconoce o aún no ha respondido. No se completa “no tiene” por omisión.</div>
+    {clinicalHistoryPrompts.map(([key,label])=>{const answer=answers[key]||{};return <fieldset className="clinical-history-field" key={key}><legend>{label}</legend><div className="form-grid"><label>Respuesta<select name={`state-${key}`} defaultValue={answer.state||'not_asked'}>{Object.entries(clinicalHistoryStateLabels).map(([value,text])=><option key={value} value={value}>{text}</option>)}</select></label><label>Detalle / observaciones<input name={`detail-${key}`} defaultValue={answer.detail||''} maxLength="1000" placeholder="Opcional; registra el dato referido"/></label></div></fieldset>})}
+    <div className="form-note">{sharedMode?'Visible al equipo clínico autorizado.':'Demostración local: se guarda solo en este navegador.'}</div>
+    <div className="modal-actions"><button type="button" className="button secondary" onClick={close}>Cancelar</button><button className="button primary" type="submit"><Check size={15}/> Guardar antecedentes</button></div>
+  </form></Modal>;
+}
 
 function ClinicalEncounterModal({patient,appointments,sharedMode,close,onSubmit}) {
   const localNow = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0,16);
@@ -2751,9 +2927,12 @@ function ClinicalEncounterModal({patient,appointments,sharedMode,close,onSubmit}
     {appointments.length>0&&<label>Cita relacionada<select name="appointmentId" defaultValue=""><option value="">Sin vincular</option>{appointments.map(item=><option key={item.id} value={item.databaseId||item.id}>{item.date} · {item.time} · {item.service}</option>)}</select></label>}
     <label>Motivo de consulta<textarea name="chiefComplaint" rows="2" maxLength="2000" required autoFocus/></label>
     <label>Antecedentes / historia<textarea name="history" rows="3" maxLength="5000"/></label>
+    <fieldset className="clinical-vitals"><legend>Signos vitales <small>Deja en blanco si no se midió; no se interpreta como normal</small></legend><div className="form-grid clinical-vitals-grid"><label>Peso (kg)<input name="weight" type="number" min="0" step="0.1"/></label><label>Estatura (cm)<input name="height" type="number" min="0" step="0.1"/></label><label>Temperatura (°C)<input name="temperature" type="number" min="0" step="0.1"/></label><label>Pulso (lpm)<input name="pulse" type="number" min="0" step="1"/></label><label>Presión arterial<input name="bloodPressure" placeholder="No registrada" maxLength="30"/></label><label>SpO₂ (%)<input name="oxygen" type="number" min="0" max="100" step="1"/></label></div></fieldset>
+    <fieldset className="clinical-vitals"><legend>Exploración física <small>Estado explícito por sistema</small></legend><div className="form-grid clinical-exam-grid">{[['skin','Piel'],['face','Cara'],['neck','Cuello'],['cardiovascular','Cardiovascular'],['respiratory','Respiratorio'],['neurological','Neurológico']].map(([key,label])=><label key={key}>{label}<select name={`exam-${key}`} defaultValue="not_recorded"><option value="not_recorded">Sin registrar</option><option value="normal">Sin hallazgos relevantes</option><option value="finding">Hallazgo documentado</option><option value="not_applicable">No aplica</option></select></label>)}</div></fieldset>
     <label>Exploración y hallazgos<textarea name="examination" rows="3" maxLength="5000"/></label>
-    <label>Valoración clínica<textarea name="assessment" rows="3" maxLength="5000"/></label>
-    <label>Plan y seguimiento<textarea name="plan" rows="3" maxLength="5000"/></label>
+    <label>Valoración / diagnóstico<textarea name="assessment" rows="3" maxLength="5000"/></label>
+    <div className="form-grid"><label>Pronóstico<textarea name="prognosis" rows="2" maxLength="2000"/></label><label>Plan<textarea name="plan" rows="2" maxLength="5000"/></label></div>
+    <label>Nota de evolución y comentarios<textarea name="evolution" rows="3" maxLength="5000" placeholder="Evolución, respuesta, observaciones o indicaciones relevantes."/></label>
     <div className="form-note"><ShieldCheck size={15}/>{sharedMode?'Visible para el personal autorizado de esta clínica.':'Demostración local: se guarda solo en este navegador.'}</div>
     <div className="modal-actions"><button type="button" className="button secondary" onClick={close}>Cancelar</button><button className="button primary" type="submit"><Check size={15}/> Guardar consulta</button></div>
   </form></Modal>;
@@ -2778,11 +2957,112 @@ function BotoxTreatmentModal({patient,appointments,sharedMode,close,onSubmit}) {
   </form></Modal>;
 }
 
+const procedureMapViews = [
+  ['face','Rostro'],['profile-right','Perfil derecho'],['profile-left','Perfil izquierdo'],
+  ['neck-chest','Cuello y tórax'],['axillae','Axilas'],['hands','Manos'],['front','Cuerpo de frente'],['back','Cuerpo de espaldas'],
+];
+
+function ProcedureAnatomyMap({ zones, toggleZone, setZoneDose, zoneName, setZoneName, dose, setDose, addCustom }) {
+  const [view, setView] = useState('face');
+  const [zoom, setZoom] = useState(null);
+  const [listOpen, setListOpen] = useState(false);
+  const clipId = useId();
+  const currentView = procedureMapViews.find(([key]) => key === view)[1];
+  const { viewBox, paths, visible } = procedureAnatomy[view];
+  const zoomView = zoom ? procedureFaceZoom[zoom] : null;
+  const drawingViewBox = zoomView?.viewBox || viewBox;
+  const [x, y, width, height] = drawingViewBox.split(' ').map(Number);
+  const visiblePaths = new Set(visible);
+  const selectedNames = new Set(zones.map(zone => zone.name));
+  const availableNames = [...new Set(visible.map(index => paths[index][4]))];
+  const orientation = view === 'back' ? ['I', 'D'] : ['D', 'I'];
+  const isProfile = view.startsWith('profile');
+  const side = view === 'profile-right' ? 'D' : 'I';
+
+  function renderPath([d, fill, stroke, strokeWidth, name], index) {
+    const available = visiblePaths.has(index) && (!zoomView || zoomView.names.includes(name));
+    const selected = available && selectedNames.has(name);
+    const attributes = { d, fill, stroke, strokeWidth };
+    if (!available) return <path key={index} {...attributes} aria-hidden="true" pointerEvents="none" />;
+
+    return <path key={index} {...attributes}
+      className="procedure-map-zone" role="button" tabIndex={0}
+      aria-label={name} aria-pressed={selected}
+      onClick={() => toggleZone(name)}
+      onKeyDown={event => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          toggleZone(name);
+        }
+      }}>
+      <title>{name}</title>
+    </path>;
+  }
+
+  return <section className="body-map-workspace" aria-label="Mapa anatómico interactivo">
+    <header className="clinical-map-header"><div><strong>Mapa de aplicación</strong><small>Selecciona las áreas tratadas; agrega dosis o detalle en cada una.</small></div><button type="button" className="button outline compact" aria-expanded={listOpen} onClick={()=>setListOpen(value=>!value)}>{listOpen?'Ver mapa':'Lista de zonas'}</button></header>
+    <nav className="clinical-map-nav" aria-label="Vistas anatómicas">{procedureMapViews.map(([key,label])=><button type="button" key={key} className={view===key?'active':''} aria-pressed={view===key} onClick={()=>{setView(key);setZoom(null);}}>{label}</button>)}</nav>
+    {view === 'face' && !listOpen && <div className="clinical-map-filters" role="group" aria-label="Acercar una zona del rostro">
+      {Object.keys(procedureFaceZoom).map(label => <button key={label} type="button"
+        className={zoom === label ? 'active' : ''} aria-pressed={zoom === label}
+        onClick={() => setZoom(current => current === label ? null : label)}>{label}</button>)}
+    </div>}
+    <div className={`body-map-layout${listOpen ? ' list-mode' : ''}`}>
+      {!listOpen && <div className="clinical-map-illustration procedure-map-stage">
+        <div className="procedure-map-orientation" aria-hidden="true">
+          {isProfile ? <span>{currentView} · {side}</span> : orientation.map(label => <span key={label}>{label}</span>)}
+        </div>
+        <svg className="procedure-map-drawing" viewBox={drawingViewBox}
+          role="group" aria-label={`${currentView}: zonas anatómicas seleccionables`}>
+          <defs><clipPath id={clipId}><rect x={x} y={y} width={width} height={height} /></clipPath></defs>
+          <g clipPath={`url(#${clipId})`}>{paths.map(renderPath)}</g>
+        </svg>
+      </div>}
+      {listOpen&&<div className="clinical-zone-picker" role="region" aria-label={`Zonas disponibles: ${currentView}`}>
+        <div className="clinical-zone-picker-heading"><strong>Zonas de {currentView.toLocaleLowerCase('es-MX')}</strong><span>{availableNames.length} disponibles</span></div>
+        <div className="clinical-zone-picker-list">{availableNames.map(name => <button type="button" key={name}
+          className={selectedNames.has(name) ? 'selected' : ''} aria-pressed={selectedNames.has(name)} onClick={() => toggleZone(name)}>
+          <span>{name}</span><i aria-hidden="true">{selectedNames.has(name) ? '✓' : '+'}</i>
+        </button>)}</div>
+      </div>}
+      <aside className="body-map-details"><div className="clinical-zone-summary"><strong>Zonas seleccionadas</strong><span aria-live="polite">{zones.length}</span></div>{zones.length?zones.map(zone=><div className="body-map-zone" key={zone.name}><div className="body-map-zone-heading"><strong>{zone.name}</strong><button type="button" aria-label={`Quitar ${zone.name}`} onClick={()=>toggleZone(zone.name)}>×</button></div><input aria-label={`Dosis o detalle para ${zone.name}`} value={zone.dose} onChange={event=>setZoneDose(zone.name,event.target.value)} placeholder="Dosis / detalle" maxLength="80"/></div>):<p className="clinical-map-empty">Aún no hay zonas. Selecciona una región del mapa o usa la lista.</p>}<div className="clinical-zone-custom"><input aria-label="Zona personalizada" value={zoneName} onChange={event=>setZoneName(event.target.value)} onKeyDown={event=>{if(event.key==='Enter'){event.preventDefault();addCustom();}}} placeholder="Agregar otra zona" maxLength="80"/><input aria-label="Detalle de zona personalizada" value={dose} onChange={event=>setDose(event.target.value)} placeholder="Dosis / detalle" maxLength="80"/><button type="button" className="button outline compact" onClick={addCustom} disabled={!zoneName.trim()}>Agregar</button></div></aside>
+    </div>
+  </section>;
+}
+
+function ProcedureModal({patient,appointments,sharedMode,close,onSubmit}) {
+  const localNow = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0,16);
+  const [zones,setZones]=useState([]);
+  const [zoneName,setZoneName]=useState('');
+  const [dose,setDose]=useState('');
+  const consentChoices=(patient.consentHistory||[]).filter(item=>item.status==='Firmado');
+  const toggleZone=name=>setZones(current=>current.some(item=>item.name===name)?current.filter(item=>item.name!==name):[...current,{name,dose:''}]);
+  const addCustom=()=>{const name=zoneName.trim();if(name&&!zones.some(item=>item.name===name)){setZones(current=>[...current,{name,dose}]);setZoneName('');setDose('');}};
+  const setZoneDose=(name,value)=>setZones(current=>current.map(item=>item.name===name?{...item,dose:value}:item));
+  return <Modal title="Nota post procedimiento" subtitle={`${patient.name} · Registro clínico`} close={close} className="patient-record-modal procedure-modal"><form className="form-stack" onSubmit={event=>onSubmit(event,zones)}>
+    <div className="procedure-fields">
+    <label>Fecha y hora<input type="datetime-local" name="performedAt" defaultValue={localNow} required/></label>
+    {appointments.length>0&&<label>Cita relacionada<select name="appointmentId" defaultValue=""><option value="">Sin vincular</option>{appointments.map(item=><option key={item.id} value={item.databaseId||item.id}>{item.date} · {item.time} · {item.service}</option>)}</select></label>}
+    <label>Procedimiento<select name="procedureType" defaultValue="Toxina botulínica"><option>Toxina botulínica</option><option>Ácido hialurónico</option><option>Bioestimulador</option><option>Endolift</option><option>Hilos tensores</option><option>Tratamiento facial</option><option>Otro</option></select></label>
+    <label>Producto / marca<input name="product" maxLength="160" placeholder="Opcional"/></label>
+    <label>Lote<input name="lotNumber" maxLength="100" placeholder="Opcional"/></label>
+    </div>
+    <ProcedureAnatomyMap zones={zones} toggleZone={toggleZone} setZoneDose={setZoneDose} zoneName={zoneName} setZoneName={setZoneName} dose={dose} setDose={setDose} addCustom={addCustom}/>
+    {consentChoices.length>0&&<label>Consentimiento de procedimiento firmado<select name="consentReference" defaultValue=""><option value="">Sin vincular</option>{consentChoices.map(item=><option value={`document:${item.id}`} key={item.id}>{item.title}</option>)}</select></label>}
+    <label>Cuidados posteriores y comentarios<textarea name="followUp" rows="3" maxLength="4000" placeholder="Indicaciones, evolución esperada y seguimiento recomendado."/></label>
+    <div className="form-note"><ShieldCheck size={15}/>{sharedMode?'Registro clínico visible al equipo autorizado.':'Demostración local: se guarda en este navegador.'} Las zonas y dosis se conservan en el expediente.</div>
+    <div className="modal-actions"><button type="button" className="button secondary" onClick={close}>Cancelar</button><button className="button primary" type="submit" disabled={!zones.length}><Check size={15}/> Guardar nota</button></div>
+  </form></Modal>;
+}
+
 function PatientFileModal({patient,sharedMode,close,onSubmit}) {
-  return <Modal title="Adjuntar documento firmado" subtitle={`${patient.name} · Expediente ${patient.id}`} close={close}><form className="form-stack" onSubmit={onSubmit}>
-    <label>Nombre del documento<input name="title" required maxLength="200" placeholder="Ej. Consentimiento de tratamiento facial" autoFocus/></label>
-    <div className="form-grid"><label>Tipo<select name="kind" defaultValue="consent"><option value="consent">Consentimiento</option><option value="contract">Contrato</option><option value="other">Otro</option></select></label><label>Fecha de firma<input name="signedAt" type="date"/></label></div>
-    <label>Archivo PDF, JPG o PNG<input name="file" type="file" accept="application/pdf,image/jpeg,image/png" required/></label>
+  const [kind,setKind]=useState('study');
+  const imageOnly=kind==='clinical_photo';
+  return <Modal title="Adjuntar archivo clínico" subtitle={`${patient.name} · Expediente ${patient.id}`} close={close}><form className="form-stack" onSubmit={onSubmit}>
+    <div className="form-grid"><label>Tipo<select name="kind" value={kind} onChange={event=>setKind(event.target.value)}><option value="study">Estudio</option><option value="clinical_photo">Foto clínica (antes / después)</option><option value="consent">Consentimiento firmado</option><option value="contract">Contrato firmado</option><option value="other">Otro documento</option></select></label><label>{kind==='consent'||kind==='contract'?'Fecha de firma':'Fecha del archivo'}<input name="signedAt" type="date"/></label></div>
+    <label>Nombre / descripción<input name="title" required maxLength="200" placeholder={imageOnly?'Ej. Antes · frente · fecha':'Ej. Laboratorio, ultrasonido o radiografía'} autoFocus/></label>
+    <label>{imageOnly?'Fotografía JPG o PNG':'Archivo PDF, JPG o PNG'}<input name="file" type="file" accept={imageOnly?'image/jpeg,image/png':'application/pdf,image/jpeg,image/png'} required/></label>
+    {imageOnly&&<p className="form-note"><ShieldCheck size={15}/> Fotografía clínica privada para documentación del tratamiento; no equivale a autorización de uso publicitario de imagen.</p>}
     <div className="form-note"><ShieldCheck size={15}/>{sharedMode?'Archivo privado de la clínica. Máximo 10 MB.':'Archivo de demostración guardado en IndexedDB de este navegador. Máximo 10 MB.'}</div>
     <div className="modal-actions"><button type="button" className="button secondary" onClick={close}>Cancelar</button><button className="button primary" type="submit"><FilePlus2 size={15}/> Adjuntar al expediente</button></div>
   </form></Modal>;

@@ -59,16 +59,27 @@ function mapDocument(row) {
     status: documentStatusToUi[row.status] || 'Pendiente',
     requestedAt: row.requested_at,
     signedAt: row.signed_at,
+    imageUseAuthorized: row.image_use_authorized ?? null,
   };
 }
 
 async function fetchDirectory(client, clinicId, role, patientId = '') {
   const canReadDiagnoses = true; // All clinic members may read the full patient record.
   const filterPatient = query => patientId ? query.eq('patient_id', patientId) : query;
-  const [patientResult, businessResult, branchResult, providerResult, assignmentResult, diagnosisResult, documentResult, activityResult, templateResult, encounterResult, fileResult, botoxResult] = await Promise.all([
-    patientId
-      ? client.from('patients').select('id, record_number, full_name, email, phone, service_summary, status, primary_branch_id, primary_provider_id, appointment_whatsapp_opt_in, appointment_whatsapp_opt_in_at, appointment_whatsapp_opt_in_source, created_at, updated_at').eq('clinic_id', clinicId).eq('id', patientId).order('created_at', { ascending: false })
-      : client.from('patients').select('id, record_number, full_name, email, phone, service_summary, status, primary_branch_id, primary_provider_id, appointment_whatsapp_opt_in, appointment_whatsapp_opt_in_at, appointment_whatsapp_opt_in_source, created_at, updated_at').eq('clinic_id', clinicId).order('created_at', { ascending: false }),
+  const patientColumns = 'id, record_number, full_name, email, phone, service_summary, status, primary_branch_id, primary_provider_id, appointment_whatsapp_opt_in, appointment_whatsapp_opt_in_at, appointment_whatsapp_opt_in_source, created_at, updated_at';
+  const selectPatients = columns => {
+    const query = client.from('patients').select(columns).eq('clinic_id', clinicId);
+    return (patientId ? query.eq('id', patientId) : query).order('created_at', { ascending: false });
+  };
+  const loadPatients = async () => {
+    const result = await selectPatients(`${patientColumns}, first_visit`);
+    if (result.error?.code === '42703' && result.error.message?.includes('first_visit')) {
+      return selectPatients(patientColumns);
+    }
+    return result;
+  };
+  const [patientResult, businessResult, branchResult, providerResult, assignmentResult, diagnosisResult, documentResult, activityResult, templateResult, encounterResult, fileResult, botoxResult, procedureResult, medicalHistoryResult] = await Promise.all([
+    loadPatients(),
     client.from('businesses').select('id, name, active').eq('clinic_id', clinicId).order('name'),
     client.from('branches').select('id, business_id, name, address, phone, hours, active').eq('clinic_id', clinicId).order('name'),
     client.from('clinic_providers').select('id, user_id, name, role_title, active').eq('clinic_id', clinicId).or(visibleProviderFilter).order('name'),
@@ -76,15 +87,21 @@ async function fetchDirectory(client, clinicId, role, patientId = '') {
     canReadDiagnoses
       ? filterPatient(client.from('patient_diagnoses').select('id, patient_id, summary, status, accepted_at, accepted_by, created_at').eq('clinic_id', clinicId).order('created_at', { ascending: false }))
       : Promise.resolve({ data: [], error: null }),
-    filterPatient(client.from('patient_documents').select('id, patient_id, diagnosis_id, kind, title, service, template_version, content_snapshot, status, requested_at, signed_at, created_by, signed_by').eq('clinic_id', clinicId).order('requested_at', { ascending: false })),
+    filterPatient(client.from('patient_documents').select('id, patient_id, diagnosis_id, kind, title, service, template_version, content_snapshot, status, requested_at, signed_at, created_by, signed_by, image_use_authorized').eq('clinic_id', clinicId).order('requested_at', { ascending: false })),
     filterPatient(client.from('patient_activities').select('id, patient_id, activity_type, note, created_at, author_id').eq('clinic_id', clinicId).order('created_at', { ascending: false })),
     client.from('document_templates').select('id, kind, title, category, version, content, active, created_at').eq('clinic_id', clinicId).eq('active', true).order('created_at', { ascending: false }),
     canReadDiagnoses
-      ? filterPatient(client.from('patient_encounters').select('id, patient_id, appointment_id, occurred_at, chief_complaint, history, examination, assessment, plan, created_at').eq('clinic_id', clinicId).order('occurred_at', { ascending: false }))
+      ? filterPatient(client.from('patient_encounters').select('id, patient_id, appointment_id, occurred_at, chief_complaint, history, examination, assessment, plan, vitals, physical_exam, prognosis, evolution, created_at').eq('clinic_id', clinicId).order('occurred_at', { ascending: false }))
       : Promise.resolve({ data: [], error: null }),
     filterPatient(client.from('patient_document_files').select('id, patient_id, kind, title, signed_at, storage_path, mime_type, byte_size, created_at').eq('clinic_id', clinicId).order('created_at', { ascending: false })),
     canReadDiagnoses
       ? filterPatient(client.from('botox_treatment_records').select('id, patient_id, appointment_id, clinician_id, performed_at, product, lot_number, expiration_date, treatment_areas, total_units, follow_up, consent_document_id, consent_file_id, created_at').eq('clinic_id', clinicId).order('performed_at', { ascending: false }))
+      : Promise.resolve({ data: [], error: null }),
+    canReadDiagnoses
+      ? filterPatient(client.from('patient_procedure_records').select('id, patient_id, appointment_id, performed_at, procedure_type, product, lot_number, zones, follow_up, consent_document_id, created_at').eq('clinic_id', clinicId).order('performed_at', { ascending: false }))
+      : Promise.resolve({ data: [], error: null }),
+    canReadDiagnoses
+      ? filterPatient(client.from('patient_clinical_histories').select('id, patient_id, answers, updated_at').eq('clinic_id', clinicId))
       : Promise.resolve({ data: [], error: null }),
   ]);
 
@@ -100,13 +117,15 @@ async function fetchDirectory(client, clinicId, role, patientId = '') {
   resultError(encounterResult, 'No se pudo cargar la historia clínica.');
   resultError(fileResult, 'No se pudieron cargar los archivos del expediente.');
   resultError(botoxResult, 'No se pudieron cargar los registros de Botox.');
+  resultError(procedureResult, 'No se pudieron cargar los procedimientos clínicos.');
+  resultError(medicalHistoryResult, 'No se pudieron cargar los antecedentes clínicos.');
 
   const encountersByPatient = new Map();
   for (const row of encounterResult.data || []) {
     encountersByPatient.set(row.patient_id, [...(encountersByPatient.get(row.patient_id) || []), {
       id: row.id, appointmentId: row.appointment_id || '', occurredAt: row.occurred_at,
       chiefComplaint: row.chief_complaint, history: row.history || '', examination: row.examination || '',
-      assessment: row.assessment || '', plan: row.plan || '',
+      assessment: row.assessment || '', plan: row.plan || '', vitals: row.vitals || {}, physicalExam: row.physical_exam || {}, prognosis: row.prognosis || '', evolution: row.evolution || '',
     }]);
   }
   const filesByPatient = new Map();
@@ -126,6 +145,12 @@ async function fetchDirectory(client, clinicId, role, patientId = '') {
       consentDocumentId: row.consent_document_id || '', consentFileId: row.consent_file_id || '', createdAt: row.created_at,
     }]);
   }
+  const proceduresByPatient = new Map();
+  for (const row of procedureResult.data || []) proceduresByPatient.set(row.patient_id, [...(proceduresByPatient.get(row.patient_id) || []), {
+    id: row.id, appointmentId: row.appointment_id || '', performedAt: row.performed_at, procedureType: row.procedure_type,
+    product: row.product || '', lotNumber: row.lot_number || '', zones: row.zones || [], followUp: row.follow_up || '', consentDocumentId: row.consent_document_id || '', createdAt: row.created_at,
+  }]);
+  const medicalHistoryByPatient = new Map((medicalHistoryResult.data || []).map(row => [row.patient_id, { id: row.id, answers: row.answers || {}, updatedAt: row.updated_at }]));
 
   const businesses = businessResult.data || [];
   const branches = branchResult.data || [];
@@ -185,6 +210,7 @@ async function fetchDirectory(client, clinicId, role, patientId = '') {
       id: row.record_number,
       databaseId: row.id,
       name: row.full_name,
+      firstVisit: row.first_visit === true,
       initials: initialsFor(row.full_name),
       treatment: row.service_summary || 'Por definir',
       email: row.email || '',
@@ -219,6 +245,8 @@ async function fetchDirectory(client, clinicId, role, patientId = '') {
       clinicalHistory: encountersByPatient.get(row.id) || [],
       recordFiles: filesByPatient.get(row.id) || [],
       botoxTreatments: botoxByPatient.get(row.id) || [],
+      procedures: proceduresByPatient.get(row.id) || [],
+      clinicalBackground: medicalHistoryByPatient.get(row.id) || null,
       last: index === 0 ? 'Actualizado recientemente' : `Expediente desde ${new Intl.DateTimeFormat('es-MX', { month: 'short', year: 'numeric' }).format(new Date(row.created_at))}`,
       tone: tones[index % tones.length],
     };
@@ -283,6 +311,7 @@ export function createPatientDirectoryStore({ clientFactory = createClient } = {
         clinic_id: clinicId,
         record_number: recordNumber,
         full_name: input.name.trim(),
+        ...(input.firstVisit === true ? { first_visit: true } : {}),
         email: input.email.trim() || null,
         phone: input.phone.trim() || null,
         service_summary: input.treatment.trim() || 'Por definir',
@@ -341,6 +370,7 @@ export function createPatientDirectoryStore({ clientFactory = createClient } = {
         clinician_id: patient.providerId || null, occurred_at: input.occurredAt,
         chief_complaint: input.chiefComplaint.trim(), history: input.history.trim(),
         examination: input.examination.trim(), assessment: input.assessment.trim(), plan: input.plan.trim(),
+        vitals: input.vitals || {}, physical_exam: input.physicalExam || {}, prognosis: input.prognosis || '', evolution: input.evolution || '',
         created_by: user.data.user?.id,
       }).select('id').single();
       resultError(result, 'No se pudo guardar la consulta. Verifica el esquema y tu rol clínico.');
@@ -362,6 +392,34 @@ export function createPatientDirectoryStore({ clientFactory = createClient } = {
         created_by: user.data.user?.id,
       }).select('id').single();
       resultError(result, 'No se pudo guardar el registro de Botox. Revisa tus permisos y vuelve a intentar.');
+      return result.data;
+    },
+
+    async createProcedure(clinicId, patient, input) {
+      const client = clientFactory();
+      if (!client) throw new Error('La conexión con Supabase no está configurada.');
+      const user = await client.auth.getUser();
+      resultError(user, 'No se pudo validar la sesión actual.');
+      const result = await client.from('patient_procedure_records').insert({
+        clinic_id: clinicId, patient_id: patient.databaseId, appointment_id: input.appointmentId || null,
+        clinician_id: patient.providerId || null, performed_at: input.performedAt, procedure_type: input.procedureType,
+        product: input.product || null, lot_number: input.lotNumber || null, zones: input.zones || [], follow_up: input.followUp || '',
+        consent_document_id: input.consentDocumentId || null, created_by: user.data.user?.id,
+      }).select('id').single();
+      resultError(result, 'No se pudo guardar el procedimiento clínico.');
+      return result.data;
+    },
+
+    async saveClinicalHistory(clinicId, patient, answers) {
+      const client = clientFactory();
+      if (!client) throw new Error('La conexión con Supabase no está configurada.');
+      const user = await client.auth.getUser();
+      resultError(user, 'No se pudo validar la sesión actual.');
+      const result = await client.from('patient_clinical_histories').upsert({
+        clinic_id: clinicId, patient_id: patient.databaseId, answers,
+        updated_by: user.data.user?.id, updated_at: new Date().toISOString(),
+      }, { onConflict: 'clinic_id,patient_id' }).select('id, updated_at').single();
+      resultError(result, 'No se pudieron guardar los antecedentes clínicos. Verifica tu rol clínico y el esquema.');
       return result.data;
     },
 
@@ -447,6 +505,7 @@ export function createPatientDirectoryStore({ clientFactory = createClient } = {
         target_template_id: input.template.id,
         target_kind: input.kind,
         target_service: input.service || null,
+        target_image_use_authorized: input.imageUseAuthorized ?? null,
       });
       resultError(result, 'No se pudo preparar el documento. Revisa el formato, el diagnóstico, tu rol y los permisos.');
       const prepared = Array.isArray(result.data) ? result.data[0] : result.data;
@@ -463,6 +522,7 @@ export function createPatientDirectoryStore({ clientFactory = createClient } = {
         diagnosisId: prepared.document_diagnosis_id || '',
         createdBy: prepared.document_created_by || '',
         createdByLabel: user.data.user?.user_metadata?.full_name || user.data.user?.email || 'Personal clínico',
+        imageUseAuthorized: prepared.document_image_use_authorized ?? null,
       };
     },
     async createBusiness(clinicId, name) {
