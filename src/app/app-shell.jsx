@@ -633,6 +633,15 @@ function App({ children }) {
   const notificationScope = sharedMode ? `${userProfile.userId}:${sharedDirectory.clinicId || 'pending'}` : 'demo';
   const notificationFeed = useNotificationFeed(notificationScope, sharedMode ? sharedDirectory.clinicId : null);
   const [selectedPatient, setSelectedPatient] = useState(null);
+  const [pendingProcedureDeletion, setPendingProcedureDeletion] = useState(null);
+  const procedureDeletionDialog = useRef(null);
+  const cancelProcedureDeletion = useRef(null);
+  useEffect(() => {
+    if (pendingProcedureDeletion && procedureDeletionDialog.current && !procedureDeletionDialog.current.open) {
+      procedureDeletionDialog.current.showModal();
+      cancelProcedureDeletion.current?.focus();
+    }
+  }, [pendingProcedureDeletion]);
   const [patientRecordTab,setPatientRecordTab]=useState('overview');
   const patientRecordReturnTab=useRef('overview');
   const [selectedProvider, setSelectedProvider] = useState(null);
@@ -929,12 +938,18 @@ function App({ children }) {
   const deleteProcedure = async record => {
     const patient = selectedPatient;
     if (!patient || procedurePending || !can('clinical.edit')) return;
-    if (!window.confirm('¿Eliminar este procedimiento y su nota del expediente?')) return;
+    setPendingProcedureDeletion({patientId: patient.id, record});
+  };
+  const confirmProcedureDeletion = async () => {
+    const request = pendingProcedureDeletion;
+    const patient = selectedPatient;
+    if (!request || !patient || request.patientId !== patient.id || procedurePending || !can('clinical.edit')) return;
+    setPendingProcedureDeletion(null);
     setProcedurePending(true);
     try {
-      const removeFromList = items => items.filter(item => item.id !== record.id);
+      const removeFromList = items => items.filter(item => item.id !== request.record.id);
       if (sharedMode) {
-        await createPatientDirectoryStore().deleteProcedure(sharedDirectory.clinicId, patient, record.id);
+        await createPatientDirectoryStore().deleteProcedure(sharedDirectory.clinicId, patient, request.record.id);
         setSelectedPatient(current => current?.id === patient.id
           ? { ...current, procedures: removeFromList(current.procedures || []) }
           : current);
@@ -1806,6 +1821,21 @@ function App({ children }) {
     {modal==='install-app' && <Modal className="mobile-install-modal" title="Instalar Elixir Clinic para Android" subtitle="Escanea el código con tu teléfono o copia el enlace." close={()=>setModal(null)}><MobileInstallLink /></Modal>}
     {modal==='confirm-logout'&&<Modal title="Cerrar sesión" subtitle="¿Quieres salir de tu cuenta en este dispositivo?" close={()=>setModal(null)}><div className="modal-actions"><button type="button" className="button secondary" onClick={()=>setModal(null)}>Cancelar</button><form action={async formData=>{await unlinkPushOnSignOut(formData);await signOut(formData)}}><button type="submit" className="button primary">Cerrar sesión</button></form></div></Modal>}
     {modal==='patient' && selectedPatient && <PatientModal patient={selectedPatient} activeRecordTab={patientRecordTab} setActiveRecordTab={setPatientRecordTab} clinicalBackground={sharedMode?selectedPatient.clinicalBackground:demoClinicalBackgrounds.find(item=>item.patientId===selectedPatient.id)||selectedPatient.clinicalBackground} packagePanel={<PatientPackagePanel key={selectedPatient.id} patient={selectedPatient} clinicId={sharedDirectory.clinicId} sharedMode={sharedMode} timeZone={clinicTimeZone} canCreate={can('payments.create')} services={serviceCatalog} promotions={promotionData.rows} demoPurchases={demoPackages} appointments={demoAppointments} payments={demoPayments} onDemoPurchase={purchase=>setDemoPackages(items=>[purchase,...items.filter(item=>item.id!==purchase.id)])}/>} appointments={workspaceAppointments} activities={workspacePatientActivities.filter(activity=>activity.patientId===selectedPatient.id)} clinicalHistory={sharedMode?(selectedPatient.clinicalHistory||[]):demoClinicalHistory.filter(item=>item.patientId===selectedPatient.id)} botoxTreatments={sharedMode?(selectedPatient.botoxTreatments||[]):demoBotoxTreatments.filter(item=>item.patientId===selectedPatient.id)} procedures={sharedMode?(selectedPatient.procedures||[]):demoProcedures.filter(item=>item.patientId===selectedPatient.id)} recordFiles={sharedMode?(selectedPatient.recordFiles||[]):demoRecordFiles.filter(item=>item.patientId===selectedPatient.id)} sharedMode={sharedMode} canEditPatient={can('patients.edit')} canDiagnose={can('clinical.edit')} canWriteClinical={can('clinical.create')} canPrepareContract={can('documents.create')} canPrepareConsent={can('documents.create')} canCreateAppointment={can('agenda.create')} close={()=>setModal(null)} notify={notify} onAddActivity={()=>openPatientRecordModal('new-patient-activity')} onClinicalBackground={()=>openPatientRecordModal('patient-clinical-background')} onNewEncounter={()=>openPatientRecordModal('new-clinical-encounter')} onNewBotoxTreatment={()=>openPatientRecordModal('new-botox-treatment')} onNewProcedure={()=>openProcedure(null)} onEditProcedure={openProcedure} onDeleteProcedure={deleteProcedure} procedurePending={procedurePending} onAddRecordFile={()=>openPatientRecordModal('new-patient-file')} onOpenRecordFile={openPatientFile} onEdit={()=>openPatientRecordModal('edit-patient')} onDiagnosis={()=>openPatientRecordModal('diagnosis')} onNewAppointment={()=>openNewAppointment(agendaDate,'17:00',selectedPatient.id)} onPrepareContract={()=>openContractPreparation(selectedPatient.id,'patient')} onPrepareConsent={()=>openConsentPreparation(selectedPatient.id,'patient')} onOpenContract={()=>openPatientDocument(selectedPatient,'contract','patient')} onOpenConsent={()=>openPatientDocument(selectedPatient,'consent','patient')} onOpenDocumentRecord={record=>openPatientDocumentRecord(selectedPatient,record,'patient')}/>}
+    <dialog ref={procedureDeletionDialog} className="point-removal-dialog" aria-labelledby="procedure-delete-title"
+      aria-describedby="procedure-delete-description" onClose={() => setPendingProcedureDeletion(null)}>
+      <div className="point-removal-heading">
+        <span aria-hidden="true"><Trash2 size={17}/></span>
+        <h3 id="procedure-delete-title">¿Eliminar procedimiento?</h3>
+      </div>
+      <p id="procedure-delete-description">Se eliminará {pendingProcedureDeletion?.record.procedureType || 'este procedimiento'} y su nota del expediente. Esta acción no se puede deshacer.</p>
+      <div className="point-removal-actions">
+        <button ref={cancelProcedureDeletion} type="button" className="button outline" onClick={() => procedureDeletionDialog.current?.close()}>Cancelar</button>
+        <button type="button" className="button point-removal-confirm" onClick={() => {
+          procedureDeletionDialog.current?.close();
+          void confirmProcedureDeletion();
+        }}>Eliminar procedimiento</button>
+      </div>
+    </dialog>
     {modal==='appointment' && selectedAppointment && <AppointmentModal serviceCatalog={serviceCatalog} timeZone={clinicTimeZone} onRecordArrival={recordAppointmentArrival} sharedMode={sharedMode} canEditAppointment={can('agenda.edit')} canCancelAppointment={can('agenda.cancel')} canCreatePayment={can('payments.create')} canManagePayments={!sharedMode||can('payments.create')} paymentDataReady={!sharedMode||sharedPaymentWorkspace.status==='ready'} appointment={selectedAppointment} businesses={workspaceBusinesses} branches={workspaceBranches} providers={workspaceProviders} payments={workspacePayments.filter(payment=>payment.appointmentId===selectedAppointment.id)} close={()=>{setModal(null);setSelectedAppointment(null)}} onSubmit={updateAppointment} onCancelAppointment={()=>cancelAppointment(selectedAppointment)} onOpenPatient={openPatientFromAppointment} onAddPayment={()=>openPaymentModal(selectedAppointment.id)}/>}
     {modal==='new-payment' && <PaymentModal sharedMode={sharedMode} clinicId={sharedDirectory.clinicId} demoPurchases={demoPackages} demoAppointments={demoAppointments} demoPayments={demoPayments} close={()=>{setModal(modalReturn==='appointment'?'appointment':null);setModalReturn(null)}} onSubmit={createPayment} canRefund={can('payments.refund')} defaultDate={paymentDefaults.date} defaultAppointmentId={paymentDefaults.appointmentId} patients={workspacePaymentPatients} appointments={selectedAppointment?[...workspacePaymentAppointments.filter(item=>item.id!==selectedAppointment.id),selectedAppointment]:workspacePaymentAppointments} payments={workspacePayments}/>}
     {modal==='new-patient-activity' && selectedPatient && <Modal title="Registrar seguimiento" subtitle={`${selectedPatient.name} · Expediente ${selectedPatient.id}`} close={returnToPatientRecord}><form onSubmit={addPatientActivity} className="form-stack"><input type="hidden" name="patientId" value={selectedPatient.id}/><label>Tipo de actividad<select name="type" defaultValue="Seguimiento"><option>Seguimiento</option><option>Llamada</option><option>Mensaje</option><option>Administrativa</option><option>Otro</option></select></label><label>Nota<textarea name="note" rows="4" maxLength="1000" placeholder="Resumen de llamada, acuerdo o pendiente. No agregues datos clínicos sensibles." required autoFocus/></label><div className="form-note"><ShieldCheck size={15}/> {sharedMode?'Nota guardada en la base compartida del consultorio.':'Nota interna de demostración, guardada solo en este navegador.'}</div><div className="modal-actions"><button type="button" className="button secondary" onClick={returnToPatientRecord}>Cancelar</button><button className="button primary" type="submit"><Check size={15}/> Guardar nota</button></div></form></Modal>}
@@ -2954,9 +2984,10 @@ function PatientModal({patient,activeRecordTab,setActiveRecordTab,clinicalBackgr
         <time dateTime={record.performedAt}><CalendarDays size={14} aria-hidden="true"/>{record.performedAt ? new Intl.DateTimeFormat('es-MX', {dateStyle:'medium', timeStyle:'short'}).format(new Date(record.performedAt)) : 'Fecha no registrada'}</time>
         {record.lotNumber && <span><b>Lote:</b> {record.lotNumber}</span>}
        </div>
+       <ProcedureRecordCounts zones={record.zones || []}/>
        {record.followUp && <p className="procedure-record-followup"><b>Indicaciones y seguimiento</b>{record.followUp}</p>}
       </div>
-      <ProcedureFaceThumbnail zones={record.zones || []}/>
+      {activeRecordTab === 'procedures' && <ProcedureThumbnails zones={record.zones || []}/>}
       {canDiagnose && <div className="procedure-record-actions">
        <button type="button" aria-label="Editar procedimiento" disabled={procedurePending} onClick={()=>onEditProcedure(record)}><PenLine size={15} aria-hidden="true"/> Editar</button>
        <button type="button" aria-label="Eliminar procedimiento" disabled={procedurePending} onClick={()=>onDeleteProcedure(record)}><Trash2 size={15} aria-hidden="true"/> Eliminar</button>
@@ -3032,8 +3063,8 @@ const procedureMapViews = [
 
 const [faceLeft, , faceWidth] = procedureAnatomy.face.viewBox.split(' ').map(Number);
 const faceCenterX = faceLeft + faceWidth / 2;
-const facePointRecordType = 'face-points-v1';
-const isFacePointRecord = zone => zone.kind === facePointRecordType;
+const procedurePointRecordType = 'face-points-v1';
+const isProcedurePointRecord = zone => zone.kind === procedurePointRecordType;
 const facePointLabel = point => [point.amount, point.unit].filter(Boolean).join(' ');
 
 const facePointDetail = point => [facePointLabel(point), point.note].filter(Boolean).join(' · ');
@@ -3064,19 +3095,71 @@ function ProcedureZoneGlyph({name, view}) {
   </svg>;
 }
 
-function ProcedureFaceThumbnail({zones}) {
-  const {viewBox, paths, visible} = procedureAnatomy.face;
-  const points = zones.filter(isFacePointRecord).flatMap(zone => zone.points || []);
-  const zoneNames = new Set(zones.filter(zone => !isFacePointRecord(zone)).map(zone => zone.name));
-  for (const point of points) if (point.zone) zoneNames.add(point.zone);
+function ProcedureRecordCounts({zones}) {
+  const points = zones.filter(isProcedurePointRecord).flatMap(zone => zone.points || []);
+  const names = new Set([
+    ...zones.filter(zone => !isProcedurePointRecord(zone)).map(zone => zone.name),
+    ...points.map(point => point.zone),
+  ].filter(Boolean));
+  return <div className="procedure-record-counts">
+    {names.size} {names.size === 1 ? 'zona' : 'zonas'} · {points.length} {points.length === 1 ? 'punto' : 'puntos'}
+  </div>;
+}
+
+function ProcedureThumbnails({zones}) {
+  const groups = new Map();
+  const points = zones.filter(isProcedurePointRecord).flatMap(zone => zone.points || []);
+  const includesZone = (view, name) => name && procedureAnatomy[view].visible.some(index => procedureAnatomy[view].paths[index][4] === name);
+  function groupFor(view) {
+    if (!groups.has(view)) groups.set(view, {names: new Set(), points: []});
+    return groups.get(view);
+  }
+  for (const point of points) {
+    const view = Object.hasOwn(procedureAnatomy, point.view) ? point.view : 'face';
+    const group = groupFor(view);
+    group.points.push(point);
+    if (point.zone) group.names.add(point.zone);
+  }
+  for (const {name} of zones.filter(zone => !isProcedurePointRecord(zone))) {
+    if ([...groups.values()].some(group => group.names.has(name))) continue;
+    const match = procedureMapViews.find(([view]) => includesZone(view, name));
+    if (match) groupFor(match[0]).names.add(name);
+  }
+  if (!groups.size) groupFor('face');
+  const views = procedureMapViews.filter(([view]) => groups.has(view));
+  const overflow = Math.max(0, views.length - 4);
+  return <div className="procedure-thumbnail-strip">
+    {views.slice(0, 4).map(([view, label]) => <ProcedureThumbnail key={view} view={view} label={label}
+      group={groups.get(view)} isolated={groups.get(view).names.size === 1}/>)}
+    {overflow > 0 && <span className="procedure-thumbnail-overflow" aria-label={`${overflow} vistas adicionales`}>+{overflow}</span>}
+  </div>;
+}
+
+function ProcedureThumbnail({view, label, group: {names, points}, isolated}) {
+  const {viewBox, paths, visible} = procedureAnatomy[view];
+  const svgRef = useRef(null);
+  const [crop, setCrop] = useState(null);
+  const zone = isolated ? [...names][0] : null;
+  useEffect(() => {
+    const path = zone && svgRef.current?.querySelector('[data-zone-selected]');
+    if (!path) { setCrop(null); return; }
+    const bounds = path.getBBox();
+    const [, , width, height] = viewBox.split(' ').map(Number);
+    const cropWidth = Math.max(bounds.width * 1.5, bounds.height * 1.15, width * .42);
+    const cropHeight = Math.max(bounds.height * 1.5, cropWidth * 1.16, height * .23);
+    setCrop([bounds.x + (bounds.width - cropWidth) / 2, bounds.y + (bounds.height - cropHeight) / 2, cropWidth, cropHeight].join(' '));
+  }, [zone, viewBox]);
   const description = points.map(point => [facePointLabel(point), point.zone, point.note].filter(Boolean).join(' · ') || 'Punto sin detalle').join('; ');
 
-  return <svg className="procedure-map-drawing procedure-face-thumbnail" viewBox={viewBox} role="img"
-    aria-label={points.length ? `Mapa facial · ${points.length} ${points.length === 1 ? 'punto' : 'puntos'}` : 'Mapa facial sin puntos'}>
-    {description && <title>{description}</title>}
+  const thumbnailViewBox = (zone && crop) || viewBox;
+  const [, , thumbnailWidth, thumbnailHeight] = thumbnailViewBox.split(' ').map(Number);
+  const pointRadius = 3.25 * Math.max(thumbnailWidth / 54, thumbnailHeight / 72);
+  return <svg ref={svgRef} className="procedure-map-drawing procedure-face-thumbnail" viewBox={thumbnailViewBox} role="img"
+    aria-label={[label, ...names].join(' · ')}>
+    <title>{[label, ...names, description].filter(Boolean).join(' · ')}</title>
     {paths.map(([d, fill, stroke, strokeWidth, name], index) => <path key={index} {...{d, fill, stroke, strokeWidth}}
-      data-zone-selected={visible.includes(index) && zoneNames.has(name) || undefined}/>)}
-    {points.map(point => <FacePointMarker key={point.id} point={point} radius={8}/>)}
+      data-zone-selected={visible.includes(index) && names.has(name) || undefined}/>)}
+    {points.map(point => <FacePointMarker key={point.id} point={point} radius={pointRadius}/>)}
   </svg>;
 }
 
@@ -3164,8 +3247,8 @@ function ProcedureAnatomyMap({ zones, toggleZone, setZoneDose, points, setPoints
   const [draggedPoint, setDraggedPoint] = useState(null);
   useEffect(() => { if (placement) drawingRef.current?.focus({preventScroll: true}); }, [placement]);
   const activePoint = points.find(point => point.id === activePointId);
-  const canMirrorPoint = placement && activePoint && Math.abs(activePoint.x - faceCenterX) > 0.01;
-  const showPoints = view === 'face' && !listOpen;
+  const canMirrorPoint = view === 'face' && placement && activePoint && Math.abs(activePoint.x - faceCenterX) > 0.01;
+  const showPoints = !listOpen;
   const currentView = procedureMapViews.find(([key]) => key === view)[1];
   const { paths, visible } = procedureAnatomy[view];
   const faceOverview = view === 'face' && !zoom;
@@ -3220,17 +3303,31 @@ function ProcedureAnatomyMap({ zones, toggleZone, setZoneDose, points, setPoints
   }
 
   function zoomIntoZone(name, path) {
-    const presets = Object.values(procedureFaceZoom);
-    const bounds = path?.getBBox();
-    const zoneY = bounds ? bounds.y + bounds.height / 2 : y + height / 2;
-    const distanceToPreset = preset => {
-      const [, top, , presetHeight] = preset.viewBox.split(' ').map(Number);
-      return Math.abs(zoneY - (top + presetHeight / 2));
-    };
-    const namedPresets = presets.filter(preset => preset.names.includes(name));
-    const candidates = namedPresets.length ? namedPresets : presets;
-    const preset = candidates.reduce((closest, option) => distanceToPreset(option) < distanceToPreset(closest) ? option : closest);
-    setZoom({viewBox: preset.viewBox});
+    if (view === 'face') {
+      const presets = Object.values(procedureFaceZoom);
+      const bounds = path?.getBBox();
+      const zoneY = bounds ? bounds.y + bounds.height / 2 : y + height / 2;
+      const distanceToPreset = preset => {
+        const [, top, , presetHeight] = preset.viewBox.split(' ').map(Number);
+        return Math.abs(zoneY - (top + presetHeight / 2));
+      };
+      const namedPresets = presets.filter(preset => preset.names.includes(name));
+      const candidates = namedPresets.length ? namedPresets : presets;
+      const preset = candidates.reduce((closest, option) => distanceToPreset(option) < distanceToPreset(closest) ? option : closest);
+      setZoom({viewBox: preset.viewBox});
+    } else if (path) {
+      const bounds = path.getBBox();
+      const stage = drawingRef.current?.getBoundingClientRect();
+      const aspect = stage?.width && stage?.height ? stage.width / stage.height : width / height;
+      const horizontalPadding = Math.max(bounds.width * 0.24, bounds.height * aspect * 0.18, width * 0.025);
+      const verticalPadding = Math.max(bounds.height * 0.24, bounds.width / aspect * 0.18, height * 0.025);
+      const viewWidth = Math.max(bounds.width + horizontalPadding * 2, (bounds.height + verticalPadding * 2) * aspect);
+      const viewHeight = viewWidth / aspect;
+      const centerX = bounds.x + bounds.width / 2;
+      const centerY = bounds.y + bounds.height / 2;
+      setZoom({viewBox: [centerX - viewWidth / 2, centerY - viewHeight / 2, viewWidth, viewHeight]
+        .map(value => Number(value.toFixed(2))).join(' ')});
+    }
     setCursor(null);
     setMode('add');
   }
@@ -3248,9 +3345,11 @@ function ProcedureAnatomyMap({ zones, toggleZone, setZoneDose, points, setPoints
   }
 
   function chooseAnatomicalZone(name, path) {
-    if (showPoints && path) {
+    const targetPath = path || Array.from(drawingContentRef.current?.querySelectorAll('[data-anatomical-zone]') || [])
+      .find(candidate => candidate.dataset.anatomicalZone === name);
+    if (showPoints && targetPath) {
       if (mode === 'zone-ready' && inspectedZone === name) {
-        zoomIntoZone(name, path);
+        zoomIntoZone(name, targetPath);
         return;
       }
       if (!selectedNames.has(name)) toggleZone(name);
@@ -3290,7 +3389,7 @@ function ProcedureAnatomyMap({ zones, toggleZone, setZoneDose, points, setPoints
     const target = new DOMPoint(position.x, position.y);
     const candidates = Array.from(drawingContentRef.current?.querySelectorAll('[data-anatomical-zone]') || []);
     const zone = candidates.reverse().find(path => path.isPointInFill(target))?.dataset.anatomicalZone || '';
-    return {...position, zone, zoneFromPosition: true};
+    return {...position, zone, view, zoneFromPosition: true};
   }
 
   function mirrorActivePoint() {
@@ -3446,7 +3545,7 @@ function ProcedureAnatomyMap({ zones, toggleZone, setZoneDose, points, setPoints
 
   return <section className="body-map-workspace" aria-label="Mapa anatómico interactivo">
     <header className="clinical-map-header"><div><strong>Mapa de aplicación</strong><small>Selecciona las áreas tratadas; agrega dosis o detalle en cada una.</small></div><button type="button" className="button outline compact" aria-expanded={listOpen} onClick={()=>{setMode(null);setListOpen(value=>!value);}}>{listOpen?'Ver mapa':'Lista de zonas'}</button></header>
-    <nav className="clinical-map-nav" aria-label="Vistas anatómicas">{procedureMapViews.map(([key,label])=><button type="button" key={key} className={view===key?'active':''} aria-pressed={view===key} onClick={()=>{setView(key);setZoom(null);setMode(null);setInspectedZone(null);}}>{label}</button>)}</nav>
+    <nav className="clinical-map-nav" aria-label="Vistas anatómicas">{procedureMapViews.map(([key,label])=><button type="button" key={key} className={view===key?'active':''} aria-pressed={view===key} onClick={()=>{setView(key);setZoom(null);setMode(null);setInspectedZone(null);setActivePointId(null);setHoveredPointId(null);setCursor(null);}}>{label}</button>)}</nav>
     {placement && <p className="face-point-mode-status" id={`${clipId}-placement`} role="status">
       Haz clic para agregar puntos. Selecciona o arrastra un punto existente. Con el teclado, usa las flechas y pulsa Intro.
     </p>}
@@ -3463,7 +3562,7 @@ function ProcedureAnatomyMap({ zones, toggleZone, setZoneDose, points, setPoints
           <defs><clipPath id={clipId}><rect x={x - faceBleed} y={y - faceBleed} width={width + faceBleed * 2} height={height + faceBleed} /></clipPath></defs>
           <g clipPath={`url(#${clipId})`}><g ref={drawingContentRef} className="procedure-map-content" style={{transformOrigin: `${x + width / 2}px ${y + height / 2}px`}}>
             {paths.map(renderPath)}
-            {showPoints && points.map(point =>
+            {showPoints && points.filter(point => point.view ? point.view === view : view === 'face').map(point =>
               point.x >= x && point.x <= x + width && point.y >= y && point.y <= y + height
                 ? <FacePointMarker key={point.id} point={{...(draggedPoint?.id === point.id ? draggedPoint : point), hovered: point.id === hoveredPointId}} radius={zoom ? 4.5 : 8} compact={!!zoom}
                     dragHandlers={placement ? dragHandlersFor(point) : undefined}
@@ -3601,9 +3700,9 @@ function ProcedureModal({patient,appointments,record,pending,sharedMode,close,on
   const procedureTypes = ['Toxina botulínica', 'Ácido hialurónico', 'Bioestimulador', 'Endolift', 'Hilos tensores', 'Tratamiento facial', 'Otro'];
   if (record?.procedureType && !procedureTypes.includes(record.procedureType)) procedureTypes.push(record.procedureType);
   const savedZones = record?.zones || [];
-  const [zones,setZones]=useState(() => savedZones.filter(zone => !isFacePointRecord(zone)));
-  const [points,setPoints]=useState(() => savedZones.find(isFacePointRecord)?.points || []);
-  const [zoneOrder, setZoneOrder] = useState(() => savedZones.find(isFacePointRecord)?.zoneOrder || []);
+  const [zones,setZones]=useState(() => savedZones.filter(zone => !isProcedurePointRecord(zone)));
+  const [points,setPoints]=useState(() => savedZones.find(isProcedurePointRecord)?.points || []);
+  const [zoneOrder, setZoneOrder] = useState(() => savedZones.find(isProcedurePointRecord)?.zoneOrder || []);
   useEffect(() => {
     const selected = new Set([...zones.map(zone => zone.name), ...groupFacePointsByZone(points).keys()]);
     setZoneOrder(current => {
@@ -3619,7 +3718,7 @@ function ProcedureModal({patient,appointments,record,pending,sharedMode,close,on
     if (zone.fromPointNotes && !value) return current.filter(item => item.name !== name);
     return current.map(item => item.name === name ? {...item, dose: value} : item);
   });
-  return <Modal title={record ? "Editar nota post procedimiento" : "Nota post procedimiento"} subtitle={`${patient.name} · Registro clínico`} close={()=>{ if (!pending) close(); }} className="patient-record-modal procedure-modal"><form className="form-stack" onSubmit={event=>onSubmit(event, points.length ? [...zones, {kind: facePointRecordType, name: 'Puntos del rostro', dose: String(points.length), points, zoneOrder}] : zones)}>
+  return <Modal title={record ? "Editar nota post procedimiento" : "Nota post procedimiento"} subtitle={`${patient.name} · Registro clínico`} close={()=>{ if (!pending) close(); }} className="patient-record-modal procedure-modal"><form className="form-stack" onSubmit={event=>onSubmit(event, points.length ? [...zones, {kind: procedurePointRecordType, name: 'Puntos anatómicos', dose: String(points.length), points, zoneOrder}] : zones)}>
     <div className="procedure-fields">
     <label>Fecha y hora<input type="datetime-local" name="performedAt" step="0.001" defaultValue={localDate} required/></label>
     {(appointments.length>0 || appointmentId)&&<label>Cita relacionada<select name="appointmentId" defaultValue={appointmentId}><option value="">Sin vincular</option>{appointmentId&&!appointments.some(item=>(item.databaseId||item.id)===appointmentId)&&<option value={appointmentId}>Cita vinculada</option>}{appointments.map(item=><option key={item.id} value={item.databaseId||item.id}>{item.date} · {item.time} · {item.service}</option>)}</select></label>}

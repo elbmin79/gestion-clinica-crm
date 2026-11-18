@@ -673,7 +673,7 @@ html[data-theme="dark"] .patient-record-file span{color:#bba9b7}
 .procedure-record-header .button { min-height: 40px; white-space: normal; }
 .procedure-record-row {
   display: grid;
-  grid-template-columns: fit-content(48%) 64px minmax(0, 1fr);
+  grid-template-columns: fit-content(30%) minmax(64px, max-content) minmax(132px, 1fr);
   align-items: start;
   gap: 12px 24px;
   padding: 16px 20px;
@@ -691,6 +691,12 @@ html[data-theme="dark"] .patient-record-file span{color:#bba9b7}
 }
 .procedure-record-meta time { display: inline-flex; align-items: center; gap: 6px; }
 .procedure-record-meta svg { flex: none; }
+.procedure-record-counts {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.25;
+}
 .procedure-record-followup {
   margin: 10px 0 0;
   max-width: 68ch;
@@ -721,7 +727,7 @@ html[data-theme="dark"] .patient-record-file span{color:#bba9b7}
 .procedure-record-box button:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
 .procedure-record-empty { border-top: 1px solid var(--line); margin: 0; padding: 16px 20px; line-height: 1.5; }
 @container (max-width: 540px) {
-  .procedure-record-row { grid-template-columns: fit-content(calc(100% - 76px)) 64px; gap: 6px 12px; }
+  .procedure-record-row { grid-template-columns: fit-content(50%) minmax(0, 1fr); gap: 6px 12px; }
   .procedure-record-header, .procedure-record-row, .procedure-record-empty { padding-inline: 14px; }
   .procedure-record-box .button, .procedure-record-actions button { min-height: 44px; }
   .procedure-record-actions { grid-column: 1 / -1; justify-self: start; margin-inline-start: -9px; }
@@ -2296,7 +2302,7 @@ html[data-theme="dark"] .patient-search-options button small,html[data-theme="da
 .patient-record-panel>.patient-activity-box .patient-activity-meta strong{font-size:13px;color:#4c3c47}
 .patient-record-panel>.patient-activity-box .patient-activity-row p{font-size:13px;line-height:1.6;color:#6d606a}
 .patient-record-panel>.medical-background-box{padding:0 16px 16px}
-.patient-record-panel>.medical-background-box>.panel-title{min-height:54px;padding:12px 0}
+.patient-record-panel>.medical-background-box>.panel-title{min-height:54px;padding:12px 16px}
 .patient-record-panel>.medical-background-box .medical-history-summary{grid-template-columns:repeat(3,minmax(0,1fr));gap:13px 12px;margin-top:16px}
 .patient-record-panel>.medical-background-box .medical-history-summary>div{min-height:58px;padding:14px 14px;border-radius:9px;background:var(--surface,#fcfafb);border-color:var(--line)}
 .patient-record-panel>.medical-background-box .medical-history-summary span{font-size:12px;color:#70636d}
@@ -2422,11 +2428,27 @@ html[data-theme="dark"] .modal.patient-record-overview-modal>.modal-actions{back
 .face-point-marker:focus-visible ellipse { fill: #562841; stroke-width: 2.5; filter: drop-shadow(0 0 3px #bd6c97); }
 .face-point-marker text { fill: currentColor; font-weight: 800; pointer-events: none; }
 .face-point-cursor { fill: none; stroke: var(--green); stroke-width: 2; vector-effect: non-scaling-stroke; pointer-events: none; }
+.procedure-thumbnail-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  max-width: 320px;
+}
+.procedure-thumbnail-overflow {
+  padding: 4px 6px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
 .procedure-map-drawing.procedure-face-thumbnail {
-  --map-outline: var(--muted);
-  --map-boundary: var(--line);
-  --map-selected: var(--green-soft);
-  --map-accent: var(--green);
+  flex: none;
+  --map-outline: #73576a;
+  --map-boundary: #9b7e90;
+  --map-selected: #cb84a7;
+  --map-accent: #71304f;
   width: 64px;
   height: 82px;
   padding: 4px;
@@ -2434,6 +2456,17 @@ html[data-theme="dark"] .modal.patient-record-overview-modal>.modal-actions{back
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--canvas);
+}
+html[data-theme="dark"] .procedure-map-drawing.procedure-face-thumbnail {
+  --map-outline: #cbb4c6;
+  --map-boundary: #947b91;
+  --map-selected: #a7507a;
+  --map-accent: #ffd0e6;
+}
+.procedure-face-thumbnail .face-point-marker ellipse {
+  fill: #42142f;
+  stroke: #fff;
+  stroke-width: 1px;
 }
 @media (max-width: 760px) {
   .face-point-editor .button { min-height: 44px; }
