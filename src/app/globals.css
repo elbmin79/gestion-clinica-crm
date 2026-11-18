@@ -911,16 +911,19 @@ html[data-theme="dark"] .modal.procedure-modal {
 }
 
 /* Day agenda: a separate resource lane per clinician, with readable overlap. */
-.resource-calendar-grid{grid-template-columns:63px minmax(0,1fr);padding-right:0}
+.resource-calendar-grid{--day-grid-hour:#eadfe5;--day-grid-lane:#ddc9d5;--day-grid-time:#6d5665;grid-template-columns:63px minmax(0,1fr);padding-right:0}
+html[data-theme="dark"] .resource-calendar-grid{--day-grid-hour:#4f3e4d;--day-grid-lane:#624b5d;--day-grid-time:#d5bfce}
+.resource-time-gutter>div:not(.provider-lane-spacer){color:var(--day-grid-time);font-weight:600}
+html .calendar-panel .resource-calendar-grid .hour-line{border-top-color:var(--day-grid-hour)}
 .resource-time-gutter .provider-lane-spacer{height:48px;padding:0;top:0}
 .provider-day-lanes{position:relative;display:grid;grid-template-columns:repeat(var(--provider-lane-count),minmax(190px,1fr));min-width:0;overflow-x:auto;overscroll-behavior-x:contain;scrollbar-color:#d6a2b8 #f8edf3;scrollbar-width:thin}
 .provider-day-lane{min-width:190px}
-.provider-lane-heading{height:48px;display:flex;align-items:center;gap:8px;padding:0 9px;border-bottom:1px solid #ead7e0;border-left:1px solid #ead7e0;background:#f8edf3;color:#513647}
+.provider-lane-heading{height:48px;display:flex;align-items:center;gap:8px;padding:0 9px;border-bottom:1px solid var(--day-grid-lane);border-left:1px solid var(--day-grid-lane);background:#f8edf3;color:#513647}
 .provider-lane-avatar{width:27px;height:27px;display:grid;place-items:center;flex:none;border-radius:50%;background:#e9cddd;color:#764a63;font-size:10px;font-weight:800;letter-spacing:.02em}
 .provider-lane-heading>div{display:flex;flex:1;min-width:0;flex-direction:column;gap:2px}
 .provider-lane-heading strong{overflow:hidden;color:inherit;font-size:12px;font-weight:800;line-height:1.2;text-overflow:ellipsis;white-space:nowrap}
 .provider-lane-heading small{color:#84697a;font-size:10px;font-weight:600;line-height:1.2}
-.provider-day-lanes .day-column{min-width:0;border-left-color:#ead7e0}
+html .calendar-panel .provider-day-lanes .day-column{min-width:0;border-left-color:var(--day-grid-lane)}
 .provider-day-lanes .calendar-slot{left:4px;width:calc(100% - 8px)}
 .provider-day-lanes .calendar-event{left:4px;width:calc(100% - 8px);border:0;border-radius:6px;padding:4px 7px;box-shadow:0 1px 3px rgba(71,37,56,.12)}
 .provider-day-lanes .calendar-event.is-short{min-height:19px;padding:2px 7px}
@@ -1038,7 +1041,7 @@ html[data-theme="dark"] .day-summary span,
 html[data-theme="dark"] .provider-lane-heading small,
 html[data-theme="dark"] .empty-state,
 html[data-theme="dark"] .table-bottom{color:#c4b2c0}
-html[data-theme="dark"] .provider-lane-heading{background:#302431;border-color:#493843;color:#f1e8ef}
+html[data-theme="dark"] .provider-lane-heading{background:#302431;color:#f1e8ef}
 html[data-theme="dark"] .provider-lane-avatar{background:#493044;color:#f0bfd2}
 html[data-theme="dark"] .calendar-slot{color:var(--muted-green-link)}
 html[data-theme="dark"] .calendar-slot:hover,
@@ -1594,6 +1597,49 @@ html[data-theme="dark"] .professional-error{color:#ffacba}
 .agenda-rule .icon-button{margin-bottom:8px}
 .agenda-identity-filters{padding:14px 22px;border-bottom:1px solid var(--line)}
 .agenda-identity-controls{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.compact-agenda-legend{display:flex;flex-wrap:wrap;gap:5px 14px;list-style:none;margin:0;padding:9px 15px;border-bottom:1px solid var(--line);color:var(--ink);font-size:12px}
+.compact-agenda-legend li{display:flex;align-items:center;gap:6px}
+.compact-agenda-empty{padding:0 15px;color:var(--ink);font-size:13px}
+.compact-agenda{--compact-hour:76px;display:grid;grid-template-columns:52px minmax(0,1fr);padding-right:8px;background:var(--paper)}
+.compact-agenda-hours{border-right:1px solid var(--line);color:var(--ink);text-align:right;font-size:11px;font-variant-numeric:tabular-nums}
+.compact-agenda-hours>div{height:var(--compact-hour);padding:4px 6px}
+.compact-agenda-track{position:relative;min-width:0}
+.compact-agenda-hour{height:var(--compact-hour);border-top:1px solid var(--line)}
+.compact-agenda-event{position:absolute;z-index:1;display:flex;flex-direction:column;align-items:flex-start;justify-content:flex-start;gap:2px;overflow:hidden;padding:1px 3px;border-radius:4px;text-align:left;font-size:12px;line-height:1.17}
+.compact-agenda-event strong,.compact-agenda-event small{display:-webkit-box;overflow:hidden;overflow-wrap:anywhere;-webkit-box-orient:vertical;-webkit-line-clamp:2;max-width:100%}
+.compact-agenda-event small{font-size:10px;-webkit-line-clamp:1}
+.compact-agenda-event[data-cancelled="true"] strong{text-decoration:line-through}
+.compact-agenda-event:focus-visible{outline:2px solid currentColor;outline-offset:-3px}
+.compact-agenda-slot{position:absolute;inset-inline:0;height:calc(var(--compact-hour)/4);width:100%;border:0;background:transparent;color:transparent;font-size:11px}
+.compact-agenda-slot:is(:hover,:focus-visible){color:var(--ink);background:var(--canvas)}
+.compact-agenda-now{position:absolute;z-index:2;inset-inline:0;border-top:1px solid #e84c82;pointer-events:none}
+@media print{.compact-agenda,.compact-agenda-legend,.compact-agenda-empty{display:none}}
+.agenda-availability-controls{display:flex;align-items:center;flex-wrap:wrap;gap:8px}
+.agenda-availability-toggle,.agenda-availability-duration{display:inline-flex;align-items:center;gap:7px;min-height:38px;padding:0 10px;border:1px solid var(--line);border-radius:7px;background:var(--paper);color:var(--ink);font-size:13px;font-weight:700}
+.agenda-availability-toggle[aria-pressed="true"]{background:#deeee4;border-color:#80a68f;color:#214e38}
+.agenda-availability-duration select{border:0;background:transparent;color:inherit;font:inherit;cursor:pointer}
+.agenda-availability-status{display:flex;flex-wrap:wrap;align-items:center;gap:4px 12px;padding:8px 16px;border-bottom:1px solid var(--line);color:var(--ink);font-size:13px}
+.agenda-availability-status small{color:var(--muted);font-size:12px}
+.show-availability .day-column{overflow:hidden}
+.show-availability .provider-lane-heading small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.show-availability .calendar-event.agenda-event-card{filter:saturate(.3)}
+.agenda-free-block{position:absolute;z-index:1;inset-inline:4px;display:flex;flex-wrap:wrap;align-content:start;align-items:center;justify-content:space-between;gap:0 8px;overflow:hidden;border:1px solid #8caf9a;border-radius:6px;background:#deeee4;color:#214e38;padding:1px 6px;text-align:left;font-size:11px;line-height:1.25;font-variant-numeric:tabular-nums}
+.show-availability .provider-now-line{z-index:0}
+.agenda-free-block[data-long="true"]{padding-top:6px}
+button.agenda-free-block:hover{background:#cce4d5;border-color:#547b61}
+button.agenda-free-block:focus-visible{outline:2px solid currentColor;outline-offset:-3px}
+html[data-theme="dark"] .agenda-free-block,html[data-theme="dark"] .agenda-availability-toggle[aria-pressed="true"]{background:#263f33;border-color:#638e74;color:#dcf2e4}
+html[data-theme="light"] .agenda-free-block{background:color-mix(in srgb,#deeee4 94%,#214e38);border-color:color-mix(in srgb,#8caf9a 90%,#214e38)}
+html[data-theme="light"] button.agenda-free-block:hover{background:#cce4d5;border-color:#547b61}
+html[data-theme="dark"] button.agenda-free-block:hover{background:#315640}
+@media(max-width:700px){
+  .agenda-availability-toggle,.agenda-availability-duration{min-height:44px}
+  .agenda-availability-toggle{padding-inline:8px}
+  .agenda-availability-duration{gap:3px;padding-inline:5px;font-size:12px}
+  .agenda-availability-duration select{font-size:16px;max-width:91px}
+  .agenda-availability-status{padding-inline:12px}
+}
+@media print{.agenda-availability-status{display:none}}
 .agenda-multiselect{position:relative;font-size:13px}
 .agenda-multiselect>summary{display:flex;align-items:center;gap:8px;list-style:none;cursor:pointer;min-height:38px;padding:8px 12px;border:1px solid var(--line);border-radius:7px;background:var(--paper);color:var(--ink);font-weight:700}
 .agenda-multiselect>summary::-webkit-details-marker{display:none}
@@ -1625,7 +1671,7 @@ html[data-theme] .agenda-event-card.agenda-colored-event .event-patient,html[dat
 html[data-theme] .agenda-event-card.agenda-colored-event .event-patient::before,.month-event.agenda-colored-event::before{content:'';display:inline-block;vertical-align:middle;width:7px;height:7px;border-radius:50%;background:var(--appointment-color);margin-right:5px}
 .agenda-event-card.agenda-colored-event:hover{border-color:var(--appointment-color);background:color-mix(in srgb,var(--appointment-color) 20%,var(--paper))}
 html[data-theme="dark"] .calendar-panel .agenda-colored-event{background:color-mix(in srgb,var(--appointment-color) 25%,var(--paper))}
-html[data-theme="light"] .calendar-panel .agenda-colored-event{background:color-mix(in srgb,var(--appointment-color) 24%,#fff);border-color:color-mix(in srgb,var(--appointment-color) 80%,#fff)}
+html[data-theme="light"] .calendar-panel .agenda-colored-event{background:color-mix(in srgb,var(--appointment-color) 29%,#fff);border-color:color-mix(in srgb,var(--appointment-color) 86%,#fff)}
 html[data-theme="light"] .calendar-panel .agenda-colored-event:hover{background:color-mix(in srgb,var(--appointment-color) 31%,#fff);border-color:var(--appointment-color)}
 @media(max-width:700px){.agenda-identity-filters{padding:12px}.agenda-search{flex-basis:100%;min-width:0}.agenda-color-menu{width:min(320px,calc(100vw - 36px));left:auto;right:-60px}.agenda-summary{align-items:flex-start;gap:12px;flex-wrap:wrap}.agenda-list-controls{padding:12px}.agenda-list-controls label{flex:1;min-width:120px}}
 .professional-editor .branch-picker legend{color:var(--ink)}
@@ -1932,6 +1978,14 @@ html[data-theme="dark"] .patient-search-options button small,html[data-theme="da
   .calendar-panel .agenda-identity-filters{padding:0 10px 10px}
   .calendar-panel .agenda-identity-controls{gap:8px}
   .calendar-panel:not(.mobile-filters-open) .agenda-multiselect{display:none}
+  .calendar-panel.availability-active:not(.mobile-filters-open) .agenda-multiselect:first-child{display:block;flex:0 1 auto}
+  .calendar-panel.compact-view-active:not(.mobile-filters-open) .agenda-multiselect:first-child{display:block;flex:0 1 auto}
+  .calendar-panel.compact-view-active:not(.mobile-filters-open) .agenda-search{display:none}
+  .calendar-panel.compact-view-active .agenda-color-explanation{display:none}
+  .compact-agenda{--compact-hour:104px;grid-template-columns:40px minmax(0,1fr);padding-right:3px}
+  .compact-agenda-legend{padding-inline:10px}
+  .calendar-panel.availability-active:not(.mobile-filters-open) .agenda-search{display:none}
+  .calendar-panel.availability-active .agenda-availability-controls{order:-1;flex-basis:100%}
   .calendar-panel .agenda-multiselect{flex:1}
   .calendar-panel .agenda-multiselect>summary{min-height:44px;justify-content:space-between}
   .calendar-panel .agenda-filter-menu{max-width:calc(100vw - 48px)}

@@ -44,6 +44,8 @@ function mapAppointment(row, catalogs, timeZone) {
     tone: patient?.tone || 'blue',
     date: datePartsInZone(startsAt, timeZone),
     time: timePartsInZone(startsAt, timeZone),
+    startsAt: row.starts_at,
+    endsAt: row.ends_at,
     service: row.service,
     clinician: provider?.name || 'Sin profesional asignado',
     providerId: row.provider_id,

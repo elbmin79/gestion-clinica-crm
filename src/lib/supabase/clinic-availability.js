@@ -17,6 +17,23 @@ export function createClinicAvailabilityStore({ clientFactory = createClient } =
   };
 
   return {
+    async loadAgendaDay(clinicId, date, timeZone) {
+      const client = clientOrThrow();
+      const next = new Date(`${date}T12:00:00Z`);
+      next.setUTCDate(next.getUTCDate() + 1);
+      const startsAt = clinicDateTimeToIso(date, '00:00', timeZone);
+      const endsAt = clinicDateTimeToIso(next.toISOString().slice(0, 10), '00:00', timeZone);
+      const [hours, blocks] = await Promise.all([
+        client.from('public_agenda_hours').select('branch_id, provider_id, day_of_week, on_date, closed, opens_minute, closes_minute')
+          .eq('clinic_id', clinicId),
+        client.from('clinic_availability_blocks').select('scope, branch_id, provider_id, starts_at, ends_at')
+          .eq('clinic_id', clinicId).lt('starts_at', endsAt).gt('ends_at', startsAt),
+      ]);
+      throwDatabaseError(hours, 'No se pudieron cargar los horarios de atención.');
+      throwDatabaseError(blocks, 'No se pudieron cargar los horarios bloqueados.');
+      return { hours: hours.data, blocks: blocks.data };
+    },
+
     async load(clinicId) {
       const client = clientOrThrow();
       const [settingsResult, blocksResult] = await Promise.all([
