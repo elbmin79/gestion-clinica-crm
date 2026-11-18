@@ -907,7 +907,13 @@ html[data-theme="dark"] .modal.procedure-modal {
 }
 @media (max-width: 480px) {
   .procedure-fields { column-gap: 8px; }
-  .procedure-modal .clinical-map-nav button { line-height: 1.2; }
+  .procedure-fields label:has([name="performedAt"],[name="procedureType"]) { grid-column: 1 / -1; }
+  .procedure-modal .form-stack :is(input:not([type="checkbox"]),select,textarea) { min-height: 44px; font-size: 16px; }
+  .procedure-modal .clinical-map-nav { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .procedure-modal .clinical-map-nav button { line-height: 1.2; overflow-wrap: anywhere; }
+  .procedure-modal .modal-actions > .button { flex: 1 1 auto; min-height: 44px; }
+  .procedure-record-row { grid-template-columns: minmax(0, 1fr); }
+  .procedure-record-row .procedure-record-actions { grid-column: auto; }
 }
 
 /* Day agenda: a separate resource lane per clinician, with readable overlap. */
@@ -2303,7 +2309,8 @@ html[data-theme="dark"] .patient-search-options button small,html[data-theme="da
 .modal.patient-record-overview-modal>.patient-modal-profile>div strong{font-size:16px;color:#42333e}
 .modal.patient-record-overview-modal>.patient-modal-profile>div span{font-size:12px;color:#796a75}
 .modal.patient-record-overview-modal>.patient-modal-profile>div small{min-width:0;overflow-wrap:anywhere;font-size:12px;line-height:1.45;color:#736671}
-.modal.patient-record-overview-modal>.patient-modal-profile>.button{min-height:38px;white-space:nowrap}
+.patient-profile-actions{display:contents}
+.patient-profile-actions>.button{min-height:38px;white-space:nowrap}
 .modal.patient-record-overview-modal>.patient-workflow-progress{gap:10px;margin:0 0 15px}
 .modal.patient-record-overview-modal>.patient-workflow-progress article{min-height:112px;padding:13px 14px;border:1px solid var(--line);border-radius:10px;background:var(--paper)}
 .modal.patient-record-overview-modal>.patient-workflow-progress article>div>strong{font-size:13px}
@@ -2344,7 +2351,7 @@ html[data-theme="dark"] .patient-search-options button small,html[data-theme="da
 .patient-record-panel>.patient-document-history>.panel-title,
 .patient-record-panel>.patient-doc-box>.panel-title{padding-right:14px;padding-left:14px}
 .patient-record-panel>.patient-activity-box>.panel-title{margin-inline:-16px;padding-inline:16px;border-radius:9px 9px 0 0}
-.patient-record-panel>.patient-document-history>.panel-title{margin-inline:-14px;padding-inline:14px;border-radius:9px 9px 0 0}
+.patient-record-panel>.patient-document-history>.panel-title{margin-inline:-14px;padding-inline:16px;border-radius:9px 9px 0 0}
 .patient-record-panel>.patient-appointments>.panel-title,
 .patient-record-panel>.patient-activity-box>.panel-title,
 .patient-record-panel>.patient-document-history>.panel-title,
@@ -2364,7 +2371,6 @@ html[data-theme="dark"] .patient-search-options button small,html[data-theme="da
 .patient-record-panel>.patient-appointments[aria-label="Paquetes del paciente"]{padding-bottom:4px}
 .patient-record-panel>.patient-files-box .patient-record-file strong{font-size:13px}
 .patient-record-panel>.patient-document-history{padding:0 14px}
-.patient-record-panel>.patient-document-history>.panel-title{padding-right:0;padding-left:0}
 .patient-record-panel>.patient-doc-box{padding-bottom:4px}
 .patient-record-panel .empty-inline{min-height:72px;height:auto;padding:16px;color:#756773;font-size:13px;text-align:center}
 .patient-record-overview-modal>.modal-actions{position:sticky;bottom:-20px;z-index:9;margin:16px 0 0;padding:12px 0 2px;background:inherit}
@@ -2404,27 +2410,37 @@ html[data-theme="dark"] .modal.patient-record-overview-modal>.modal-actions{back
 @media(max-width:980px){
   .modal.patient-record-overview-modal>.patient-modal-profile{display:flex;flex-wrap:wrap;gap:10px 12px}
   .modal.patient-record-overview-modal>.patient-modal-profile>div{flex:1 1 260px}
-  .modal.patient-record-overview-modal>.patient-modal-profile>.button{flex:1 1 auto;justify-content:center}
+  .patient-profile-actions>.button{flex:1 1 auto;justify-content:center}
 }
 @media(max-width:760px){
   .modal.patient-record-overview-modal{width:calc(100vw - 20px);max-height:calc(100dvh - 20px);padding:18px 16px 16px;border-radius:14px}
   .modal.patient-record-overview-modal>.modal-heading{top:0;margin-top:-3px}
+  .modal.patient-record-overview-modal>.modal-heading>.icon-button{min-width:44px;min-height:44px;flex:none}
+  .modal.patient-record-overview-modal>.modal-actions{position:static}
   .modal.patient-record-overview-modal>.patient-modal-profile{display:grid;grid-template-columns:42px minmax(0,1fr);gap:9px 12px;margin-bottom:11px;padding:13px}
   .modal.patient-record-overview-modal>.patient-modal-profile>div{display:grid;grid-template-columns:minmax(0,1fr);gap:5px}
   .modal.patient-record-overview-modal>.patient-modal-profile>div>*{grid-column:1}
-  .modal.patient-record-overview-modal>.patient-modal-profile>.button{min-height:40px;justify-content:center}
+  .modal.patient-record-overview-modal>.patient-modal-profile>.patient-profile-actions{display:flex;grid-column:1/-1;flex-wrap:wrap;gap:8px;margin-top:3px}
+  .patient-profile-actions>.button{min-height:44px;padding-inline:9px}
+  .patient-profile-actions>.button svg{flex:none}
   .modal.patient-record-overview-modal>.patient-workflow-progress{grid-template-columns:minmax(0,1fr);gap:8px;margin-bottom:11px}
   .modal.patient-record-overview-modal>.patient-workflow-progress article{min-height:0;padding:11px 12px}
-  .patient-record-tabs{top:62px;gap:2px;min-height:48px;margin-bottom:12px}
+  .patient-record-tabs{position:static;flex-wrap:wrap;gap:2px 4px;min-height:48px;margin-bottom:12px}
   .patient-record-tabs [role="tab"]{min-height:44px;padding:0 10px;font-size:12px}
   .patient-record-panel{gap:11px}
   .patient-record-panel>.medical-background-box .medical-history-summary{grid-template-columns:repeat(2,minmax(0,1fr))}
   .patient-record-panel>.medical-background-box>.panel-title{align-items:flex-start;flex-wrap:wrap;gap:8px}
+  .patient-record-panel>.patient-files-box>.panel-title{flex-wrap:wrap;gap:8px}
+  .patient-record-panel>.patient-files-box .record-actions{flex-wrap:wrap}
+  .patient-record-panel :is(.panel-title,.patient-record-file) .button{min-height:44px}
+}
+@media(max-width:560px){
+  .patients-directory-table .row-more{width:44px;height:44px}
 }
 @media(max-width:430px){
   .modal.patient-record-overview-modal{padding-right:12px;padding-left:12px}
   .modal.patient-record-overview-modal>.patient-modal-profile{grid-template-columns:38px minmax(0,1fr)}
-  .modal.patient-record-overview-modal>.patient-modal-profile>.button{font-size:12px;padding-inline:8px}
+  .patient-profile-actions>.button{font-size:12px}
   .patient-record-panel>.medical-background-box .medical-history-summary{grid-template-columns:minmax(0,1fr)}
 }
 .body-map-details[data-zone-details] { padding: 14px 16px; }
