@@ -302,7 +302,7 @@ const backPaths = [
 ];
 
 export const procedureAnatomy = {
-  'face': { viewBox: '66 22 268 366', paths: headPaths, visible: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 36, 37, 38, 39, 40, 41, 42, 43, 44] },
+  'face': { viewBox: '48 0 304 410', paths: headPaths, visible: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 36, 37, 38, 39, 40, 41, 42, 43, 44] },
   'profile-right': { viewBox: '24 20 345 460', paths: profilePaths, visible: [2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32, 34, 36, 38, 40, 42, 44, 46, 48, 50, 52] },
   'profile-left': { viewBox: '431 20 345 460', paths: profilePaths, visible: [3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25, 27, 29, 31, 33, 35, 37, 39, 41, 43, 45, 47, 49, 51, 53] },
   'neck-chest': { viewBox: '20 320 360 280', paths: headPaths, visible: [28, 29, 30, 31, 32, 33, 34, 35, 43, 44, 45, 46] },
@@ -313,6 +313,8 @@ export const procedureAnatomy = {
 };
 
 export const procedureFaceZoom = {
+  'Cuero cabelludo': {viewBox: '80 18 240 116', names: ['Cuero cabelludo']},
+  Frente: {viewBox: '95 12 210 204', names: ['Región frontal', 'Glabela', 'Región temporal (D)', 'Región temporal (I)', 'Ceja (D)', 'Ceja (I)']},
   Ojos: {"viewBox":"108 140 184 84","names":["Región temporal (D)","Región temporal (I)","Ceja (D)","Ceja (I)","Párpado superior (D)","Párpado superior (I)","Ángulo lateral del ojo (D)","Ángulo lateral del ojo (I)","Párpado inferior (D)","Párpado inferior (I)","Glabela","Raíz, dorso y paredes laterales de la nariz"]},
   Nariz: {"viewBox":"134 186 132 118","names":["Párpado inferior (D)","Párpado inferior (I)","Región infraorbitaria (D)","Región infraorbitaria (I)","Surco nasolabial (D)","Surco nasolabial (I)","Mejilla (D)","Mejilla (I)","Comisura labial (D)","Comisura labial (I)","Raíz, dorso y paredes laterales de la nariz","Punta y alas de la nariz","Labio superior"]},
   Boca: {"viewBox":"126 262 148 108","names":["Surco nasolabial (D)","Surco nasolabial (I)","Comisura labial (D)","Comisura labial (I)","Surco labiomandibular (D)","Surco labiomandibular (I)","Base de la mandíbula (D)","Base de la mandíbula (I)","Labio superior","Labio inferior","Región mentoniana","Trígono submentoniano"]},

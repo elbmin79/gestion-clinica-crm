@@ -287,6 +287,15 @@ async function fetchDirectory(client, clinicId, role, patientId = '') {
   };
 }
 
+function procedureFields(input) {
+  return {
+    appointment_id: input.appointmentId || null, performed_at: input.performedAt,
+    procedure_type: input.procedureType, product: input.product || null,
+    lot_number: input.lotNumber || null, zones: input.zones || [],
+    follow_up: input.followUp || '', consent_document_id: input.consentDocumentId || null,
+  };
+}
+
 export function createPatientDirectoryStore({ clientFactory = createClient } = {}) {
   return {
     async load(clinicId, role) {
@@ -401,13 +410,28 @@ export function createPatientDirectoryStore({ clientFactory = createClient } = {
       const user = await client.auth.getUser();
       resultError(user, 'No se pudo validar la sesión actual.');
       const result = await client.from('patient_procedure_records').insert({
-        clinic_id: clinicId, patient_id: patient.databaseId, appointment_id: input.appointmentId || null,
-        clinician_id: patient.providerId || null, performed_at: input.performedAt, procedure_type: input.procedureType,
-        product: input.product || null, lot_number: input.lotNumber || null, zones: input.zones || [], follow_up: input.followUp || '',
-        consent_document_id: input.consentDocumentId || null, created_by: user.data.user?.id,
+        ...procedureFields(input), clinic_id: clinicId, patient_id: patient.databaseId,
+        clinician_id: patient.providerId || null, created_by: user.data.user?.id,
       }).select('id').single();
       resultError(result, 'No se pudo guardar el procedimiento clínico.');
       return result.data;
+    },
+
+    async updateProcedure(clinicId, patient, id, input) {
+      const client = clientFactory();
+      if (!client) throw new Error('La conexión con Supabase no está configurada.');
+      const result = await client.from('patient_procedure_records').update(procedureFields(input))
+        .eq('clinic_id', clinicId).eq('patient_id', patient.databaseId).eq('id', id).select('id').single();
+      resultError(result, 'No se pudo actualizar el procedimiento clínico.');
+      return result.data;
+    },
+
+    async deleteProcedure(clinicId, patient, id) {
+      const client = clientFactory();
+      if (!client) throw new Error('La conexión con Supabase no está configurada.');
+      const result = await client.from('patient_procedure_records').delete()
+        .eq('clinic_id', clinicId).eq('patient_id', patient.databaseId).eq('id', id).select('id').single();
+      resultError(result, 'No se pudo eliminar el procedimiento clínico.');
     },
 
     async saveClinicalHistory(clinicId, patient, answers) {

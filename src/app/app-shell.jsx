@@ -881,11 +881,18 @@ function App({ children }) {
       notify(error?.message || 'No se pudo guardar la sesión de Botox.');
     }
   };
-  const addProcedure = async (event, zones) => {
+  const [editingProcedure, setEditingProcedure] = useState(null);
+  const [procedurePending, setProcedurePending] = useState(false);
+  const openProcedure = record => {
+    setEditingProcedure(record);
+    openPatientRecordModal('new-patient-procedure');
+  };
+  const saveProcedure = async (event, zones) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     const patient = selectedPatient;
-    if (!patient) return;
+    const existing = editingProcedure;
+    if (!patient || procedurePending || !can(existing ? 'clinical.edit' : 'clinical.create')) return;
     const record = {
       patientId: patient.id, appointmentId: String(form.get('appointmentId') || ''),
       performedAt: new Date(String(form.get('performedAt') || new Date().toISOString())).toISOString(),
@@ -893,17 +900,52 @@ function App({ children }) {
       lotNumber: String(form.get('lotNumber') || '').trim(), zones, followUp: String(form.get('followUp') || '').trim(),
       consentDocumentId: String(form.get('consentReference') || '').replace(/^document:/, ''),
     };
+    setProcedurePending(true);
     try {
-      let saved = { ...record, id: `procedure-${Date.now()}` };
+      let saved = { ...record, id: existing?.id ?? crypto.randomUUID() };
       if (sharedMode) {
-        const result = await createPatientDirectoryStore().createProcedure(sharedDirectory.clinicId, patient, record);
+        const store = createPatientDirectoryStore();
+        const result = existing
+          ? await store.updateProcedure(sharedDirectory.clinicId, patient, existing.id, record)
+          : await store.createProcedure(sharedDirectory.clinicId, patient, record);
         saved = { ...saved, id: result.id };
+      }
+      const saveToList = items => [saved, ...items.filter(item => item.id !== saved.id)]
+        .sort((a, b) => Date.parse(b.performedAt) - Date.parse(a.performedAt));
+      if (sharedMode) {
+        setSelectedPatient(current => current?.id === patient.id
+          ? { ...current, procedures: saveToList(current.procedures || []) }
+          : current);
         sharedDirectory.refresh();
-      } else setDemoProcedures(items => [saved, ...items]);
-      setSelectedPatient(current => current?.id === patient.id ? { ...current, procedures: [saved, ...(current.procedures || [])] } : current);
+      } else setDemoProcedures(saveToList);
       returnToPatientRecord();
-      notify('Procedimiento agregado al expediente');
-    } catch (error) { notify(error?.message || 'No se pudo guardar el procedimiento.'); }
+      notify(existing ? 'Procedimiento actualizado' : 'Procedimiento agregado al expediente');
+    } catch (error) {
+      notify(error?.message || 'No se pudo guardar el procedimiento.');
+    } finally {
+      setProcedurePending(false);
+    }
+  };
+  const deleteProcedure = async record => {
+    const patient = selectedPatient;
+    if (!patient || procedurePending || !can('clinical.edit')) return;
+    if (!window.confirm('¿Eliminar este procedimiento y su nota del expediente?')) return;
+    setProcedurePending(true);
+    try {
+      const removeFromList = items => items.filter(item => item.id !== record.id);
+      if (sharedMode) {
+        await createPatientDirectoryStore().deleteProcedure(sharedDirectory.clinicId, patient, record.id);
+        setSelectedPatient(current => current?.id === patient.id
+          ? { ...current, procedures: removeFromList(current.procedures || []) }
+          : current);
+        sharedDirectory.refresh();
+      } else setDemoProcedures(removeFromList);
+      notify('Procedimiento eliminado del expediente');
+    } catch (error) {
+      notify(error?.message || 'No se pudo eliminar el procedimiento.');
+    } finally {
+      setProcedurePending(false);
+    }
   };
   const attachPatientFile = async (event) => {
     event.preventDefault();
@@ -1731,13 +1773,13 @@ function App({ children }) {
     </aside>
     {mobileNavOpen&&<button className="mobile-nav-backdrop" aria-label="Cerrar navegación" onClick={()=>setMobileNavOpen(false)}/>}
     <main className="main-shell">
-      <header className="topbar"><button className="mobile-menu-button" aria-label="Abrir navegación" aria-expanded={mobileNavOpen} onClick={()=>setMobileNavOpen(open=>!open)}><Menu size={18}/></button><div className="breadcrumbs"><span>{activeClinicName}</span><ChevronRight size={14}/><strong>{({overview:'Resumen',agenda:'Agenda',payments:'Pagos',recall:'Seguimiento',reminders:'Recordatorios',whatsapp:'WhatsApp',patients:'Pacientes',consents:'Consentimientos',contracts:'Contratos',team:'Equipo y sucursales',settings:'Configuración',profile:'Mi perfil'})[page]}</strong></div><div className="topbar-actions"><button className="search-shortcut" onClick={openPatientSearch}><Search size={15}/><span>Buscar</span><kbd>⌘ K</kbd></button><span className="topbar-divider"/><IconButton className="theme-toggle-button" aria-label={theme==='dark'?'Activar modo claro':'Activar modo oscuro'} aria-pressed={theme==='dark'} title={theme==='dark'?'Cambiar a modo claro':'Cambiar a modo oscuro'} onClick={()=>setTheme(current=>current==='dark'?'light':'dark')}>{theme==='dark'?<Sun size={18}/>:<Moon size={18}/>}</IconButton><IconButton className="mobile-install-button" type="button" aria-label="Instalar app para Android" title="Instalar app para Android" onClick={()=>setModal('install-app')}><Smartphone size={18}/></IconButton><NotificationCenter key={notificationScope} {...notificationFeed}/><button type="button" className="topbar-profile-button" aria-label="Abrir mi perfil" onClick={()=>setPage('profile')}><Avatar initials={profileInitials(displayUserName)} tone="navy" imageUrl={userProfile.avatarUrl}/></button></div>{sharedPageStatus === 'loading' && <div className="clinic-loading-track" role="progressbar" aria-label="Cargando datos de la clínica" />}</header>
+      <header className="topbar"><button className="mobile-menu-button" aria-label="Abrir navegación" aria-expanded={mobileNavOpen} onClick={()=>setMobileNavOpen(open=>!open)}><Menu size={18}/></button><div className="breadcrumbs"><span>{activeClinicName}</span><ChevronRight size={14}/><strong>{({overview:'Resumen',agenda:'Agenda',payments:'Pagos',recall:'Seguimiento',reminders:'Recordatorios',whatsapp:'WhatsApp',patients:'Pacientes',consents:'Consentimientos',contracts:'Contratos',team:'Equipo y sucursales',settings:'Configuración',profile:'Mi perfil'})[page]}</strong></div><div className="topbar-actions"><button className="search-shortcut" onClick={openPatientSearch}><Search size={15}/><span>Buscar</span></button><span className="topbar-divider"/><IconButton className="theme-toggle-button" aria-label={theme==='dark'?'Activar modo claro':'Activar modo oscuro'} aria-pressed={theme==='dark'} title={theme==='dark'?'Cambiar a modo claro':'Cambiar a modo oscuro'} onClick={()=>setTheme(current=>current==='dark'?'light':'dark')}>{theme==='dark'?<Sun size={18}/>:<Moon size={18}/>}</IconButton><IconButton className="mobile-install-button" type="button" aria-label="Instalar app para Android" title="Instalar app para Android" onClick={()=>setModal('install-app')}><Smartphone size={18}/></IconButton><NotificationCenter key={notificationScope} {...notificationFeed}/><button type="button" className="topbar-profile-button" aria-label="Abrir mi perfil" onClick={()=>setPage('profile')}><Avatar initials={profileInitials(displayUserName)} tone="navy" imageUrl={userProfile.avatarUrl}/></button></div>{sharedPageStatus === 'loading' && <div className="clinic-loading-track" role="progressbar" aria-label="Cargando datos de la clínica" />}</header>
     <div className="content-area">
         {!sharedMode && <div className="demo-storage-banner" role="status"><ShieldCheck size={15}/> Modo de demostración: usa solo datos ficticios. Los cambios se guardan en este navegador; no es un sistema seguro para información real de pacientes. Conecta el proyecto Supabase de la clínica antes de usarlo en operación.</div>}
         {sharedMode && <SharedDataStatus status={sharedPageStatus} memberships={sharedDirectory.memberships} chooseClinic={sharedDirectory.chooseClinic} retry={sharedPageRetry}/>}
         <div className="shared-page-content" aria-busy={sharedMode && page !== 'profile' && sharedPageStatus === 'loading'} inert={sharedMode && page !== 'profile' && sharedPageStatus !== 'ready'}>
         {page==='overview' && <Overview sharedMode={sharedMode} canCreateAppointment={can('agenda.create')} timeZone={clinicTimeZone} patients={workspacePatients} appointments={workspaceAppointments} patientActivities={workspacePatientActivities} pendingDocs={pendingDocs} setPage={setPage} setModal={setModal} notify={notify} onNewAppointment={openNewAppointment} onOpenPatient={patient=>{setSelectedPatient(patient);setPatientRecordTab('overview');setModalReturn(null);setModal('patient')}} onOpenDocument={openPatientDocument}/>}
-        {page==='patients' && <PatientsPage key={`${activeWorkspaceSelection.businessId}:${activeWorkspaceSelection.branchId}`} patients={filteredPatients} allPatients={workspacePatients} query={query} setQuery={setQuery} searchRef={patientSearchRef} setModal={setModal} canCreatePatient={can('patients.create')} onOpen={p=>{setSelectedPatient(p);setPatientRecordTab('overview');setModalReturn(null);setModal('patient')}}/>}
+        {page==='patients' && <PatientsPage key={`${activeWorkspaceSelection.businessId}:${activeWorkspaceSelection.branchId}`} patients={filteredPatients} allPatients={workspacePatients} query={query} setQuery={setQuery} searchRef={patientSearchRef} setModal={setModal} canCreatePatient={can('patients.create')} sharedMode={sharedMode} onOpen={p=>{setSelectedPatient(p);setPatientRecordTab('overview');setModalReturn(null);setModal('patient')}}/>}
         {!sharedMode&&page==='agenda' && <AgendaPage currentAccountProviderId={providers.find(provider=>provider.userId&&provider.userId===userProfile.userId)?.id||''} accountReady={profileLoaded&&sharedDirectory.status==='ready'} listEnd={agendaListEnd} setListEnd={setAgendaListEnd} timeZone={clinicTimeZone} appointments={filteredAppointments} payments={workspacePayments} providerFilter={providerFilter} setProviderFilter={setProviderFilter} providerOptions={providerOptions} branchFilter={branchFilter} setBranchFilter={updateAgendaBranchFilter} branchOptions={branchOptions} businessFilter={businessFilter} setBusinessFilter={updateAgendaBusinessFilter} businessOptions={businessOptions} period={period} setPeriod={setPeriod} onNewAppointment={openNewAppointment} canCreateAppointment onEditAppointment onCancelAppointment notify={notify} agendaDate={agendaDate} setAgendaDate={setAgendaDate} onOpenAppointment={appointment=>{setSelectedAppointment(appointment);setModal('appointment')}}/>}
         {sharedMode&&page==='agenda'&&<AgendaPage currentAccountProviderId={providers.find(provider=>provider.userId&&provider.userId===userProfile.userId)?.id||''} accountReady={profileLoaded&&sharedDirectory.status==='ready'} listEnd={agendaListEnd} setListEnd={setAgendaListEnd} timeZone={clinicTimeZone} appointments={filteredAppointments} payments={[]} sharedMode providerFilter={providerFilter} setProviderFilter={setProviderFilter} providerOptions={providerOptions} branchFilter={branchFilter} setBranchFilter={updateAgendaBranchFilter} branchOptions={branchOptions} businessFilter={businessFilter} setBusinessFilter={updateAgendaBusinessFilter} businessOptions={businessOptions} period={period} setPeriod={setPeriod} onNewAppointment={openNewAppointment} canCreateAppointment={can('agenda.create')} canEditAppointment={can('agenda.edit')} canCancelAppointment={can('agenda.cancel')} notify={notify} agendaDate={agendaDate} setAgendaDate={setAgendaDate} onOpenAppointment={appointment=>{setSelectedAppointment(appointment);setModal('appointment')}}/>}
         {page==='payments' && <FinanceWorkspace expenses={<ClinicExpenseLedger clinicId={sharedDirectory.clinicId} sharedMode={sharedMode}
@@ -1763,14 +1805,14 @@ function App({ children }) {
     </main>
     {modal==='install-app' && <Modal className="mobile-install-modal" title="Instalar Elixir Clinic para Android" subtitle="Escanea el código con tu teléfono o copia el enlace." close={()=>setModal(null)}><MobileInstallLink /></Modal>}
     {modal==='confirm-logout'&&<Modal title="Cerrar sesión" subtitle="¿Quieres salir de tu cuenta en este dispositivo?" close={()=>setModal(null)}><div className="modal-actions"><button type="button" className="button secondary" onClick={()=>setModal(null)}>Cancelar</button><form action={async formData=>{await unlinkPushOnSignOut(formData);await signOut(formData)}}><button type="submit" className="button primary">Cerrar sesión</button></form></div></Modal>}
-    {modal==='patient' && selectedPatient && <PatientModal patient={selectedPatient} activeRecordTab={patientRecordTab} setActiveRecordTab={setPatientRecordTab} clinicalBackground={sharedMode?selectedPatient.clinicalBackground:demoClinicalBackgrounds.find(item=>item.patientId===selectedPatient.id)||selectedPatient.clinicalBackground} packagePanel={<PatientPackagePanel key={selectedPatient.id} patient={selectedPatient} clinicId={sharedDirectory.clinicId} sharedMode={sharedMode} timeZone={clinicTimeZone} canCreate={can('payments.create')} services={serviceCatalog} promotions={promotionData.rows} demoPurchases={demoPackages} appointments={demoAppointments} payments={demoPayments} onDemoPurchase={purchase=>setDemoPackages(items=>[purchase,...items.filter(item=>item.id!==purchase.id)])}/>} appointments={workspaceAppointments} activities={workspacePatientActivities.filter(activity=>activity.patientId===selectedPatient.id)} clinicalHistory={sharedMode?(selectedPatient.clinicalHistory||[]):demoClinicalHistory.filter(item=>item.patientId===selectedPatient.id)} botoxTreatments={sharedMode?(selectedPatient.botoxTreatments||[]):demoBotoxTreatments.filter(item=>item.patientId===selectedPatient.id)} procedures={sharedMode?(selectedPatient.procedures||[]):demoProcedures.filter(item=>item.patientId===selectedPatient.id)} recordFiles={sharedMode?(selectedPatient.recordFiles||[]):demoRecordFiles.filter(item=>item.patientId===selectedPatient.id)} sharedMode={sharedMode} canEditPatient={can('patients.edit')} canDiagnose={can('clinical.edit')} canWriteClinical={can('clinical.create')} canPrepareContract={can('documents.create')} canPrepareConsent={can('documents.create')} canCreateAppointment={can('agenda.create')} close={()=>setModal(null)} notify={notify} onAddActivity={()=>openPatientRecordModal('new-patient-activity')} onClinicalBackground={()=>openPatientRecordModal('patient-clinical-background')} onNewEncounter={()=>openPatientRecordModal('new-clinical-encounter')} onNewBotoxTreatment={()=>openPatientRecordModal('new-botox-treatment')} onNewProcedure={()=>openPatientRecordModal('new-patient-procedure')} onAddRecordFile={()=>openPatientRecordModal('new-patient-file')} onOpenRecordFile={openPatientFile} onEdit={()=>openPatientRecordModal('edit-patient')} onDiagnosis={()=>openPatientRecordModal('diagnosis')} onNewAppointment={()=>openNewAppointment(agendaDate,'17:00',selectedPatient.id)} onPrepareContract={()=>openContractPreparation(selectedPatient.id,'patient')} onPrepareConsent={()=>openConsentPreparation(selectedPatient.id,'patient')} onOpenContract={()=>openPatientDocument(selectedPatient,'contract','patient')} onOpenConsent={()=>openPatientDocument(selectedPatient,'consent','patient')} onOpenDocumentRecord={record=>openPatientDocumentRecord(selectedPatient,record,'patient')}/>}
+    {modal==='patient' && selectedPatient && <PatientModal patient={selectedPatient} activeRecordTab={patientRecordTab} setActiveRecordTab={setPatientRecordTab} clinicalBackground={sharedMode?selectedPatient.clinicalBackground:demoClinicalBackgrounds.find(item=>item.patientId===selectedPatient.id)||selectedPatient.clinicalBackground} packagePanel={<PatientPackagePanel key={selectedPatient.id} patient={selectedPatient} clinicId={sharedDirectory.clinicId} sharedMode={sharedMode} timeZone={clinicTimeZone} canCreate={can('payments.create')} services={serviceCatalog} promotions={promotionData.rows} demoPurchases={demoPackages} appointments={demoAppointments} payments={demoPayments} onDemoPurchase={purchase=>setDemoPackages(items=>[purchase,...items.filter(item=>item.id!==purchase.id)])}/>} appointments={workspaceAppointments} activities={workspacePatientActivities.filter(activity=>activity.patientId===selectedPatient.id)} clinicalHistory={sharedMode?(selectedPatient.clinicalHistory||[]):demoClinicalHistory.filter(item=>item.patientId===selectedPatient.id)} botoxTreatments={sharedMode?(selectedPatient.botoxTreatments||[]):demoBotoxTreatments.filter(item=>item.patientId===selectedPatient.id)} procedures={sharedMode?(selectedPatient.procedures||[]):demoProcedures.filter(item=>item.patientId===selectedPatient.id)} recordFiles={sharedMode?(selectedPatient.recordFiles||[]):demoRecordFiles.filter(item=>item.patientId===selectedPatient.id)} sharedMode={sharedMode} canEditPatient={can('patients.edit')} canDiagnose={can('clinical.edit')} canWriteClinical={can('clinical.create')} canPrepareContract={can('documents.create')} canPrepareConsent={can('documents.create')} canCreateAppointment={can('agenda.create')} close={()=>setModal(null)} notify={notify} onAddActivity={()=>openPatientRecordModal('new-patient-activity')} onClinicalBackground={()=>openPatientRecordModal('patient-clinical-background')} onNewEncounter={()=>openPatientRecordModal('new-clinical-encounter')} onNewBotoxTreatment={()=>openPatientRecordModal('new-botox-treatment')} onNewProcedure={()=>openProcedure(null)} onEditProcedure={openProcedure} onDeleteProcedure={deleteProcedure} procedurePending={procedurePending} onAddRecordFile={()=>openPatientRecordModal('new-patient-file')} onOpenRecordFile={openPatientFile} onEdit={()=>openPatientRecordModal('edit-patient')} onDiagnosis={()=>openPatientRecordModal('diagnosis')} onNewAppointment={()=>openNewAppointment(agendaDate,'17:00',selectedPatient.id)} onPrepareContract={()=>openContractPreparation(selectedPatient.id,'patient')} onPrepareConsent={()=>openConsentPreparation(selectedPatient.id,'patient')} onOpenContract={()=>openPatientDocument(selectedPatient,'contract','patient')} onOpenConsent={()=>openPatientDocument(selectedPatient,'consent','patient')} onOpenDocumentRecord={record=>openPatientDocumentRecord(selectedPatient,record,'patient')}/>}
     {modal==='appointment' && selectedAppointment && <AppointmentModal serviceCatalog={serviceCatalog} timeZone={clinicTimeZone} onRecordArrival={recordAppointmentArrival} sharedMode={sharedMode} canEditAppointment={can('agenda.edit')} canCancelAppointment={can('agenda.cancel')} canCreatePayment={can('payments.create')} canManagePayments={!sharedMode||can('payments.create')} paymentDataReady={!sharedMode||sharedPaymentWorkspace.status==='ready'} appointment={selectedAppointment} businesses={workspaceBusinesses} branches={workspaceBranches} providers={workspaceProviders} payments={workspacePayments.filter(payment=>payment.appointmentId===selectedAppointment.id)} close={()=>{setModal(null);setSelectedAppointment(null)}} onSubmit={updateAppointment} onCancelAppointment={()=>cancelAppointment(selectedAppointment)} onOpenPatient={openPatientFromAppointment} onAddPayment={()=>openPaymentModal(selectedAppointment.id)}/>}
     {modal==='new-payment' && <PaymentModal sharedMode={sharedMode} clinicId={sharedDirectory.clinicId} demoPurchases={demoPackages} demoAppointments={demoAppointments} demoPayments={demoPayments} close={()=>{setModal(modalReturn==='appointment'?'appointment':null);setModalReturn(null)}} onSubmit={createPayment} canRefund={can('payments.refund')} defaultDate={paymentDefaults.date} defaultAppointmentId={paymentDefaults.appointmentId} patients={workspacePaymentPatients} appointments={selectedAppointment?[...workspacePaymentAppointments.filter(item=>item.id!==selectedAppointment.id),selectedAppointment]:workspacePaymentAppointments} payments={workspacePayments}/>}
     {modal==='new-patient-activity' && selectedPatient && <Modal title="Registrar seguimiento" subtitle={`${selectedPatient.name} · Expediente ${selectedPatient.id}`} close={returnToPatientRecord}><form onSubmit={addPatientActivity} className="form-stack"><input type="hidden" name="patientId" value={selectedPatient.id}/><label>Tipo de actividad<select name="type" defaultValue="Seguimiento"><option>Seguimiento</option><option>Llamada</option><option>Mensaje</option><option>Administrativa</option><option>Otro</option></select></label><label>Nota<textarea name="note" rows="4" maxLength="1000" placeholder="Resumen de llamada, acuerdo o pendiente. No agregues datos clínicos sensibles." required autoFocus/></label><div className="form-note"><ShieldCheck size={15}/> {sharedMode?'Nota guardada en la base compartida del consultorio.':'Nota interna de demostración, guardada solo en este navegador.'}</div><div className="modal-actions"><button type="button" className="button secondary" onClick={returnToPatientRecord}>Cancelar</button><button className="button primary" type="submit"><Check size={15}/> Guardar nota</button></div></form></Modal>}
     {modal==='patient-clinical-background' && selectedPatient && <ClinicalBackgroundModal patient={selectedPatient} clinicalBackground={sharedMode?selectedPatient.clinicalBackground:demoClinicalBackgrounds.find(item=>item.patientId===selectedPatient.id)||selectedPatient.clinicalBackground} sharedMode={sharedMode} close={returnToPatientRecord} onSubmit={savePatientClinicalHistory}/>}
     {modal==='new-clinical-encounter' && selectedPatient && <ClinicalEncounterModal patient={selectedPatient} appointments={workspaceAppointments.filter(item=>item.patientId===selectedPatient.id||item.patient===selectedPatient.name)} sharedMode={sharedMode} close={returnToPatientRecord} onSubmit={addClinicalEncounter}/>}
     {modal==='new-botox-treatment' && selectedPatient && <BotoxTreatmentModal patient={selectedPatient} appointments={workspaceAppointments.filter(item=>item.patientId===selectedPatient.id||item.patient===selectedPatient.name)} sharedMode={sharedMode} close={returnToPatientRecord} onSubmit={addBotoxTreatment}/>}
-    {modal==='new-patient-procedure' && selectedPatient && <ProcedureModal patient={selectedPatient} appointments={workspaceAppointments.filter(item=>item.patientId===selectedPatient.id||item.patient===selectedPatient.name)} sharedMode={sharedMode} close={returnToPatientRecord} onSubmit={addProcedure}/>}
+    {modal==='new-patient-procedure' && selectedPatient && <ProcedureModal patient={selectedPatient} appointments={workspaceAppointments.filter(item=>item.patientId===selectedPatient.id||item.patient===selectedPatient.name)} record={editingProcedure} pending={procedurePending} sharedMode={sharedMode} close={returnToPatientRecord} onSubmit={saveProcedure}/>}
     {modal==='new-patient-file' && selectedPatient && <PatientFileModal patient={selectedPatient} sharedMode={sharedMode} close={returnToPatientRecord} onSubmit={attachPatientFile}/>}
     {modal==='diagnosis' && selectedPatient && <DiagnosisModal patient={selectedPatient} sharedMode={sharedMode} close={returnToPatientRecord} onAccept={acceptDiagnosis}/>}
     {modal==='contract-prompt' && selectedPatient && <ContractPromptModal patient={selectedPatient} close={returnToPatientRecord} onViewContract={()=>{setSelectedContractRecordId(latestDocumentRecord(selectedPatient,'contract')?.id || '');setModal('contract-view')}} onPrepareContract={()=>openContractPreparation(selectedPatient.id, 'patient')}/>}
@@ -2235,7 +2277,7 @@ function Overview({patients,appointments,patientActivities,pendingDocs,setPage,s
 function MetricCard({label,value,change,attention=false}) { return <article className={`metric-card${attention?' attention':''}`} role="listitem"><span className="metric-label">{label}</span><strong className="metric-value">{value}</strong><span className={`metric-change${attention?' attention':''}`}>{attention&&<span className="attention-dot" aria-hidden="true"/>}{change}</span></article>; }
 function TaskItem({icon:Icon,tint,title,subtitle,time,action,onClick}) { return <div className="task-item"><div className={`task-icon ${tint}`}><Icon size={16}/></div><div className="task-copy"><strong>{title}</strong><span>{subtitle}</span><small><Clock3 size={11}/>{time}</small></div><button onClick={onClick}>{action}<ChevronRight size={14}/></button></div>; }
 
-function PatientsPage({patients,allPatients,query,setQuery,searchRef,setModal,onOpen,canCreatePatient=true}) {
+function PatientsPage({patients,allPatients,query,setQuery,searchRef,setModal,onOpen,canCreatePatient=true,sharedMode=false}) {
  const [filter,setFilter]=useState('Todos');
  const [documentFilter,setDocumentFilter]=useState('Todos');
  const [branchFilter,setBranchFilter]=useState('Todas las sucursales');
@@ -2255,7 +2297,7 @@ function PatientsPage({patients,allPatients,query,setQuery,searchRef,setModal,on
  const shown=filtered.slice((page-1)*pageSize,page*pageSize);
  const pendingPatients=allPatients.filter(patient=>patient.contract==='Pendiente'||patient.consent==='Pendiente').length;
  const clearFilters=()=>{setQuery('');setFilter('Todos');setDocumentFilter('Todos');setBranchFilter('Todas las sucursales');setProviderFilter('Todas las personas');};
- return <><PageTitle eyebrow="DIRECTORIO CLÍNICO" title="Pacientes" description="Expedientes, documentos y seguimiento en un solo lugar." action={canCreatePatient&&<button className="button primary" onClick={()=>setModal('new-patient')}><Plus size={16}/> Agregar paciente</button>}/><div className="summary-strip patient-directory-summary"><div><UsersRound size={16}/><strong>{allPatients.length}</strong><span>pacientes en el directorio</span></div><i/><div><span className="summary-dot green"/><strong>{allPatients.filter(patient=>patient.status==='Activo').length}</strong><span>activos</span></div><i/><div><span className="summary-dot orange"/><strong>{pendingPatients}</strong><span>expedientes con documentos pendientes</span></div><div className="summary-side-note"><ShieldCheck size={14}/> Datos de demostración</div></div><section className="panel data-panel patients-directory-table"><div className="table-toolbar"><div className="filter-tabs">{['Todos','Activos','Nuevos','Docs pendientes'].map(label=><button className={filter===label?'selected':''} onClick={()=>setFilter(label)} key={label}>{label}{label==='Todos'?<span>{allPatients.length}</span>:label==='Docs pendientes'?<span>{pendingPatients}</span>:null}</button>)}</div><div className="table-actions"><label className="input-search"><Search size={15}/><input ref={searchRef} value={query} onChange={event=>setQuery(event.target.value)} placeholder="Buscar nombre, expediente, correo…"/><kbd>⌘ K</kbd></label><button className="button outline compact" aria-expanded={filtersOpen} onClick={()=>setFiltersOpen(open=>!open)}><SlidersHorizontal size={15}/> Filtros</button><button className="icon-button outline" onClick={clearFilters} aria-label="Limpiar búsqueda y filtros"><ListFilter size={16}/></button></div></div>{filtersOpen&&<div className="agenda-filter-panel patient-filter-panel"><label className="select-filter"><Activity size={15}/><select aria-label="Filtrar pacientes por sucursal" value={branchFilter} onChange={event=>setBranchFilter(event.target.value)}><option>Todas las sucursales</option>{branches.map(branch=><option key={branch}>{branch}</option>)}</select><ChevronDown size={14}/></label><label className="select-filter"><UserRound size={15}/><select aria-label="Filtrar pacientes por profesional" value={providerFilter} onChange={event=>setProviderFilter(event.target.value)}><option>Todas las personas</option>{providers.map(provider=><option key={provider}>{provider}</option>)}</select><ChevronDown size={14}/></label><label className="select-filter"><FileCheck2 size={15}/><select aria-label="Filtrar pacientes por documento" value={documentFilter} onChange={event=>setDocumentFilter(event.target.value)}><option>Todos</option><option>Contrato pendiente</option><option>Consentimiento pendiente</option><option>Ambos pendientes</option></select><ChevronDown size={14}/></label><span className="panel-subtitle">Los filtros se combinan con la búsqueda, el estado y los documentos.</span></div>}<div className="table-wrap"><table><thead><tr><th>PACIENTE</th><th>ÚLTIMA ACTIVIDAD</th><th>TRATAMIENTO</th><th>CONTRATO</th><th>CONSENTIMIENTO</th><th>ESTADO</th><th></th></tr></thead><tbody>{shown.map(patient=><tr key={patient.id} onClick={()=>onOpen(patient)} className="clickable-row"><td><div className="patient-cell"><Avatar initials={patient.initials} tone={patient.tone}/><div><strong>{patient.name}</strong><span>{patient.id}</span></div></div></td><td className="last-cell">{patient.last}</td><td><span className="treatment-cell">{patient.treatment}</span></td><td><DocStatus status={patient.contract}/></td><td><DocStatus status={patient.consent}/></td><td><Badge variant={patient.status==='Activo'?'active':patient.status==='Nuevo'?'new':'followup'}><span className="badge-dot"/>{patient.status}</Badge></td><td><button className="row-more" aria-label={`Abrir expediente de ${patient.name}`} onClick={event=>{event.stopPropagation();onOpen(patient)}}><MoreHorizontal size={17}/></button></td></tr>)}</tbody></table>{shown.length===0&&<div className="empty-state"><Search size={20}/><strong>No encontramos pacientes</strong><span>Prueba con otros filtros o limpia la búsqueda.</span></div>}</div><div className="table-bottom"><span>Mostrando <strong>{filtered.length?((page-1)*pageSize)+1:0}–{Math.min(page*pageSize,filtered.length)}</strong> de <strong>{filtered.length}</strong> resultados</span><div className="pagination"><button aria-label="Página anterior" disabled={page<=1} onClick={()=>setPage(current=>Math.max(1,current-1))}><ChevronLeft size={15}/></button><span className="page-number active">{page} de {pageCount}</span><button aria-label="Página siguiente" disabled={page>=pageCount} onClick={()=>setPage(current=>Math.min(pageCount,current+1))}><ChevronRight size={15}/></button></div><label className="per-page">Filas por página <select aria-label="Filas por página" value={pageSize} onChange={event=>setPageSize(Number(event.target.value))}><option value={5}>5</option><option value={10}>10</option><option value={20}>20</option><option value={50}>50</option></select></label></div></section></>;
+ return <><PageTitle eyebrow="DIRECTORIO CLÍNICO" title="Pacientes" description="Expedientes, documentos y seguimiento en un solo lugar." action={canCreatePatient&&<button className="button primary" onClick={()=>setModal('new-patient')}><Plus size={16}/> Agregar paciente</button>}/><div className="summary-strip patient-directory-summary"><div><UsersRound size={16}/><strong>{allPatients.length}</strong><span>pacientes en el directorio</span></div><i/><div><span className="summary-dot green"/><strong>{allPatients.filter(patient=>patient.status==='Activo').length}</strong><span>activos</span></div><i/><div><span className="summary-dot orange"/><strong>{pendingPatients}</strong><span>expedientes con documentos pendientes</span></div><div className="summary-side-note"><ShieldCheck size={14}/> {sharedMode?'Datos compartidos':'Datos de demostración'}</div></div><section className="panel data-panel patients-directory-table"><div className="table-toolbar"><div className="filter-tabs">{['Todos','Activos','Nuevos','Docs pendientes'].map(label=><button className={filter===label?'selected':''} onClick={()=>setFilter(label)} key={label}>{label}{label==='Todos'?<span>{allPatients.length}</span>:label==='Docs pendientes'?<span>{pendingPatients}</span>:null}</button>)}</div><div className="table-actions"><label className="input-search"><Search size={15}/><input ref={searchRef} value={query} onChange={event=>setQuery(event.target.value)} placeholder="Buscar nombre, expediente, correo…"/></label><button className="button outline compact" aria-expanded={filtersOpen} onClick={()=>setFiltersOpen(open=>!open)}><SlidersHorizontal size={15}/> Filtros</button><button className="icon-button outline" onClick={clearFilters} aria-label="Limpiar búsqueda y filtros"><ListFilter size={16}/></button></div></div>{filtersOpen&&<div className="agenda-filter-panel patient-filter-panel"><label className="select-filter"><Activity size={15}/><select aria-label="Filtrar pacientes por sucursal" value={branchFilter} onChange={event=>setBranchFilter(event.target.value)}><option>Todas las sucursales</option>{branches.map(branch=><option key={branch}>{branch}</option>)}</select><ChevronDown size={14}/></label><label className="select-filter"><UserRound size={15}/><select aria-label="Filtrar pacientes por profesional" value={providerFilter} onChange={event=>setProviderFilter(event.target.value)}><option>Todas las personas</option>{providers.map(provider=><option key={provider}>{provider}</option>)}</select><ChevronDown size={14}/></label><label className="select-filter"><FileCheck2 size={15}/><select aria-label="Filtrar pacientes por documento" value={documentFilter} onChange={event=>setDocumentFilter(event.target.value)}><option>Todos</option><option>Contrato pendiente</option><option>Consentimiento pendiente</option><option>Ambos pendientes</option></select><ChevronDown size={14}/></label><span className="panel-subtitle">Los filtros se combinan con la búsqueda, el estado y los documentos.</span></div>}<div className="table-wrap"><table><thead><tr><th>PACIENTE</th><th>ÚLTIMA ACTIVIDAD</th><th>TRATAMIENTO</th><th>CONTRATO</th><th>CONSENTIMIENTO</th><th>ESTADO</th><th></th></tr></thead><tbody>{shown.map(patient=><tr key={patient.id} onClick={()=>onOpen(patient)} className="clickable-row"><td><div className="patient-cell"><Avatar initials={patient.initials} tone={patient.tone}/><div><strong>{patient.name}</strong><span>{patient.id}</span></div></div></td><td className="last-cell">{patient.last}</td><td><span className="treatment-cell">{patient.treatment}</span></td><td><DocStatus status={patient.contract}/></td><td><DocStatus status={patient.consent}/></td><td><Badge variant={patient.status==='Activo'?'active':patient.status==='Nuevo'?'new':'followup'}><span className="badge-dot"/>{patient.status}</Badge></td><td><button className="row-more" aria-label={`Abrir expediente de ${patient.name}`} onClick={event=>{event.stopPropagation();onOpen(patient)}}><MoreHorizontal size={17}/></button></td></tr>)}</tbody></table>{shown.length===0&&<div className="empty-state"><Search size={20}/><strong>No encontramos pacientes</strong><span>Prueba con otros filtros o limpia la búsqueda.</span></div>}</div><div className="table-bottom"><span>Mostrando <strong>{filtered.length?((page-1)*pageSize)+1:0}–{Math.min(page*pageSize,filtered.length)}</strong> de <strong>{filtered.length}</strong> resultados</span><div className="pagination"><button aria-label="Página anterior" disabled={page<=1} onClick={()=>setPage(current=>Math.max(1,current-1))}><ChevronLeft size={15}/></button><span className="page-number active">{page} de {pageCount}</span><button aria-label="Página siguiente" disabled={page>=pageCount} onClick={()=>setPage(current=>Math.min(pageCount,current+1))}><ChevronRight size={15}/></button></div><label className="per-page">Filas por página <select aria-label="Filas por página" value={pageSize} onChange={event=>setPageSize(Number(event.target.value))}><option value={5}>5</option><option value={10}>10</option><option value={20}>20</option><option value={50}>50</option></select></label></div></section></>;
 }
 function agendaSlotTime(index) {
   const totalMinutes = 6 * 60 + index * 15;
@@ -2854,7 +2896,7 @@ function TeamPage({businesses,branches,providers,setModal,notify,onEditBranch,on
   return <><PageTitle title="Equipo y sucursales" description="Administra los negocios, ubicaciones y profesionales que aparecen en la agenda."/><div className="team-layout"><section className="panel team-panel"><div className="panel-heading padded"><div><div className="panel-title">Equipo clínico</div><p className="panel-subtitle">{providers.filter(item=>item.active).length} profesionales activos</p></div>{canManageProviders&&<button className="more-button" onClick={()=>setModal('new-provider')} aria-label="Agregar profesional"><Plus size={18}/></button>}</div><div className="team-list">{accountDirectory.error&&<p className="professional-error" role="alert">{accountDirectory.error} <button className="button outline compact" onClick={accountDirectory.reload}>Reintentar</button></p>}{providers.filter(item=>item.active).map(provider=><div className="team-member" key={provider.id}><Avatar initials={provider.initials||provider.name.split(/\s+/).slice(0,2).map(part=>part[0]).join('').toUpperCase()} tone={provider.tone||'blue'} imageUrl={accountFor(provider)?.avatarUrl} size="large"/><div className="team-person"><div className="professional-name-line"><strong>{professionalName(provider)}</strong>{provider.userId&&<span className="professional-link-icon" role="img" aria-label="Cuenta vinculada" title={accountFor(provider)?.email?`Cuenta vinculada: ${accountFor(provider).email}`:'Cuenta vinculada'}><Link2 size={14}/></span>}</div><span>{provider.role}</span><small><Activity size={12}/>{branchNamesForProvider(provider)}</small></div><span className="team-presence"><i/> Activo</span>{canManageProviders&&<button className="row-more" onClick={()=>onEditProvider(provider)} aria-label={`Editar profesional ${professionalName(provider)}`}><MoreHorizontal size={17}/></button>}</div>)}</div></section><section className="panel team-panel branch-panel"><div className="panel-heading padded"><div><div className="panel-title">Sucursales</div><p className="panel-subtitle">{branches.filter(item=>item.active).length} ubicaciones habilitadas</p></div>{canManageBusinesses&&<button className="icon-button outline" onClick={()=>setModal('new-branch')} aria-label="Agregar sucursal"><Plus size={16}/></button>}</div>{branches.filter(item=>item.active).map((branch,index)=><div className="branch-row" key={branch.id}><div className={`branch-icon branch-${index%3}`}><Activity size={16}/></div><div><strong>{branch.name}</strong><span>{branch.address||'Dirección pendiente'}</span>{branch.phone&&<small>{branch.phone}</small>}{branch.hours&&<small>{branch.hours}</small>}</div><span className="branch-active"><i/>Activa</span>{canManageBusinesses&&<button className="row-more" onClick={()=>onEditBranch(branch)} aria-label={`Editar sucursal ${branch.name}`}><Settings2 size={15}/></button>}</div>)}</section><section className="panel team-panel business-panel"><div className="panel-heading padded"><div><div className="panel-title">Negocios</div><p className="panel-subtitle">Agendas y sucursales agrupadas por negocio</p></div>{canManageBusinesses&&<button className="button outline compact" onClick={()=>setModal('new-business')}><Plus size={15}/> Agregar negocio</button>}</div><div className="business-list">{businesses.filter(item=>item.active).map(business=>{const count=branches.filter(branch=>branch.active&&branch.businessId===business.id).length;return <div className="business-row" key={business.id}><div className="branch-icon"><Building2 size={16}/></div><div><strong>{business.name}</strong><span>{count} {count===1?'sucursal activa':'sucursales activas'}</span></div><Badge variant="active"><span className="badge-dot"/>Activo</Badge></div>})}{businesses.filter(item=>item.active).length===0&&<div className="empty-inline">Aún no hay negocios. Agrega uno para empezar.</div>}</div></section></div></>;
 }
 
-function PatientModal({patient,activeRecordTab,setActiveRecordTab,clinicalBackground=null,packagePanel,appointments,activities,clinicalHistory=[],botoxTreatments=[],procedures=[],recordFiles=[],sharedMode=false,canEditPatient=true,canCreateAppointment=true,canDiagnose=true,canWriteClinical=true,canPrepareContract=true,canPrepareConsent=true,close,notify,onAddActivity,onClinicalBackground,onNewEncounter,onNewBotoxTreatment,onNewProcedure,onAddRecordFile,onOpenRecordFile,onEdit,onDiagnosis,onNewAppointment,onPrepareContract,onPrepareConsent,onOpenContract,onOpenConsent,onOpenDocumentRecord}) {
+function PatientModal({patient,activeRecordTab,setActiveRecordTab,clinicalBackground=null,packagePanel,appointments,activities,clinicalHistory=[],botoxTreatments=[],procedures=[],recordFiles=[],sharedMode=false,canEditPatient=true,canCreateAppointment=true,canDiagnose=true,canWriteClinical=true,canPrepareContract=true,canPrepareConsent=true,close,notify,onAddActivity,onClinicalBackground,onNewEncounter,onNewBotoxTreatment,onNewProcedure,onEditProcedure,onDeleteProcedure,procedurePending,onAddRecordFile,onOpenRecordFile,onEdit,onDiagnosis,onNewAppointment,onPrepareContract,onPrepareConsent,onOpenContract,onOpenConsent,onOpenDocumentRecord}) {
   const selectRecordTab=(event,tab)=>{setActiveRecordTab(tab);event.currentTarget.closest('.modal')?.scrollTo({top:0,behavior:'instant'});};
   const patientAppointments=appointments.filter(appointment=>appointment.patientId===patient.id||appointment.patient===patient.name).sort((a,b)=>`${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`));
   const sortedActivities=[...activities].sort((a,b)=>b.createdAt.localeCompare(a.createdAt));
@@ -2896,7 +2938,33 @@ function PatientModal({patient,activeRecordTab,setActiveRecordTab,clinicalBackgr
   </div>
   <div className="patient-record-panel" role="tabpanel" id="patient-record-panel-procedures" aria-labelledby="patient-record-tab-procedures" tabIndex={0} hidden={activeRecordTab!=='procedures'}>
    <section className="patient-activity-box botox-treatment-box"><div className="panel-title"><span>Tratamientos de Botox</span><div className="record-actions"><span>{botoxTreatments.length} sesiones</span>{canWriteClinical&&<button className="button outline compact" onClick={onNewBotoxTreatment}><Plus size={13}/> Registrar sesión</button>}</div></div>{botoxTreatments.map(record=><article className="patient-activity-row clinical-encounter" key={record.id}><div className="patient-activity-meta"><strong>{record.product}</strong><time dateTime={record.performedAt}>{record.performedAt?new Intl.DateTimeFormat('es-MX',{dateStyle:'medium',timeStyle:'short'}).format(new Date(record.performedAt)):'Fecha no registrada'}</time></div><div className="botox-record-facts"><span><b>Lote:</b> {record.lotNumber}</span><span><b>Unidades totales:</b> {record.totalUnits}</span>{record.expirationDate&&<span><b>Caducidad:</b> {formatRecordDate(record.expirationDate)}</span>}</div><p><b>Áreas y unidades por área:</b> {record.treatmentAreas}</p>{record.followUp&&<p><b>Seguimiento:</b> {record.followUp}</p>}{record.consentDocumentId&&<p><b>Consentimiento vinculado:</b> {(patient.consentHistory||[]).find(item=>item.id===record.consentDocumentId)?.title||'Documento firmado'}</p>}{record.consentFileId&&<p><b>Consentimiento vinculado:</b> {(patient.recordFiles||[]).find(item=>item.id===record.consentFileId)?.title||'Archivo firmado'}</p>}</article>)}{botoxTreatments.length===0&&<div className="empty-inline">Aún no hay sesiones registradas.</div>}</section>
-   <section className="patient-activity-box procedure-record-box"><div className="panel-title"><span>Notas post procedimiento</span><div className="record-actions"><span>{procedures.length} registros</span>{canWriteClinical&&<button className="button outline compact" onClick={onNewProcedure}><Plus size={13}/> Registrar procedimiento</button>}</div></div>{procedures.map(record=><article className="patient-activity-row clinical-encounter" key={record.id}><div className="patient-activity-meta"><strong>{record.procedureType}{record.product?` · ${record.product}`:''}</strong><time dateTime={record.performedAt}>{record.performedAt?new Intl.DateTimeFormat('es-MX',{dateStyle:'medium',timeStyle:'short'}).format(new Date(record.performedAt)):'Fecha no registrada'}</time></div>{record.lotNumber&&<p><b>Lote:</b> {record.lotNumber}</p>}<div className="procedure-zone-list">{(record.zones||[]).map((zone,index)=><span key={`${zone.name}-${index}`}>{zone.name}{zone.dose?` · ${zone.dose}`:''}</span>)}</div>{record.followUp&&<p><b>Indicaciones y seguimiento:</b> {record.followUp}</p>}</article>)}{procedures.length===0&&<div className="empty-inline">Registra el procedimiento, las zonas tratadas y las indicaciones posteriores.</div>}</section>
+   <section className="procedure-record-box" aria-labelledby="procedure-notes-title">
+    <header className="procedure-record-header">
+     <div>
+      <h3 id="procedure-notes-title">Notas post procedimiento</h3>
+      <span>{procedures.length} {procedures.length === 1 ? 'registro' : 'registros'}</span>
+     </div>
+     {canWriteClinical && <button type="button" className="button primary" onClick={onNewProcedure}><Plus size={16} aria-hidden="true"/> Registrar procedimiento</button>}
+    </header>
+    {procedures.map(record => (
+     <article className="procedure-record-row" key={record.id}>
+      <div className="procedure-record-details">
+       <h4>{record.procedureType}{record.product ? ` · ${record.product}` : ''}</h4>
+       <div className="procedure-record-meta">
+        <time dateTime={record.performedAt}><CalendarDays size={14} aria-hidden="true"/>{record.performedAt ? new Intl.DateTimeFormat('es-MX', {dateStyle:'medium', timeStyle:'short'}).format(new Date(record.performedAt)) : 'Fecha no registrada'}</time>
+        {record.lotNumber && <span><b>Lote:</b> {record.lotNumber}</span>}
+       </div>
+       {record.followUp && <p className="procedure-record-followup"><b>Indicaciones y seguimiento</b>{record.followUp}</p>}
+      </div>
+      <ProcedureFaceThumbnail zones={record.zones || []}/>
+      {canDiagnose && <div className="procedure-record-actions">
+       <button type="button" aria-label="Editar procedimiento" disabled={procedurePending} onClick={()=>onEditProcedure(record)}><PenLine size={15} aria-hidden="true"/> Editar</button>
+       <button type="button" aria-label="Eliminar procedimiento" disabled={procedurePending} onClick={()=>onDeleteProcedure(record)}><Trash2 size={15} aria-hidden="true"/> Eliminar</button>
+      </div>}
+     </article>
+    ))}
+    {procedures.length === 0 && <p className="procedure-record-empty">Registra el procedimiento, las zonas tratadas y las indicaciones posteriores.</p>}
+   </section>
   </div>
   <div className="patient-record-panel" role="tabpanel" id="patient-record-panel-documents" aria-labelledby="patient-record-tab-documents" tabIndex={0} hidden={activeRecordTab!=='documents'}>
    <section className="patient-activity-box patient-files-box"><div className="panel-title"><span>Documentos, estudios y fotografías</span><div className="record-actions"><span>{recordFiles.length} archivos</span>{canWriteClinical&&<button className="button outline compact" onClick={onAddRecordFile}><Plus size={13}/> Adjuntar archivo</button>}</div></div>{recordFiles.map(file=><article className="patient-record-file" key={file.id}><div><strong>{file.title}</strong><span>{file.kind==='consent'?'Consentimiento':file.kind==='contract'?'Contrato':file.kind==='study'?'Estudio':file.kind==='clinical_photo'?'Foto clínica':'Otro documento'}{file.signedAt?` · Firmado ${formatRecordDate(file.signedAt)}`:''} · {(file.byteSize/1024).toFixed(0)} KB</span></div><button type="button" className="button outline compact" onClick={()=>onOpenRecordFile(file)}><ArrowUpRight size={14}/> Abrir</button></article>)}{recordFiles.length===0&&<div className="empty-inline">Aquí aparecen consentimientos firmados, estudios y fotos clínicas privadas.</div>}</section>
@@ -2962,37 +3030,414 @@ const procedureMapViews = [
   ['neck-chest','Cuello y tórax'],['axillae','Axilas'],['hands','Manos'],['front','Cuerpo de frente'],['back','Cuerpo de espaldas'],
 ];
 
-function ProcedureAnatomyMap({ zones, toggleZone, setZoneDose, zoneName, setZoneName, dose, setDose, addCustom }) {
+const [faceLeft, , faceWidth] = procedureAnatomy.face.viewBox.split(' ').map(Number);
+const faceCenterX = faceLeft + faceWidth / 2;
+const facePointRecordType = 'face-points-v1';
+const isFacePointRecord = zone => zone.kind === facePointRecordType;
+const facePointLabel = point => [point.amount, point.unit].filter(Boolean).join(' ');
+
+const facePointDetail = point => [facePointLabel(point), point.note].filter(Boolean).join(' · ');
+
+function groupFacePointsByZone(points) {
+  const grouped = new Map();
+  for (const point of points) {
+    if (!point.zone) continue;
+    if (!grouped.has(point.zone)) grouped.set(point.zone, []);
+    grouped.get(point.zone).push(point);
+  }
+  return grouped;
+}
+
+function ProcedureZoneGlyph({name, view}) {
+  const includesZone = anatomy => anatomy.visible.some(index => anatomy.paths[index][4] === name);
+  const current = procedureAnatomy[view];
+  const anatomy = includesZone(current) ? current : Object.values(procedureAnatomy).find(includesZone);
+  if (!anatomy) return <PenLine size={19} className="procedure-zone-custom-glyph" aria-hidden="true"/>;
+  const {paths, visible, viewBox} = anatomy;
+  return <svg className="face-zone-glyph" viewBox={viewBox} aria-hidden="true" focusable="false">
+    {paths.map(([d, , stroke, , zone], index) => {
+      const highlighted = visible.includes(index) && zone === name;
+      return stroke === '#6b7280' || highlighted
+        ? <path key={index} d={d} data-highlight={highlighted || undefined}/>
+        : null;
+    })}
+  </svg>;
+}
+
+function ProcedureFaceThumbnail({zones}) {
+  const {viewBox, paths, visible} = procedureAnatomy.face;
+  const points = zones.filter(isFacePointRecord).flatMap(zone => zone.points || []);
+  const zoneNames = new Set(zones.filter(zone => !isFacePointRecord(zone)).map(zone => zone.name));
+  for (const point of points) if (point.zone) zoneNames.add(point.zone);
+  const description = points.map(point => [facePointLabel(point), point.zone, point.note].filter(Boolean).join(' · ') || 'Punto sin detalle').join('; ');
+
+  return <svg className="procedure-map-drawing procedure-face-thumbnail" viewBox={viewBox} role="img"
+    aria-label={points.length ? `Mapa facial · ${points.length} ${points.length === 1 ? 'punto' : 'puntos'}` : 'Mapa facial sin puntos'}>
+    {description && <title>{description}</title>}
+    {paths.map(([d, fill, stroke, strokeWidth, name], index) => <path key={index} {...{d, fill, stroke, strokeWidth}}
+      data-zone-selected={visible.includes(index) && zoneNames.has(name) || undefined}/>)}
+    {points.map(point => <FacePointMarker key={point.id} point={point} radius={8}/>)}
+  </svg>;
+}
+
+function FacePointMarker({point, radius: baseRadius, compact, active, dragHandlers, onSelect}) {
+  const radius = baseRadius * (compact ? 0.7225 : 0.85);
+  const quantity = point.amount.trim();
+  const label = [facePointLabel(point), point.zone, point.note].filter(Boolean).join(' · ') || 'sin detalle';
+  const labelWidth = Math.max(radius, radius * (.55 + quantity.length * .34));
+  return <g transform={`translate(${point.x} ${point.y})`} className="face-point-marker" data-active={active || undefined} data-hovered={point.hovered || undefined} data-draggable={!!dragHandlers || undefined}
+    {...dragHandlers}
+    role={onSelect ? 'button' : undefined} tabIndex={onSelect ? 0 : undefined}
+    aria-label={onSelect ? `Seleccionar punto: ${label}` : undefined}
+    onClick={onSelect ? event => { event.stopPropagation(); onSelect(); } : undefined}
+    onKeyDown={onSelect ? event => {
+      if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); event.stopPropagation(); onSelect(); }
+    } : undefined}>
+    <ellipse rx={labelWidth} ry={radius}/>
+    {quantity
+      ? <text textAnchor="middle" dominantBaseline="central" fontSize={radius * 1.18}>{quantity}</text>
+      : <circle className="face-point-dot" r={radius * .24}/>}
+  </g>;
+}
+
+function ProcedureAnatomyMap({ zones, toggleZone, setZoneDose, points, setPoints, zoneOrder }) {
   const [view, setView] = useState('face');
   const [zoom, setZoom] = useState(null);
+  const [drawingViewBox, setDrawingViewBox] = useState(procedureAnatomy.face.viewBox);
+  const drawingViewBoxRef = useRef(drawingViewBox);
+  const previousViewRef = useRef(view);
   const [listOpen, setListOpen] = useState(false);
   const clipId = useId();
+  const [mode, setMode] = useState(null);
+  const placement = mode === 'add';
+  const [inspectedZone, setInspectedZone] = useState(null);
+  const [activePointId, setActivePointId] = useState(null);
+  const [hoveredPointId, setHoveredPointId] = useState(null);
+  const [cursor, setCursor] = useState(null);
+  const [pendingMapRemoval, setPendingMapRemoval] = useState(null);
+  const baseViewBox = procedureAnatomy[view].viewBox;
+  const targetViewBox = zoom?.viewBox || baseViewBox;
+  useEffect(() => {
+    if (previousViewRef.current !== view) {
+      previousViewRef.current = view;
+      drawingViewBoxRef.current = baseViewBox;
+      setDrawingViewBox(baseViewBox);
+      return;
+    }
+
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      drawingViewBoxRef.current = targetViewBox;
+      setDrawingViewBox(targetViewBox);
+      return;
+    }
+
+    const from = drawingViewBoxRef.current.split(' ').map(Number);
+    const to = targetViewBox.split(' ').map(Number);
+    if (from.every((value, index) => value === to[index])) return;
+
+    const startedAt = performance.now();
+    const duration = zoom ? 620 : 420;
+    let frame;
+    const animate = now => {
+      const progress = Math.min(1, (now - startedAt) / duration);
+      const eased = 1 - Math.pow(1 - progress, 5);
+      const next = from.map((value, index) => value + (to[index] - value) * eased)
+        .map(value => Number(value.toFixed(3))).join(' ');
+      drawingViewBoxRef.current = next;
+      setDrawingViewBox(next);
+      if (progress < 1) frame = requestAnimationFrame(animate);
+    };
+    frame = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(frame);
+  }, [baseViewBox, targetViewBox, view, zoom]);
+  const pointRemovalDialog = useRef(null);
+  const cancelPointRemoval = useRef(null);
+  useEffect(() => {
+    if (pendingMapRemoval && !pointRemovalDialog.current.open) {
+      pointRemovalDialog.current.showModal();
+      cancelPointRemoval.current?.focus();
+    }
+  }, [pendingMapRemoval]);
+  const drawingRef = useRef(null);
+  const drawingContentRef = useRef(null);
+  const dragRef = useRef(null);
+  const [draggedPoint, setDraggedPoint] = useState(null);
+  useEffect(() => { if (placement) drawingRef.current?.focus({preventScroll: true}); }, [placement]);
+  const activePoint = points.find(point => point.id === activePointId);
+  const canMirrorPoint = placement && activePoint && Math.abs(activePoint.x - faceCenterX) > 0.01;
+  const showPoints = view === 'face' && !listOpen;
   const currentView = procedureMapViews.find(([key]) => key === view)[1];
-  const { viewBox, paths, visible } = procedureAnatomy[view];
-  const zoomView = zoom ? procedureFaceZoom[zoom] : null;
-  const drawingViewBox = zoomView?.viewBox || viewBox;
+  const { paths, visible } = procedureAnatomy[view];
+  const faceOverview = view === 'face' && !zoom;
+  const faceBleed = faceOverview ? 16 : 0;
   const [x, y, width, height] = drawingViewBox.split(' ').map(Number);
   const visiblePaths = new Set(visible);
-  const selectedNames = new Set(zones.map(zone => zone.name));
+  const pointsByZone = groupFacePointsByZone(points);
+  const manualZones = new Map(zones.map(zone => [zone.name, zone]));
+  const selectedNames = new Set([...manualZones.keys(), ...pointsByZone.keys()]);
+  const orderedNames = [...new Set([...zoneOrder.filter(name => selectedNames.has(name)), ...selectedNames])];
   const availableNames = [...new Set(visible.map(index => paths[index][4]))];
   const orientation = view === 'back' ? ['I', 'D'] : ['D', 'I'];
   const isProfile = view.startsWith('profile');
   const side = view === 'profile-right' ? 'D' : 'I';
 
+  const zoneInDetail = selectedNames.has(inspectedZone) ? inspectedZone : null;
+  const detailPoints = zoneInDetail ? pointsByZone.get(zoneInDetail) || [] : [];
+  const focusedPoint = showPoints && mode === 'add' && Boolean(activePoint);
+  const activePointIndex = activePoint ? points.findIndex(point => point.id === activePoint.id) : -1;
+  const pointPlacementActive = placement && Boolean(zoom);
+  const pointPlacementAction = zoneInDetail && <button type="button" className={`face-zone-add-application${pointPlacementActive ? ' is-active' : ''}`}
+    aria-label={pointPlacementActive ? `Cancelar agregar puntos en ${zoneInDetail}` : `Agregar puntos en ${zoneInDetail}`}
+    aria-pressed={pointPlacementActive}
+    onClick={() => toggleZonePointPlacement(zoneInDetail)}>
+    {pointPlacementActive ? <X size={15} aria-hidden="true"/> : <Plus size={15} aria-hidden="true"/>}
+    <span>{pointPlacementActive ? 'Cancelar' : 'Agregar puntos'}</span>
+  </button>;
+
+  function beginZoneSelection() {
+    setZoom(null);
+    setCursor(null);
+    setActivePointId(null);
+    setInspectedZone(null);
+    setListOpen(false);
+    setMode('choose-zone');
+  }
+
+  function finishZoneEntry() {
+    setMode(null);
+    setZoom(null);
+    setCursor(null);
+    setInspectedZone(null);
+    setActivePointId(null);
+    setHoveredPointId(null);
+  }
+
+  function backToZoneSummary() {
+    setActivePointId(null);
+    setCursor(null);
+    setMode(zoneInDetail ? 'zone-ready' : null);
+    if (!zoneInDetail) setZoom(null);
+  }
+
+  function zoomIntoZone(name, path) {
+    const presets = Object.values(procedureFaceZoom);
+    const bounds = path?.getBBox();
+    const zoneY = bounds ? bounds.y + bounds.height / 2 : y + height / 2;
+    const distanceToPreset = preset => {
+      const [, top, , presetHeight] = preset.viewBox.split(' ').map(Number);
+      return Math.abs(zoneY - (top + presetHeight / 2));
+    };
+    const namedPresets = presets.filter(preset => preset.names.includes(name));
+    const candidates = namedPresets.length ? namedPresets : presets;
+    const preset = candidates.reduce((closest, option) => distanceToPreset(option) < distanceToPreset(closest) ? option : closest);
+    setZoom({viewBox: preset.viewBox});
+    setCursor(null);
+    setMode('add');
+  }
+
+  function toggleZonePointPlacement(name) {
+    if (placement && zoom) {
+      setZoom(null);
+      setCursor(null);
+      setMode('zone-ready');
+      return;
+    }
+    const path = Array.from(drawingContentRef.current?.querySelectorAll('[data-anatomical-zone]') || [])
+      .find(candidate => candidate.dataset.anatomicalZone === name);
+    if (path) zoomIntoZone(name, path);
+  }
+
+  function chooseAnatomicalZone(name, path) {
+    if (showPoints && path) {
+      if (mode === 'zone-ready' && inspectedZone === name) {
+        zoomIntoZone(name, path);
+        return;
+      }
+      if (!selectedNames.has(name)) toggleZone(name);
+      openZone(name);
+      return;
+    }
+    if (selectedNames.has(name)) openZone(name);
+    else toggleZone(name);
+  }
+
+  function openZone(name) {
+    setInspectedZone(name);
+    setActivePointId(null);
+    setHoveredPointId(null);
+    if (showPoints) {
+      setZoom(null);
+      setCursor(null);
+      setMode('zone-ready');
+    }
+  }
+
+  function editZonePoint(point) {
+    setHoveredPointId(null);
+    if (!showPoints) { setView('face'); setListOpen(false); setZoom(null); }
+    setMode('add');
+    selectPoint(point.id);
+  }
+
+  function selectPoint(id) {
+    setActivePointId(id);
+    const point = points.find(item => item.id === id);
+    setInspectedZone(point?.zone || null);
+    if (zoom && point && (point.x < x || point.x > x + width || point.y < y || point.y > y + height)) setZoom(null);
+  }
+
+  function withAnatomicalZone(position) {
+    const target = new DOMPoint(position.x, position.y);
+    const candidates = Array.from(drawingContentRef.current?.querySelectorAll('[data-anatomical-zone]') || []);
+    const zone = candidates.reverse().find(path => path.isPointInFill(target))?.dataset.anatomicalZone || '';
+    return {...position, zone, zoneFromPosition: true};
+  }
+
+  function mirrorActivePoint() {
+    if (!canMirrorPoint) return;
+    const position = withAnatomicalZone({x: 2 * faceCenterX - activePoint.x, y: activePoint.y});
+    const copy = {...activePoint, ...position, id: crypto.randomUUID()};
+    setPoints(current => [...current, copy]);
+    setActivePointId(copy.id);
+    if (zoom && (copy.x < x || copy.x > x + width || copy.y < y || copy.y > y + height)) setZoom(null);
+  }
+
+  function savePosition(position) {
+    if (!placement || position.x < x || position.x > x + width || position.y < y || position.y > y + height) return;
+    const location = withAnatomicalZone(position);
+    if (!location.zone) return;
+    if (!selectedNames.has(location.zone)) {
+      toggleZone(location.zone);
+      openZone(location.zone);
+      return;
+    }
+    const id = crypto.randomUUID();
+    setPoints(current => [...current, {id, ...location, amount: '', unit: '', note: ''}]);
+    setActivePointId(id);
+    setInspectedZone(location.zone);
+
+  }
+
+  function dragHandlersFor(point) {
+    return {
+      onPointerDown(event) {
+        if (!event.isPrimary || event.button !== 0 || dragRef.current) return;
+        event.preventDefault();
+        event.currentTarget.setPointerCapture(event.pointerId);
+        dragRef.current = {
+          pointerId: event.pointerId, id: point.id, point,
+          clientX: event.clientX, clientY: event.clientY,
+          position: null,
+        };
+      },
+      onPointerMove(event) {
+        const drag = dragRef.current;
+        if (drag?.pointerId !== event.pointerId || drag.id !== point.id) return;
+        if (!drag.position && Math.hypot(event.clientX - drag.clientX, event.clientY - drag.clientY) < 4) return;
+        const matrix = drawingContentRef.current?.getScreenCTM();
+        if (!matrix) return;
+        const inverse = matrix.inverse();
+        const start = new DOMPoint(drag.clientX, drag.clientY).matrixTransform(inverse);
+        const current = new DOMPoint(event.clientX, event.clientY).matrixTransform(inverse);
+        if (!drag.position) selectPoint(point.id);
+        drag.position = {
+          x: Math.min(x + width, Math.max(x, drag.point.x + current.x - start.x)),
+          y: Math.min(y + height, Math.max(y, drag.point.y + current.y - start.y)),
+        };
+        setDraggedPoint({...drag.point, ...drag.position});
+      },
+      onPointerUp(event) {
+        const drag = dragRef.current;
+        if (drag?.pointerId !== event.pointerId || drag.id !== point.id) return;
+        if (drag.position) {
+          const location = withAnatomicalZone(drag.position);
+          setPoints(current => current.map(item => item.id === point.id ? {...item, ...location} : item));
+        }
+        dragRef.current = null;
+        setDraggedPoint(null);
+      },
+      onLostPointerCapture(event) {
+        if (dragRef.current?.pointerId !== event.pointerId) return;
+        dragRef.current = null;
+        setDraggedPoint(null);
+      },
+    };
+  }
+
+  function placeFromClick(event) {
+    if (!placement) return;
+    const matrix = drawingContentRef.current?.getScreenCTM();
+    if (!matrix) return;
+    const position = new DOMPoint(event.clientX, event.clientY).matrixTransform(matrix.inverse());
+    savePosition({x: position.x, y: position.y});
+  }
+
+  function placeFromKeyboard(event) {
+    if (event.target !== event.currentTarget) return;
+    const position = cursor ?? {x: x + width / 2, y: y + height / 2};
+    if (event.key === 'Escape') { finishZoneEntry(); return; }
+    if (!placement) return;
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      savePosition(position);
+      return;
+    }
+    const direction = {ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1]}[event.key];
+    if (!direction) return;
+    event.preventDefault();
+    const step = event.shiftKey ? 8 : 2;
+    setCursor({
+      x: Math.min(x + width, Math.max(x, position.x + direction[0] * step)),
+      y: Math.min(y + height, Math.max(y, position.y + direction[1] * step)),
+    });
+  }
+
+  function editPoint(field, value) {
+    setPoints(current => current.map(point => point.id === activePointId ? {...point, [field]: value} : point));
+  }
+
+  function removePoint(point) {
+    const hasDetails = [point.amount, point.unit, point.note, point.zoneFromPosition ? '' : point.zone].some(value => value.trim());
+    if (hasDetails) {
+      setPendingMapRemoval({point});
+      return;
+    }
+    deletePoint(point);
+  }
+
+  function deleteZone(name) {
+    if (manualZones.has(name)) toggleZone(name);
+    setPoints(current => current.filter(point => point.zone !== name));
+    finishZoneEntry();
+  }
+
+  function removeZone(name) {
+    if (pointsByZone.has(name) || manualZones.get(name)?.dose?.trim()) {
+      setPendingMapRemoval({zone: name});
+      return;
+    }
+    deleteZone(name);
+  }
+
+  function deletePoint(point) {
+    setPoints(current => current.filter(item => item.id !== point.id));
+    if (activePointId === point.id) setActivePointId(null);
+  }
+
   function renderPath([d, fill, stroke, strokeWidth, name], index) {
-    const available = visiblePaths.has(index) && (!zoomView || zoomView.names.includes(name));
+    const available = visiblePaths.has(index);
     const selected = available && selectedNames.has(name);
-    const attributes = { d, fill, stroke, strokeWidth };
-    if (!available) return <path key={index} {...attributes} aria-hidden="true" pointerEvents="none" />;
+    const attributes = { d, fill, stroke, strokeWidth, 'data-anatomical-zone': visiblePaths.has(index) ? name : undefined, 'data-zone-selected': selected || undefined };
+    if (!available || placement) return <path key={index} {...attributes} aria-hidden="true" style={{pointerEvents: 'none'}} />;
 
     return <path key={index} {...attributes}
       className="procedure-map-zone" role="button" tabIndex={0}
       aria-label={name} aria-pressed={selected}
-      onClick={() => toggleZone(name)}
+      onClick={event => chooseAnatomicalZone(name, event.currentTarget)}
       onKeyDown={event => {
         if (event.key === 'Enter' || event.key === ' ') {
           event.preventDefault();
-          toggleZone(name);
+          chooseAnatomicalZone(name, event.currentTarget);
         }
       }}>
       <title>{name}</title>
@@ -3000,58 +3445,193 @@ function ProcedureAnatomyMap({ zones, toggleZone, setZoneDose, zoneName, setZone
   }
 
   return <section className="body-map-workspace" aria-label="Mapa anatómico interactivo">
-    <header className="clinical-map-header"><div><strong>Mapa de aplicación</strong><small>Selecciona las áreas tratadas; agrega dosis o detalle en cada una.</small></div><button type="button" className="button outline compact" aria-expanded={listOpen} onClick={()=>setListOpen(value=>!value)}>{listOpen?'Ver mapa':'Lista de zonas'}</button></header>
-    <nav className="clinical-map-nav" aria-label="Vistas anatómicas">{procedureMapViews.map(([key,label])=><button type="button" key={key} className={view===key?'active':''} aria-pressed={view===key} onClick={()=>{setView(key);setZoom(null);}}>{label}</button>)}</nav>
-    {view === 'face' && !listOpen && <div className="clinical-map-filters" role="group" aria-label="Acercar una zona del rostro">
-      {Object.keys(procedureFaceZoom).map(label => <button key={label} type="button"
-        className={zoom === label ? 'active' : ''} aria-pressed={zoom === label}
-        onClick={() => setZoom(current => current === label ? null : label)}>{label}</button>)}
-    </div>}
+    <header className="clinical-map-header"><div><strong>Mapa de aplicación</strong><small>Selecciona las áreas tratadas; agrega dosis o detalle en cada una.</small></div><button type="button" className="button outline compact" aria-expanded={listOpen} onClick={()=>{setMode(null);setListOpen(value=>!value);}}>{listOpen?'Ver mapa':'Lista de zonas'}</button></header>
+    <nav className="clinical-map-nav" aria-label="Vistas anatómicas">{procedureMapViews.map(([key,label])=><button type="button" key={key} className={view===key?'active':''} aria-pressed={view===key} onClick={()=>{setView(key);setZoom(null);setMode(null);setInspectedZone(null);}}>{label}</button>)}</nav>
+    {placement && <p className="face-point-mode-status" id={`${clipId}-placement`} role="status">
+      Haz clic para agregar puntos. Selecciona o arrastra un punto existente. Con el teclado, usa las flechas y pulsa Intro.
+    </p>}
     <div className={`body-map-layout${listOpen ? ' list-mode' : ''}`}>
-      {!listOpen && <div className="clinical-map-illustration procedure-map-stage">
+      {!listOpen && <div className="clinical-map-illustration procedure-map-stage" data-face-overview={faceOverview || undefined}>
         <div className="procedure-map-orientation" aria-hidden="true">
           {isProfile ? <span>{currentView} · {side}</span> : orientation.map(label => <span key={label}>{label}</span>)}
         </div>
-        <svg className="procedure-map-drawing" viewBox={drawingViewBox}
+        <svg ref={drawingRef} className="procedure-map-drawing" viewBox={drawingViewBox}
+          data-placement={placement ? 'add' : undefined}
+          data-point-zoom={showPoints && placement && zoom ? 'detail' : undefined} onClick={placeFromClick} onKeyDown={placeFromKeyboard}
+          tabIndex={placement ? 0 : undefined} aria-describedby={placement ? `${clipId}-placement` : undefined}
           role="group" aria-label={`${currentView}: zonas anatómicas seleccionables`}>
-          <defs><clipPath id={clipId}><rect x={x} y={y} width={width} height={height} /></clipPath></defs>
-          <g clipPath={`url(#${clipId})`}>{paths.map(renderPath)}</g>
+          <defs><clipPath id={clipId}><rect x={x - faceBleed} y={y - faceBleed} width={width + faceBleed * 2} height={height + faceBleed} /></clipPath></defs>
+          <g clipPath={`url(#${clipId})`}><g ref={drawingContentRef} className="procedure-map-content" style={{transformOrigin: `${x + width / 2}px ${y + height / 2}px`}}>
+            {paths.map(renderPath)}
+            {showPoints && points.map(point =>
+              point.x >= x && point.x <= x + width && point.y >= y && point.y <= y + height
+                ? <FacePointMarker key={point.id} point={{...(draggedPoint?.id === point.id ? draggedPoint : point), hovered: point.id === hoveredPointId}} radius={zoom ? 4.5 : 8} compact={!!zoom}
+                    dragHandlers={placement ? dragHandlersFor(point) : undefined}
+                    active={point.id === activePointId}
+                    onSelect={() => mode === 'choose-zone' ? undefined : editZonePoint(point)}/>
+                : null)}
+            {placement && cursor && <path className="face-point-cursor"
+              d="M-4 0H4M0-4V4" transform={`translate(${cursor.x} ${cursor.y})`} aria-hidden="true"/>}
+          </g></g>
         </svg>
+        {showPoints && placement && <span className="face-map-mode-icon" aria-hidden="true">
+          <PenLine size={13}/>
+        </span>}
       </div>}
       {listOpen&&<div className="clinical-zone-picker" role="region" aria-label={`Zonas disponibles: ${currentView}`}>
         <div className="clinical-zone-picker-heading"><strong>Zonas de {currentView.toLocaleLowerCase('es-MX')}</strong><span>{availableNames.length} disponibles</span></div>
         <div className="clinical-zone-picker-list">{availableNames.map(name => <button type="button" key={name}
-          className={selectedNames.has(name) ? 'selected' : ''} aria-pressed={selectedNames.has(name)} onClick={() => toggleZone(name)}>
+          className={selectedNames.has(name) ? 'selected' : ''} aria-pressed={selectedNames.has(name)} onClick={() => chooseAnatomicalZone(name)}>
           <span>{name}</span><i aria-hidden="true">{selectedNames.has(name) ? '✓' : '+'}</i>
         </button>)}</div>
       </div>}
-      <aside className="body-map-details"><div className="clinical-zone-summary"><strong>Zonas seleccionadas</strong><span aria-live="polite">{zones.length}</span></div>{zones.length?zones.map(zone=><div className="body-map-zone" key={zone.name}><div className="body-map-zone-heading"><strong>{zone.name}</strong><button type="button" aria-label={`Quitar ${zone.name}`} onClick={()=>toggleZone(zone.name)}>×</button></div><input aria-label={`Dosis o detalle para ${zone.name}`} value={zone.dose} onChange={event=>setZoneDose(zone.name,event.target.value)} placeholder="Dosis / detalle" maxLength="80"/></div>):<p className="clinical-map-empty">Aún no hay zonas. Selecciona una región del mapa o usa la lista.</p>}<div className="clinical-zone-custom"><input aria-label="Zona personalizada" value={zoneName} onChange={event=>setZoneName(event.target.value)} onKeyDown={event=>{if(event.key==='Enter'){event.preventDefault();addCustom();}}} placeholder="Agregar otra zona" maxLength="80"/><input aria-label="Detalle de zona personalizada" value={dose} onChange={event=>setDose(event.target.value)} placeholder="Dosis / detalle" maxLength="80"/><button type="button" className="button outline compact" onClick={addCustom} disabled={!zoneName.trim()}>Agregar</button></div></aside>
+      <aside className="body-map-details" data-zone-details data-map-columns={!listOpen || undefined}
+        data-application-summary={showPoints && zoneInDetail && !focusedPoint ? '' : undefined}>
+      {(zoneInDetail || focusedPoint) && <div className="face-zone-detail-header">
+        <button type="button" className="face-zone-back" onClick={focusedPoint ? backToZoneSummary : finishZoneEntry}>
+          <ArrowLeft size={15} aria-hidden="true"/> {focusedPoint ? zoneInDetail || 'Zonas' : 'Zonas'}
+        </button>
+        <h3>{focusedPoint ? `Punto ${activePointIndex + 1}` : zoneInDetail}</h3>
+        {!focusedPoint && zoneInDetail && <button type="button" className="face-zone-remove" aria-label="Quitar zona" title="Quitar zona" onClick={() => removeZone(zoneInDetail)}>
+          <Trash2 size={16} aria-hidden="true"/>
+        </button>}
+      </div>}
+      {zoneInDetail && !focusedPoint && <section className="face-zone-summary" aria-label={`Resumen de ${zoneInDetail}`}>
+        <div className="face-zone-summary-heading"><strong>Aplicaciones</strong><span>{detailPoints.length}</span></div>
+        {detailPoints.length > 0
+          ? <div className="face-zone-summary-list" aria-label="Aplicaciones de la zona">{detailPoints.map((point, index) => <div className="face-zone-summary-row" key={point.id}>
+            <button type="button" className="face-zone-summary-inspect"
+              aria-label={`Inspeccionar aplicación ${index + 1}: ${facePointDetail(point) || 'Sin detalles'}`}
+              title={`Inspeccionar aplicación ${index + 1}`} onMouseEnter={() => setHoveredPointId(point.id)}
+              onMouseLeave={() => setHoveredPointId(null)} onFocus={() => setHoveredPointId(point.id)}
+              onBlur={() => setHoveredPointId(null)} onClick={() => editZonePoint(point)}>
+              <span className="face-zone-summary-index">{index + 1}</span>
+              <span className="face-zone-summary-copy"><strong>{facePointLabel(point) || 'Sin cantidad'}</strong>{point.note && <span>{point.note}</span>}</span>
+            </button>
+            <button type="button" className="face-zone-summary-delete" aria-label={`Eliminar aplicación ${index + 1}`}
+              title={`Eliminar aplicación ${index + 1}`} onClick={event => { event.stopPropagation(); removePoint(point); }}>
+              <Trash2 size={15} aria-hidden="true"/>
+            </button>
+          </div>)}</div>
+          : <p className="face-zone-summary-empty">Aún no hay puntos en esta zona.</p>}
+        {pointPlacementAction}
+      </section>}
+      {focusedPoint && <section className="face-point-editor" aria-label="Editar punto">
+        <h3>Editar punto</h3>
+        <div className="face-point-fields">
+          <label>Cantidad<input inputMode="decimal" maxLength={24} value={activePoint.amount} onChange={event => editPoint('amount', event.target.value)}/></label>
+          <label>Unidad<input maxLength={24} value={activePoint.unit} onChange={event => editPoint('unit', event.target.value)}/></label>
+          <p className="face-point-zone"><strong>Zona</strong> {activePoint.zone || 'Fuera de las zonas marcadas'}</p>
+          <label>Nota del punto<input maxLength={200} value={activePoint.note} onChange={event => editPoint('note', event.target.value)}/></label>
+          <div className="face-point-actions">
+            <button type="button" className="button outline compact" onClick={() => removePoint(activePoint)}>Quitar punto</button>
+            <button type="button" className="button outline compact" disabled={!canMirrorPoint} onClick={mirrorActivePoint}>Copiar</button>
+          </div>
+        </div>
+        {pointPlacementAction}
+      </section>}
+      {showPoints && activePoint && !mode && !activePoint.zone && <p className="face-zone-details">{facePointDetail(activePoint) || 'Punto sin detalle'}</p>}
+      {!zoneInDetail && <div className="clinical-zone-summary"><strong>Zonas seleccionadas</strong><span aria-live="polite">{selectedNames.size}</span></div>}
+      {mode === 'choose-zone' && <div className="face-zone-entry-prompt">
+        <p role="status">Selecciona una zona en el diagrama.</p>
+        <button type="button" className="button outline compact" onClick={finishZoneEntry}>Cancelar selección</button>
+      </div>}
+      {!zoneInDetail && (selectedNames.size > 0 || showPoints) && <div className="face-zone-grid">
+        {orderedNames.map(name => {
+          const zonePoints = pointsByZone.get(name) || [];
+          const count = zonePoints.length;
+          const pointSummary = zonePoints.map(facePointLabel).filter(Boolean).join(' · ');
+          return <button type="button" className="face-zone-tile" key={name}
+            title={pointSummary ? `${name} · Cantidades: ${pointSummary}` : name}
+            aria-label={pointSummary ? `${name} · Cantidades: ${pointSummary}` : name}
+            onClick={() => openZone(name)}>
+            <span className="face-zone-tile-visual">
+              <ProcedureZoneGlyph name={name} view={view}/>
+              {count > 0 && <span className="face-zone-tile-count" aria-label={`${count} ${count === 1 ? 'punto' : 'puntos'}`}>{count}</span>}
+            </span>
+            <strong>{name}</strong>
+          </button>;
+        })}
+        {showPoints && mode !== 'choose-zone' && <button type="button" className="face-zone-tile face-zone-add-tile" onClick={placement ? finishZoneEntry : beginZoneSelection}>
+          {placement ? <Check size={26} aria-hidden="true"/> : <Plus size={26} aria-hidden="true"/>}
+          <strong>{placement ? "Finalizar" : "Agregar zona"}</strong>
+        </button>}
+      </div>}
+      {selectedNames.size ? (zoneInDetail && !focusedPoint ? [zoneInDetail] : []).map(name => {
+        const zone = manualZones.get(name);
+        const zonePoints = pointsByZone.get(name);
+        return <div className="face-zone-detail-content" key={name}>
+          <label className="procedure-zone-detail-field">
+            {zonePoints ? 'Notas adicionales' : 'Dosis / detalle'}
+            {zonePoints
+              ? <textarea aria-label={`Notas adicionales para ${name}`} value={zone?.dose || ''}
+                  onChange={event => setZoneDose(name, event.target.value)} placeholder="Escribe una nota para esta zona…" rows={3} maxLength={80}/>
+              : <input aria-label={`Dosis o detalle para ${name}`} value={zone?.dose || ''}
+                  onChange={event => setZoneDose(name, event.target.value)} maxLength={80}/>}
+          </label>
+        </div>;
+      }) : <p className="clinical-map-empty">Aún no hay zonas. Selecciona una región del mapa o usa la lista.</p>}
+      </aside>
     </div>
+    <dialog ref={pointRemovalDialog} className="point-removal-dialog" aria-labelledby={`${clipId}-remove-title`}
+      aria-describedby={`${clipId}-remove-description`} onClose={() => setPendingMapRemoval(null)}>
+      <div className="point-removal-heading">
+        <span aria-hidden="true"><Trash2 size={17}/></span>
+        <h3 id={`${clipId}-remove-title`}>{pendingMapRemoval?.zone ? "¿Quitar esta zona?" : "¿Quitar este punto?"}</h3>
+      </div>
+      <p id={`${clipId}-remove-description`}>{pendingMapRemoval?.zone ? "Se quitarán la zona, sus puntos y sus notas." : "Se quitará del mapa junto con los datos que ingresaste."}</p>
+      <div className="point-removal-actions">
+        <button ref={cancelPointRemoval} type="button" className="button outline" onClick={() => pointRemovalDialog.current.close()}>Cancelar</button>
+        <button type="button" className="button point-removal-confirm" onClick={() => {
+          if (!pendingMapRemoval) return;
+          pointRemovalDialog.current.close();
+          if (pendingMapRemoval.zone) deleteZone(pendingMapRemoval.zone);
+          else deletePoint(pendingMapRemoval.point);
+        }}>{pendingMapRemoval?.zone ? "Quitar zona" : "Quitar punto"}</button>
+      </div>
+    </dialog>
   </section>;
 }
 
-function ProcedureModal({patient,appointments,sharedMode,close,onSubmit}) {
-  const localNow = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0,16);
-  const [zones,setZones]=useState([]);
-  const [zoneName,setZoneName]=useState('');
-  const [dose,setDose]=useState('');
+function ProcedureModal({patient,appointments,record,pending,sharedMode,close,onSubmit}) {
+  const performedAt = record?.performedAt ? new Date(record.performedAt) : new Date();
+  const localDate = new Date(performedAt.getTime() - performedAt.getTimezoneOffset() * 60000).toISOString().slice(0,23);
+  const appointmentId = record?.appointmentId || '';
+  const consentId = record?.consentDocumentId || '';
+  const procedureTypes = ['Toxina botulínica', 'Ácido hialurónico', 'Bioestimulador', 'Endolift', 'Hilos tensores', 'Tratamiento facial', 'Otro'];
+  if (record?.procedureType && !procedureTypes.includes(record.procedureType)) procedureTypes.push(record.procedureType);
+  const savedZones = record?.zones || [];
+  const [zones,setZones]=useState(() => savedZones.filter(zone => !isFacePointRecord(zone)));
+  const [points,setPoints]=useState(() => savedZones.find(isFacePointRecord)?.points || []);
+  const [zoneOrder, setZoneOrder] = useState(() => savedZones.find(isFacePointRecord)?.zoneOrder || []);
+  useEffect(() => {
+    const selected = new Set([...zones.map(zone => zone.name), ...groupFacePointsByZone(points).keys()]);
+    setZoneOrder(current => {
+      const next = [...new Set([...current.filter(name => selected.has(name)), ...selected])];
+      return next.length === current.length && next.every((name, index) => name === current[index]) ? current : next;
+    });
+  }, [zones, points]);
   const consentChoices=(patient.consentHistory||[]).filter(item=>item.status==='Firmado');
   const toggleZone=name=>setZones(current=>current.some(item=>item.name===name)?current.filter(item=>item.name!==name):[...current,{name,dose:''}]);
-  const addCustom=()=>{const name=zoneName.trim();if(name&&!zones.some(item=>item.name===name)){setZones(current=>[...current,{name,dose}]);setZoneName('');setDose('');}};
-  const setZoneDose=(name,value)=>setZones(current=>current.map(item=>item.name===name?{...item,dose:value}:item));
-  return <Modal title="Nota post procedimiento" subtitle={`${patient.name} · Registro clínico`} close={close} className="patient-record-modal procedure-modal"><form className="form-stack" onSubmit={event=>onSubmit(event,zones)}>
+  const setZoneDose = (name, value) => setZones(current => {
+    const zone = current.find(item => item.name === name);
+    if (!zone) return value ? [...current, {name, dose: value, fromPointNotes: true}] : current;
+    if (zone.fromPointNotes && !value) return current.filter(item => item.name !== name);
+    return current.map(item => item.name === name ? {...item, dose: value} : item);
+  });
+  return <Modal title={record ? "Editar nota post procedimiento" : "Nota post procedimiento"} subtitle={`${patient.name} · Registro clínico`} close={()=>{ if (!pending) close(); }} className="patient-record-modal procedure-modal"><form className="form-stack" onSubmit={event=>onSubmit(event, points.length ? [...zones, {kind: facePointRecordType, name: 'Puntos del rostro', dose: String(points.length), points, zoneOrder}] : zones)}>
     <div className="procedure-fields">
-    <label>Fecha y hora<input type="datetime-local" name="performedAt" defaultValue={localNow} required/></label>
-    {appointments.length>0&&<label>Cita relacionada<select name="appointmentId" defaultValue=""><option value="">Sin vincular</option>{appointments.map(item=><option key={item.id} value={item.databaseId||item.id}>{item.date} · {item.time} · {item.service}</option>)}</select></label>}
-    <label>Procedimiento<select name="procedureType" defaultValue="Toxina botulínica"><option>Toxina botulínica</option><option>Ácido hialurónico</option><option>Bioestimulador</option><option>Endolift</option><option>Hilos tensores</option><option>Tratamiento facial</option><option>Otro</option></select></label>
-    <label>Producto / marca<input name="product" maxLength="160" placeholder="Opcional"/></label>
-    <label>Lote<input name="lotNumber" maxLength="100" placeholder="Opcional"/></label>
+    <label>Fecha y hora<input type="datetime-local" name="performedAt" step="0.001" defaultValue={localDate} required/></label>
+    {(appointments.length>0 || appointmentId)&&<label>Cita relacionada<select name="appointmentId" defaultValue={appointmentId}><option value="">Sin vincular</option>{appointmentId&&!appointments.some(item=>(item.databaseId||item.id)===appointmentId)&&<option value={appointmentId}>Cita vinculada</option>}{appointments.map(item=><option key={item.id} value={item.databaseId||item.id}>{item.date} · {item.time} · {item.service}</option>)}</select></label>}
+    <label>Procedimiento<select name="procedureType" defaultValue={record?.procedureType || procedureTypes[0]}>{procedureTypes.map(type=><option key={type}>{type}</option>)}</select></label>
+    <label>Producto / marca<input name="product" defaultValue={record?.product} maxLength="160" placeholder="Opcional"/></label>
+    <label>Lote<input name="lotNumber" defaultValue={record?.lotNumber} maxLength="100" placeholder="Opcional"/></label>
     </div>
-    <ProcedureAnatomyMap zones={zones} toggleZone={toggleZone} setZoneDose={setZoneDose} zoneName={zoneName} setZoneName={setZoneName} dose={dose} setDose={setDose} addCustom={addCustom}/>
-    {consentChoices.length>0&&<label>Consentimiento de procedimiento firmado<select name="consentReference" defaultValue=""><option value="">Sin vincular</option>{consentChoices.map(item=><option value={`document:${item.id}`} key={item.id}>{item.title}</option>)}</select></label>}
-    <label>Cuidados posteriores y comentarios<textarea name="followUp" rows="3" maxLength="4000" placeholder="Indicaciones, evolución esperada y seguimiento recomendado."/></label>
-    <div className="form-note"><ShieldCheck size={15}/>{sharedMode?'Registro clínico visible al equipo autorizado.':'Demostración local: se guarda en este navegador.'} Las zonas y dosis se conservan en el expediente.</div>
-    <div className="modal-actions"><button type="button" className="button secondary" onClick={close}>Cancelar</button><button className="button primary" type="submit" disabled={!zones.length}><Check size={15}/> Guardar nota</button></div>
+    <ProcedureAnatomyMap zones={zones} toggleZone={toggleZone} setZoneDose={setZoneDose} points={points} setPoints={setPoints} zoneOrder={zoneOrder}/>
+    {(consentChoices.length>0 || consentId)&&<label>Consentimiento de procedimiento firmado<select name="consentReference" defaultValue={consentId ? `document:${consentId}` : ""}><option value="">Sin vincular</option>{consentId&&!consentChoices.some(item=>item.id===consentId)&&<option value={`document:${consentId}`}>Consentimiento vinculado</option>}{consentChoices.map(item=><option value={`document:${item.id}`} key={item.id}>{item.title}</option>)}</select></label>}
+    <label>Cuidados posteriores y comentarios<textarea name="followUp" defaultValue={record?.followUp} rows="3" maxLength="4000" placeholder="Indicaciones, evolución esperada y seguimiento recomendado."/></label>
+    <div className="form-note"><ShieldCheck size={15}/>{sharedMode?'Registro clínico visible al equipo autorizado.':'Demostración local: se guarda en este navegador.'} Los puntos, zonas y dosis se conservan en el expediente.</div>
+    <div className="modal-actions"><button type="button" className="button secondary" disabled={pending} onClick={close}>Cancelar</button><button className="button primary" type="submit" disabled={pending || (!record && !zones.length && !points.length)}><Check size={15}/> Guardar nota</button></div>
   </form></Modal>;
 }
 
