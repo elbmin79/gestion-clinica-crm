@@ -4461,7 +4461,32 @@ function ConsentViewerModal({patient,document,content,status,signedAt,close,onPr
   </Modal>
   {signing&&<SignatureCaptureModal title="Firma de la paciente" subtitle={patient.name} confirmLabel="Firmar consentimiento" saving={saving} onClose={()=>setSigning(false)} onSave={async file=>{ setSaving(true); try { await onSaveSignature?.(file); setSigning(false); setJustSigned(true); } finally { setSaving(false); } }}/>}
   </>;
-}function Modal({title,subtitle,close,children,printable=false,className=''}){
+}let openModalCount = 0;
+let lockedScrollY = 0;
+function keepScrollInsideModal(event) {
+  const scroller = event.target.closest?.('.modal, .clinic-date-popover, .session-camera-stage');
+  if (!scroller) event.preventDefault();
+}
+function lockPageScroll() {
+  if (openModalCount === 0) {
+    lockedScrollY = window.scrollY;
+    document.body.classList.add('modal-open');
+    document.body.style.top = `-${lockedScrollY}px`;
+    document.addEventListener('touchmove', keepScrollInsideModal, { passive: false, capture: true });
+  }
+  openModalCount += 1;
+  return () => {
+    openModalCount = Math.max(0, openModalCount - 1);
+    if (openModalCount === 0) {
+      document.removeEventListener('touchmove', keepScrollInsideModal, { capture: true });
+      document.body.classList.remove('modal-open');
+      document.body.style.top = '';
+      window.scrollTo(0, lockedScrollY);
+    }
+  };
+}
+function Modal({title,subtitle,close,children,printable=false,className=''}){
+  useEffect(() => lockPageScroll(), []);
   useEffect(()=>{
     if(!printable)return undefined;
     document.body.classList.add('print-document-mode');
