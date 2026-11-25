@@ -2,7 +2,7 @@
   width: min(550px, 100%);
   padding: clamp(18px, 5vw, 30px);
   padding-bottom: clamp(18px, 4vw, 24px);
-  border-radius: 22px;
+  border-radius: 13.2px;
   background: var(--paper);
   border-color: var(--line);
 }
@@ -18,7 +18,7 @@
   gap: clamp(16px, 5vw, 28px);
   padding: 16px;
   border: 1px solid var(--line);
-  border-radius: 16px;
+  border-radius: 9.6px;
   background: color-mix(in srgb, var(--green-soft) 56%, var(--paper));
 }
 
@@ -29,7 +29,7 @@
   aspect-ratio: 1;
   width: min(100%, 240px);
   overflow: hidden;
-  border-radius: 12px;
+  border-radius: 7.2px;
   background: #fff;
   color: #443740;
   text-align: center;
@@ -65,13 +65,13 @@
   min-height: 44px;
   padding: 0 12px;
   border: 1px solid var(--line);
-  border-radius: 9px;
+  border-radius: 5.4px;
   background: var(--canvas);
   color: var(--ink);
   font-size: 13px;
   text-overflow: ellipsis;
 }
-.mobile-install-controls .button { min-height: 44px; justify-content: center; padding-inline: 10px; border-radius: 9px; white-space: nowrap; }
+.mobile-install-controls .button { min-height: 44px; justify-content: center; padding-inline: 10px; border-radius: 5.4px; white-space: nowrap; }
 .mobile-install-status { display: block; color: var(--muted); font-size: 13px; }
 .mobile-install-status:not(:empty) { margin-top: 8px; }
 .mobile-install :focus-visible { outline: 2px solid var(--green); outline-offset: 3px; }

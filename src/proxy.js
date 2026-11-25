@@ -4,7 +4,7 @@ import { getSupabaseConfig } from './lib/supabase/config';
 
 export async function proxy(request) {
   const pathname = request.nextUrl.pathname;
-  if (pathname === '/app-download' || pathname === '/api/mobile/release') return NextResponse.next({ request });
+  if (pathname === '/app-download' || pathname === '/api/mobile/release' || pathname === '/landing' || pathname.startsWith('/landing/')) return NextResponse.next({ request });
   const config = getSupabaseConfig();
   const isLoginRoute = pathname === '/login';
   const isForgotPasswordRoute = pathname === '/forgot-password';

@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState, useId } from 'react';
+import { createPortal } from 'react-dom';
 import Image from 'next/image';
 import { procedureAnatomy, procedureFaceZoom } from './procedure-anatomy';
 import Link from 'next/link';
@@ -29,6 +30,9 @@ import ClinicAvailabilitySettings from './clinic-availability-settings';
 import WhatsAppSettings from './whatsapp-settings';
 import GoogleCalendarSettings from './google-calendar-settings';
 import WhatsAppInbox from './whatsapp-inbox';
+import SocialInbox from './social-inbox';
+import { fillDocumentPlaceholders, suggestConsentTemplate } from '../lib/document-placeholders';
+import { ClinicDateField, ClinicTimeField, localISODate } from './clinic-date-field';
 import { demoClinicServices, eligibleServiceProviders, serviceCategories } from '../lib/clinic-services';
 import { createClinicServicesStore } from '../lib/supabase/clinic-services';
 import { usePatientDirectory } from '../lib/supabase/use-patient-directory';
@@ -38,7 +42,7 @@ import { useClinicReminders } from '../lib/supabase/use-clinic-reminders';
 import { createDemoAppointmentReminders } from '../lib/supabase/clinic-reminders';
 import { buildClinicGroups, filterByWorkspace, normalizeWorkspaceSelection } from '../lib/clinic-workspace';
 import { hasClinicPermission } from '../lib/clinic-permissions.js';
-import { openDemoRecordFile, saveDemoRecordFile, validatePatientRecordFile, validatePatientRecordFileContent } from '../lib/patient-record-files';
+import { compressClinicalPhoto, openDemoRecordFile, saveDemoRecordFile, validatePatientRecordFile, validatePatientRecordFileContent } from '../lib/patient-record-files';
 import { signOut } from './login/actions';
 import { createClient as createSupabaseBrowserClient } from '../lib/supabase/client';
 import { profileBirthCountries, profileStaffTypes } from '../lib/profile-options';
@@ -58,11 +62,11 @@ import { addDemoAppointmentAlert, unlinkPushOnSignOut } from '../lib/staff-notif
 import {
   Activity, ArrowDown, ArrowDownRight, ArrowLeft, ArrowRight, ArrowUpRight, Building2,
   Bell, CalendarDays, CalendarPlus, Check, CheckCircle2, ChevronDown, ChevronLeft,
-  ChevronRight, CircleHelp, ClipboardCheck, Clock3, Command, FileCheck2,
+  ChevronRight, ClipboardCheck, Clock3, Command, FileCheck2,
   FilePlus2, FileText, Filter, LayoutDashboard, ListFilter, MoreHorizontal,
-  Plus, Search, Settings2, ShieldCheck, SlidersHorizontal, Sparkles,
+  Plus, Search, Settings, Settings2, ShieldCheck, SlidersHorizontal, Sparkles,
   Download, Maximize2, PenLine, Trash2, Upload,
-  UserRound, UsersRound, X, Menu, Printer, Video, DollarSign, Moon, Sun, Link2, MessageCircle, Smartphone
+  UserRound, UsersRound, X, Menu, Printer, Video, DollarSign, Moon, Sun, Link2, MessageCircle, Smartphone, Camera, SwitchCamera, AtSign
 } from 'lucide-react';
 
 const initialPatients = [
@@ -176,6 +180,7 @@ const pageRoutes = {
   reminders: "/recordatorios",
   recall: "/seguimiento",
   whatsapp: "/whatsapp",
+  messages: "/mensajes",
   patients: "/pacientes",
   consents: "/consentimientos",
   contracts: "/contratos",
@@ -346,6 +351,15 @@ function SharedDataStatus({ status, memberships, chooseClinic, retry }) {
   </div>;
 }
 
+function BrandSwitch({ theme }) {
+  const [open, setOpen] = useState(false);
+  return <div className="brand-switch">
+    <button type="button" className="brand" aria-expanded={open} aria-label="Elegir CRM o landing" onClick={() => setOpen(value => !value)}>
+      <Image className="brand-logo" src={theme === 'dark' ? '/elixirclinic-logo-dark.png' : '/elixirclinic-logo.png'} alt="Elixir Clinic" width={1374} height={1145} unoptimized />
+    </button>
+    {open && <div className="brand-switch-menu" role="menu"><Link href="/" onClick={() => setOpen(false)}>CRM</Link><Link href="/landing" onClick={() => setOpen(false)}>Landing</Link></div>}
+  </div>;
+}
 function App({ children }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -430,6 +444,11 @@ function App({ children }) {
       const avatarUrl = avatarPath ? supabase.storage.from('profile-avatars').getPublicUrl(avatarPath).data.publicUrl : '';
       const signaturePath = typeof metadata.signature_path === 'string' ? metadata.signature_path : '';
       setUserProfile({ name, email: user?.email || '', metadata, userId: user?.id || '', avatarPath, avatarUrl, signaturePath, signatureUrl: '' });
+      if (signaturePath) {
+        supabase.storage.from('profile-signatures').createSignedUrl(signaturePath, 3600).then(({ data: signed }) => {
+          if (active && signed?.signedUrl) setUserProfile(current => ({ ...current, signatureUrl: signed.signedUrl }));
+        });
+      }
       setProfileLoaded(true);
     }).catch(() => { if (active) setProfileLoaded(true); });
     return () => { active = false; };
@@ -589,7 +608,7 @@ function App({ children }) {
   const [appointmentDefaults, setAppointmentDefaults] = useState({ date: '2026-10-26', time: '17:00', patientId: '', providerId: '', packageId: '', serviceId: '', serviceName: '' });
   const [paymentDefaults, setPaymentDefaults] = useState({ date: '2026-10-26', appointmentId: '' });
   const [contractDefaults, setContractDefaults] = useState({ patientId: '' });
-  const [consentDefaults, setConsentDefaults] = useState({ patientId: '', templateId: '' });
+  const [consentDefaults, setConsentDefaults] = useState({ patientId: '', templateId: '', service: '' });
   const [contractTemplateReturn, setContractTemplateReturn] = useState(null);
   const [consentTemplateReturn, setConsentTemplateReturn] = useState(null);
   const [consentTemplateDraft, setConsentTemplateDraft] = useState(null);
@@ -601,7 +620,7 @@ function App({ children }) {
   const sharedAgenda = useClinicAgenda(sharedMode && (page === 'agenda' || page === 'overview') && sharedDirectory.status === 'ready', sharedDirectory.clinicId, agendaDate, page === 'overview' ? 'Mes' : period, sharedDirectory.timeZone, { patients, branches, providers, businesses }, page === 'agenda' && period === 'Lista' ? (agendaListEnd >= agendaDate ? agendaListEnd : agendaDate) : null);
   const appointments = sharedMode ? sharedAgenda.appointments : demoAppointments;
   const canReadSharedPayments = can('payments.view');
-  const sharedPaymentWorkspace = useClinicPayments(sharedMode && (page === 'payments' || (page === 'agenda' && canReadSharedPayments)), sharedDirectory.clinicId, sharedDirectory.role, sharedDirectory.timeZone, { branches, providers, businesses }, sharedDirectory.permissions);
+  const sharedPaymentWorkspace = useClinicPayments(sharedMode && canReadSharedPayments && (page === 'payments' || page === 'overview' || page === 'agenda'), sharedDirectory.clinicId, sharedDirectory.role, sharedDirectory.timeZone, { branches, providers, businesses }, sharedDirectory.permissions);
   const sharedReminderWorkspace = useClinicReminders(sharedMode && (page === 'reminders' || page === 'whatsapp') && sharedDirectory.status === 'ready' && can('reminders.view'), sharedDirectory.clinicId, sharedDirectory.role, sharedDirectory.timeZone, sharedDirectory.permissions);
   const sharedPageStatus = !sharedMode ? 'idle' : sharedDirectory.status !== 'ready' ? sharedDirectory.status
     : (page === 'overview' || page === 'agenda') ? (sharedAgenda.status === 'idle' ? 'loading' : sharedAgenda.status)
@@ -715,9 +734,21 @@ function App({ children }) {
     setModalReturn(returnTo);
     setModal('new-contract');
   };
-  const openConsentPreparation = (patientId = '', returnTo = null, templateId = '') => {
+  const signConsentForService = service => {
+    const patient = selectedPatient;
+    if (!patient || !service) return;
+    const existing = [...documentHistory(patient, 'consent')].reverse().find(item => item.status !== 'Reemplazado' && item.service === service);
+    if (existing?.status === 'Firmado') return;
+    if (existing) {
+      openPatientDocumentRecord(patient, { ...existing, kind: 'consent' }, 'patient');
+      return;
+    }
+    const matched = suggestConsentTemplate(service, consentTemplatesForPage);
+    openConsentPreparation(patient.id, 'patient', matched?.id || matched?.title || '', service);
+  };
+  const openConsentPreparation = (patientId = '', returnTo = null, templateId = '', service = '') => {
     if (returnTo === 'patient') patientRecordReturnTab.current = patientRecordTab;
-    setConsentDefaults({ patientId, templateId });
+    setConsentDefaults({ patientId, templateId, service });
     setModalReturn(returnTo);
     setConsentTemplateReturn(returnTo);
     setModal('send-consent');
@@ -834,7 +865,7 @@ function App({ children }) {
     const entry = {
       patientId: patient.id,
       appointmentId: String(form.get('appointmentId') || ''),
-      occurredAt: new Date(String(form.get('occurredAt') || new Date().toISOString())).toISOString(),
+      occurredAt: new Date(`${String(form.get('occurredOn') || localISODate())}T${String(form.get('occurredTime') || '00:00')}`).toISOString(),
       chiefComplaint: String(form.get('chiefComplaint') || '').trim(),
       history: String(form.get('history') || '').trim(),
       examination: String(form.get('examination') || '').trim(),
@@ -868,7 +899,7 @@ function App({ children }) {
     const record = {
       patientId: patient.id,
       appointmentId: String(form.get('appointmentId') || ''),
-      performedAt: new Date(String(form.get('performedAt') || new Date().toISOString())).toISOString(),
+      performedAt: new Date(`${String(form.get('performedOn') || localISODate())}T${String(form.get('performedTime') || '00:00')}`).toISOString(),
       product: String(form.get('product') || '').trim(),
       lotNumber: String(form.get('lotNumber') || '').trim(),
       expirationDate: String(form.get('expirationDate') || ''),
@@ -900,15 +931,17 @@ function App({ children }) {
     setEditingProcedure(record);
     openPatientRecordModal('new-patient-procedure');
   };
-  const saveProcedure = async (event, zones) => {
+  const saveProcedure = async (event, zones, photos = []) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     const patient = selectedPatient;
     const existing = editingProcedure;
     if (!patient || procedurePending || !can(existing ? 'clinical.edit' : 'clinical.create')) return;
+    const sessionDate = String(form.get('sessionDate') || localISODate());
+    const sessionTime = String(form.get('sessionTime') || '00:00');
     const record = {
       patientId: patient.id, appointmentId: String(form.get('appointmentId') || ''),
-      performedAt: new Date(String(form.get('performedAt') || new Date().toISOString())).toISOString(),
+      performedAt: new Date(`${sessionDate}T${sessionTime}`).toISOString(),
       procedureType: String(form.get('procedureType') || '').trim(), product: String(form.get('product') || '').trim(),
       lotNumber: String(form.get('lotNumber') || '').trim(), zones, followUp: String(form.get('followUp') || '').trim(),
       consentDocumentId: String(form.get('consentReference') || '').replace(/^document:/, ''),
@@ -931,8 +964,9 @@ function App({ children }) {
           : current);
         sharedDirectory.refresh();
       } else setDemoProcedures(saveToList);
+      if (photos.length) await saveSessionMedia(saved.id, photos, 'photo', true);
       returnToPatientRecord();
-      notify(existing ? 'Procedimiento actualizado' : 'Procedimiento agregado al expediente');
+      notify(existing ? 'Sesión actualizada' : 'Sesión guardada en el expediente');
     } catch (error) {
       notify(error?.message || 'No se pudo guardar el procedimiento.');
     } finally {
@@ -969,7 +1003,10 @@ function App({ children }) {
   const attachPatientFile = async (event) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
-    const file = form.get('file');
+    let file = form.get('file');
+    if (file?.type?.startsWith('image/')) {
+      try { file = await compressClinicalPhoto(file); } catch { notify('No se pudo comprimir la fotografía.'); return; }
+    }
     const validationError = validatePatientRecordFile(file);
     if (validationError) { notify(validationError); return; }
     const contentError = await validatePatientRecordFileContent(file);
@@ -995,6 +1032,112 @@ function App({ children }) {
     } catch (error) {
       notify(error?.message || 'No se pudo guardar el archivo.');
     }
+  };
+  async function saveSessionMedia(sessionId, incoming, mode, quiet = false) {
+    const patient = selectedPatient;
+    if (!patient || !sessionId) return;
+    const prefix = `[sesión:${sessionId}]`;
+    const currentFiles = sharedMode ? (patient.recordFiles || []) : demoRecordFiles.filter(item => item.patientId === patient.id);
+    const photoCount = currentFiles.filter(item => item.title?.startsWith(prefix) && item.kind === 'clinical_photo').length;
+    const room = mode === 'photo' ? Math.max(0, 4 - photoCount) : incoming.length;
+    const batch = [...incoming].slice(0, room);
+    if (!batch.length) { notify(mode === 'photo' ? 'Esta sesión ya tiene 4 fotos.' : 'Selecciona un archivo.'); return; }
+    const stored = [];
+    try {
+    for (let index = 0; index < batch.length; index += 1) {
+      let file = batch[index];
+      if (file.type?.startsWith('image/')) {
+        try { file = await compressClinicalPhoto(file, 1024, 0.55); } catch { notify('No se pudo comprimir una fotografía.'); continue; }
+      }
+      const validationError = validatePatientRecordFile(file);
+      if (validationError) { notify(validationError); continue; }
+      const contentError = await validatePatientRecordFileContent(file);
+      if (contentError) { notify(contentError); continue; }
+      const label = mode === 'photo' ? `Foto ${photoCount + stored.length + 1}` : (file.name || 'Archivo').replace(/\.[^.]+$/, '');
+      const title = `${prefix} ${label}`.slice(0, 200);
+      const kind = mode === 'photo' ? 'clinical_photo' : 'other';
+      let id = `file-${Date.now()}-${index}`;
+      let metadata = { id, title, kind, signedAt: '', mimeType: file.type, byteSize: file.size, createdAt: new Date().toISOString(), patientId: patient.id };
+      if (sharedMode) {
+        const uploaded = await createPatientDirectoryStore().uploadPatientFile(sharedDirectory.clinicId, patient, { file, title, kind, signedAt: '' });
+        metadata = { ...metadata, id: uploaded.id, storagePath: uploaded.storagePath };
+      } else {
+        await saveDemoRecordFile(id, file);
+      }
+      stored.push(metadata);
+    }
+    if (!stored.length) return;
+    if (sharedMode) {
+      setSelectedPatient(current => current?.id === patient.id ? { ...current, recordFiles: [...stored, ...(current.recordFiles || [])] } : current);
+      sharedDirectory.refresh();
+    } else setDemoRecordFiles(items => [...stored, ...items]);
+    if (!quiet) notify(mode === 'photo' ? 'Fotos guardadas en la sesión.' : 'Archivos guardados en la sesión.');
+    } catch (error) {
+      notify(error?.message || 'No se pudo guardar en la sesión.');
+    }
+  }
+  const resolvePatientFileUrl = async file => {
+    if (sharedMode) return createPatientDirectoryStore().openPatientFile(file.storagePath);
+    const blob = await openDemoRecordFile(file.id);
+    return blob ? URL.createObjectURL(blob) : '';
+  };
+  const saveDocumentSignature = async (kind, file) => {
+    const patient = selectedPatient;
+    if (!patient || !file) return;
+    const recordId = kind === 'contract' ? selectedContractRecordId : selectedConsentRecordId;
+    const history = documentHistory(patient, kind);
+    const record = history.find(item => item.id === recordId) || history.at(-1);
+    const documentTitle = record?.title || (kind === 'contract' ? patient.contractTemplateTitle : selectedConsent) || (kind === 'contract' ? 'Contrato' : 'Consentimiento');
+    const signedAt = new Date().toISOString();
+    const input = { file, title: `Firma · ${documentTitle}`, kind, signedAt: signedAt.slice(0, 10) };
+    const nextHistory = history.map(item => item.id === (record?.id || recordId) ? { ...item, status: 'Firmado', signedAt } : item);
+    const signedUpdate = kind === 'contract'
+      ? { contract: 'Firmado', contractSignedAt: signedAt, contractHistory: nextHistory }
+      : { consent: 'Firmado', consentSignedAt: signedAt, consentHistory: nextHistory };
+    try {
+      let storedFile = { id: `file-${Date.now()}`, title: input.title, kind, signedAt: input.signedAt, mimeType: file.type, byteSize: file.size, createdAt: signedAt };
+      if (sharedMode) {
+        const uploaded = await createPatientDirectoryStore().uploadPatientFile(sharedDirectory.clinicId, patient, input);
+        storedFile = { ...storedFile, ...uploaded };
+        sharedDirectory.refresh();
+      } else {
+        await saveDemoRecordFile(storedFile.id, file);
+        setDemoRecordFiles(items => [{ ...storedFile, patientId: patient.id, demoOnly: true }, ...items]);
+        setPatients(current => current.map(item => item.id === patient.id ? { ...item, ...signedUpdate } : item));
+      }
+      setSelectedPatient(current => current?.id === patient.id ? { ...current, ...signedUpdate, recordFiles: [storedFile, ...(current.recordFiles || [])] } : current);
+      notify('La firma quedó guardada en el expediente.');
+    } catch (error) {
+      notify(error?.message || 'No se pudo guardar la firma.');
+      throw error;
+    }
+  };
+  const saveAccountSignature = async file => {
+    const dataUrl = await fileToDataUrl(file);
+    if (!sharedMode) {
+      const stored = JSON.parse(window.localStorage.getItem('crm-demo-user-profile-v1') || '{}');
+      window.localStorage.setItem('crm-demo-user-profile-v1', JSON.stringify({ ...stored, signatureUrl: dataUrl }));
+      setUserProfile(current => ({ ...current, signatureUrl: dataUrl }));
+      return dataUrl;
+    }
+    const supabase = createSupabaseBrowserClient();
+    if (!supabase) throw new Error('La sesión no está disponible.');
+    const { data: userData, error: userError } = await supabase.auth.getUser();
+    if (userError || !userData.user) throw new Error('Inicia sesión de nuevo para guardar tu firma.');
+    const user = userData.user;
+    const path = `${user.id}/${crypto.randomUUID()}.png`;
+    const bucket = supabase.storage.from('profile-signatures');
+    const { error: uploadError } = await bucket.upload(path, file, { contentType: file.type || 'image/png', cacheControl: '3600', upsert: false });
+    if (uploadError) throw new Error('No se pudo guardar la firma en la cuenta.');
+    const { data: signedData, error: signedError } = await bucket.createSignedUrl(path, 3600);
+    if (signedError || !signedData?.signedUrl) throw new Error('La firma se subió, pero no se pudo mostrar.');
+    const metadata = { ...userProfile.metadata, signature_path: path };
+    const { error: metadataError } = await supabase.auth.updateUser({ data: metadata });
+    if (metadataError) throw new Error('No se pudo guardar la firma en la cuenta.');
+    const previousPath = typeof userProfile.metadata?.signature_path === 'string' ? userProfile.metadata.signature_path : '';
+    if (previousPath.startsWith(`${user.id}/`) && previousPath !== path) await bucket.remove([previousPath]);
+    setUserProfile(current => ({ ...current, metadata, signaturePath: path, signatureUrl: signedData.signedUrl }));
+    return signedData.signedUrl;
   };
   const openPatientFile = async (file) => {
     try {
@@ -1245,7 +1388,10 @@ function App({ children }) {
       try {
         await createClinicAgendaStore().create(sharedDirectory.clinicId, { patient: patientRecord, businessId, branchId, providerId, date, time, modality, service, serviceId, serviceIds, serviceSnapshot, depositRequired, depositAmount, durationMinutes, note, sessionPrice, packageId }, sharedDirectory.timeZone);
         sharedAgenda.refresh();
-        setAgendaDate(date); setModal(null); setPage('agenda'); setProviderFilter(''); setBranchFilter(''); setBusinessFilter(''); notify('Cita guardada en la agenda compartida',false);
+        setAgendaDate(date); setPage('agenda'); setProviderFilter(''); setBranchFilter(''); setBusinessFilter(''); notify('Cita guardada en la agenda compartida',false);
+        const matchedConsent = suggestConsentTemplate(service, consentTemplatesForPage);
+        if (matchedConsent) openConsentPreparation(patientRecord.id, null, matchedConsent.id || matchedConsent.title);
+        else setModal(null);
       } catch (error) {
         if (error?.code === 'APPOINTMENT_PRICE_SCHEMA') { notify(error.message); return; }
         if (packageId && error?.code === '23514' && /package/i.test(error.cause?.message || '')) { notify('El paquete no tiene sesiones disponibles para este servicio.'); return; }
@@ -1255,7 +1401,10 @@ function App({ children }) {
     }
     const appointmentId = `appointment-${crypto.randomUUID()}`;
     setAppointments(prev => [...prev, { id: appointmentId, date, time, patient, patientId, initials: patientRecord.initials, service, serviceId, serviceIds, serviceSnapshot, clinician, providerId, branch, branchId, business, businessId, modality, depositRequired, depositAmount, note, sessionPrice, packageId, duration: `${durationMinutes} min`, status: 'Por confirmar', tone: patientRecord.tone||'blue' }].sort((a,b)=>a.date.localeCompare(b.date)||a.time.localeCompare(b.time)));
-    setAgendaDate(date); setModal(null); setPage('agenda'); setProviderFilter(''); setBranchFilter(''); setBusinessFilter(''); notify('Cita agregada a la agenda',false); addDemoAppointmentAlert('new_appointment','Nueva cita registrada',appointmentId);
+    setAgendaDate(date); setPage('agenda'); setProviderFilter(''); setBranchFilter(''); setBusinessFilter(''); notify('Cita agregada a la agenda',false); addDemoAppointmentAlert('new_appointment','Nueva cita registrada',appointmentId);
+    const matchedConsent = suggestConsentTemplate(service, consentTemplatesForPage);
+    if (matchedConsent) openConsentPreparation(patientRecord.id, null, matchedConsent.id || matchedConsent.title);
+    else setModal(null);
   };
   const updateAppointment = async (event) => {
     event.preventDefault();
@@ -1547,6 +1696,63 @@ function App({ children }) {
     setConsentTemplates(previous => [...previous.map(template => sameTitle(template) ? { ...template, active: false } : template), { id: `consent-template-${Date.now()}`, title, type, content, version: `v${version}`, active: true, uses: '0 expedientes vinculados', initials, color: 'blue' }]);
     setModal(consentTemplateReturn || null); setConsentTemplateReturn(null); setConsentTemplateDraft(null); notify(`Versión v${version} guardada en este navegador`);
   };
+  const renameConsentTemplate = async (template, title) => {
+    const nextTitle = String(title || '').trim();
+    if (!template || !nextTitle) return;
+    if (sharedMode) {
+      if (!can('documents.manage_templates')) { notify('No tienes permiso para cambiar formatos.'); return; }
+      try {
+        await createPatientDirectoryStore().renameTemplate(sharedDirectory.clinicId, template.id, nextTitle);
+        sharedDirectory.refresh();
+        notify('Nombre del formato actualizado. Los documentos ya preparados conservan el nombre con el que se guardaron.');
+      } catch (error) {
+        notify(error.message || 'No se pudo cambiar el nombre.');
+      }
+      return;
+    }
+    setConsentTemplates(previous => previous.map(item => item.id === template.id ? { ...item, title: nextTitle } : item));
+    notify('Nombre del formato actualizado en este navegador.');
+  };
+  const archiveConsentTemplate = async (template) => {
+    if (!template) return;
+    if (sharedMode) {
+      if (!can('documents.manage_templates')) { notify('No tienes permiso para quitar formatos.'); return; }
+      try {
+        await createPatientDirectoryStore().archiveTemplate(sharedDirectory.clinicId, template.id);
+        sharedDirectory.refresh();
+        notify('Formato quitado de la biblioteca. Los expedientes que ya lo usaron conservan su copia.');
+      } catch (error) {
+        notify(error.message || 'No se pudo quitar el formato.');
+      }
+      return;
+    }
+    setConsentTemplates(previous => previous.map(item => item.id === template.id ? { ...item, active: false } : item));
+    notify('Formato quitado de la biblioteca. Los expedientes que ya lo usaron conservan su copia.');
+  };
+  const linkConsentToRecord = async ({ patientId, template, service }) => {
+    if (!patientId || !template) return;
+    const patientRecord = patients.find(patient => patient.id === patientId);
+    if (!patientRecord) return;
+    if (!template.content?.trim()) { notify('Este formato no tiene texto para vincular.'); return; }
+    const requestedAt = new Date().toISOString();
+    if (sharedMode) {
+      if (!can('documents.create')) { notify('No tienes permiso para preparar documentos clínicos.'); return; }
+      try {
+        const result = await createPatientDirectoryStore().createPatientDocument(sharedDirectory.clinicId, patientRecord, { kind: 'consent', template, service: service || null });
+        sharedDirectory.refresh();
+        notify(`Formato vinculado al expediente${service ? ` con ${service}` : ''}. La copia ya guardada no cambia si editas el formato.`);
+        return result;
+      } catch (error) {
+        notify(error.message || 'No se pudo vincular el expediente.');
+        return;
+      }
+    }
+    const consentRecord = { id: `consent-${Date.now()}`, title: template.title, type: template.type || 'Consentimiento informado', templateVersion: String(template.version || '').match(/\d+(?:\.\d+)?/)?.[0] || '', createdByLabel: 'Equipo clínico · demostración', contentSnapshot: template.content, service: service || '', status: 'Pendiente', requestedAt, signedAt: null };
+    const consentHistory = [...documentHistory(patientRecord, 'consent'), consentRecord];
+    const update = { consent: 'Pendiente', consentDocument: template.title, consentRequestedAt: requestedAt, consentContentSnapshot: template.content, consentHistory };
+    setPatients(previous => previous.map(patient => patient.id === patientId ? { ...patient, ...update } : patient));
+    notify(`Formato vinculado al expediente${service ? ` con ${service}` : ''}.`);
+  };
   const createContractTemplate = async (event) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
@@ -1586,6 +1792,7 @@ function App({ children }) {
     const imageUseRaw=String(form.get('imageUseAuthorized')||'');
     const imageUseAuthorized=imageUseRaw==='true'?true:imageUseRaw==='false'?false:null;
     if(/imagen/i.test(document)&&imageUseAuthorized===null){notify('Registra si la persona autoriza o no el uso de su imagen.');return;}
+    if (!templateId) { notify('Elige un formato.'); return; }
     if (!template?.content?.trim()) {
       notify('Agrega el texto oficial aprobado por la clínica antes de preparar una solicitud.');
       return;
@@ -1593,8 +1800,9 @@ function App({ children }) {
     if (sharedMode) {
       if (!can('documents.create')) { notify('No tienes permiso para preparar documentos clínicos.'); return; }
       try {
-        const result = await createPatientDirectoryStore().createPatientDocument(sharedDirectory.clinicId, patientRecord, { kind: 'consent', template, imageUseAuthorized });
-        const consentRecord = { id: result.id, title: result.title || document, type: template.type || 'Consentimiento informado', templateVersion: String(result.templateVersion || ''), createdByLabel: result.createdByLabel, contentSnapshot: result.contentSnapshot, imageUseAuthorized: result.imageUseAuthorized ?? imageUseAuthorized, status: 'Pendiente', requestedAt: result.requestedAt || requestedAt, signedAt: null };
+        const service = String(form.get('service') || '').trim();
+        const result = await createPatientDirectoryStore().createPatientDocument(sharedDirectory.clinicId, patientRecord, { kind: 'consent', template, imageUseAuthorized, service: service || null });
+        const consentRecord = { id: result.id, title: result.title || document, type: template.type || 'Consentimiento informado', templateVersion: String(result.templateVersion || ''), createdByLabel: result.createdByLabel, contentSnapshot: result.contentSnapshot, service: service || '', imageUseAuthorized: result.imageUseAuthorized ?? imageUseAuthorized, status: 'Pendiente', requestedAt: result.requestedAt || requestedAt, signedAt: null };
         const update = { consent: 'Pendiente', consentDocument: consentRecord.title, consentRequestedAt: consentRecord.requestedAt, consentContentSnapshot: consentRecord.contentSnapshot, consentHistory: [...documentHistory(patientRecord, 'consent').map(record => record.status === 'Pendiente' ? { ...record, status: 'Reemplazado', replacedAt: consentRecord.requestedAt, replacedBy: consentRecord.id } : record), consentRecord] };
         setSelectedPatient({ ...patientRecord, ...update });
         setSelectedConsent(document); setSelectedConsentRecordId(consentRecord.id); setModal('consent-view');
@@ -1605,7 +1813,7 @@ function App({ children }) {
       }
       return;
     }
-    const consentRecord = { id: `consent-${Date.now()}`, title: document, type: template.type || 'Consentimiento informado', templateVersion: String(template.version || '').match(/\d+(?:\.\d+)?/)?.[0] || '', createdByLabel: 'Equipo clínico · demostración', contentSnapshot: template.content, imageUseAuthorized, status: 'Pendiente', requestedAt, signedAt: null };
+    const consentRecord = { id: `consent-${Date.now()}`, title: document, type: template.type || 'Consentimiento informado', templateVersion: String(template.version || '').match(/\d+(?:\.\d+)?/)?.[0] || '', createdByLabel: 'Equipo clínico · demostración', contentSnapshot: template.content, service: String(form.get('service') || ''), imageUseAuthorized, status: 'Pendiente', requestedAt, signedAt: null };
     const consentHistory = [...documentHistory(patientRecord, 'consent').map(record => record.status === 'Pendiente' ? { ...record, status: 'Reemplazado', replacedAt: requestedAt, replacedBy: consentRecord.id } : record), consentRecord];
     const update = { consent: 'Pendiente', consentDocument: document, consentRequestedAt: requestedAt, consentContentSnapshot: consentRecord.contentSnapshot, consentHistory };
     setSelectedPatient({ ...patientRecord, ...update });
@@ -1766,7 +1974,7 @@ function App({ children }) {
 
   const nav = [
     { section: 'PRINCIPAL', links: [{ id: 'overview', label: 'Resumen', icon: LayoutDashboard }, { id: 'agenda', label: 'Agenda', icon: CalendarDays, count: String(workspaceAppointments.filter(a => !a.date || a.date === agendaDate).length) }, { id: 'patients', label: 'Pacientes', icon: UsersRound }] },
-    { section: 'OPERACIÓN', links: [{ id: 'payments', label: 'Pagos', icon: DollarSign }, { id: 'recall', label: 'Seguimiento', icon: Activity, count: String(buildPatientRecallQueue(workspacePatients, workspaceAppointments, recallPackages, clinicTimeZone).length) }, { id: 'reminders', label: 'Recordatorios', icon: Bell }, ...(can('whatsapp.view') ? [{ id: 'whatsapp', label: 'WhatsApp', icon: MessageCircle }] : [])] },
+    { section: 'OPERACIÓN', links: [{ id: 'payments', label: 'Pagos', icon: DollarSign }, { id: 'recall', label: 'Seguimiento', icon: Activity, count: String(buildPatientRecallQueue(workspacePatients, workspaceAppointments, recallPackages, clinicTimeZone).length) }, { id: 'reminders', label: 'Recordatorios', icon: Bell }, ...(can('whatsapp.view') ? [{ id: 'whatsapp', label: 'WhatsApp', icon: MessageCircle }, { id: 'messages', label: 'Instagram y Messenger', icon: AtSign }] : [])] },
     { section: 'GESTIÓN CLÍNICA', links: [{ id: 'consents', label: 'Consentimientos', icon: FileCheck2, count: String(workspacePatients.filter(p => p.consent === 'Pendiente').length) }, { id: 'contracts', label: 'Contratos', icon: FileText }, { id: 'team', label: 'Equipo y sucursales', icon: UserRound }] },
   ];
 
@@ -1774,7 +1982,9 @@ function App({ children }) {
 
   return <div className="app-shell">
     <aside className={`sidebar ${mobileNavOpen?'mobile-open':''}`}>
-      <Link className="brand" href="/" aria-label="Ir al panel principal de Elixir Clinic" title="Ir al panel principal"><Image className="brand-logo" src={theme==='dark'?'/elixirclinic-logo-dark.png':'/elixirclinic-logo.png'} alt="Elixir Clinic" width={1374} height={1145} unoptimized/></Link>
+      <span className="zone-corner zone-corner-tl" aria-hidden="true"/>
+      <span className="zone-corner zone-corner-tr" aria-hidden="true"/>
+      <BrandSwitch theme={theme}/>
       <div className="workspace-switcher" ref={workspaceSwitcherRef}>
         {canSwitchWorkspace
           ? <button type="button" className="workspace-chip workspace-chip-button" title="Cambiar clínica y área" aria-label={`Selección actual: ${workspaceLabel}. Cambiar clínica y área`} aria-haspopup="menu" aria-expanded={workspaceMenuOpen} onClick={() => setWorkspaceMenuOpen(open => !open)}><span className="online-dot"/><span>{workspaceLabel}</span><ChevronDown size={14}/></button>
@@ -1788,16 +1998,20 @@ function App({ children }) {
         </div>}
       </div>
       <nav className="side-nav">{nav.map(group=><div className="nav-group" key={group.section}><div className="nav-caption">{group.section}</div>{group.links.map(item=><button key={item.id} className={`nav-item ${page===item.id?'active':''}`} onClick={()=>setPage(item.id)}><item.icon size={17}/><span>{item.label}</span>{item.count&&<span className="nav-count">{item.count}</span>}</button>)}</div>)}</nav>
-      <div className="sidebar-bottom"><button className={`nav-item ${page==='settings'?'active':''}`} onClick={()=>setPage('settings')}><Settings2 size={17}/><span>Configuración</span></button><div className="profile-row"><button type="button" className="profile-identity" onClick={()=>setPage('profile')} aria-label="Abrir mi perfil"><Avatar initials={profileInitials(displayUserName)} tone="navy" imageUrl={userProfile.avatarUrl}/><span className="profile-copy"><strong>{profileLoaded?displayUserName:'Cargando perfil…'}</strong></span></button><button type="button" className="profile-logout" onClick={()=>setModal('confirm-logout')}>Cerrar sesión</button></div></div>
+      <div className="sidebar-bottom"><span className="sidebar-above-flora sidebar-above-flora-left" aria-hidden="true"/><span className="sidebar-above-flora sidebar-above-flora-right" aria-hidden="true"/><div className="profile-row"><span className="profile-mini profile-mini-tl" aria-hidden="true"/><span className="profile-mini profile-mini-br" aria-hidden="true"/><button type="button" className="profile-identity" onClick={()=>setPage('profile')} aria-label="Abrir mi perfil"><Avatar initials={profileInitials(displayUserName)} tone="navy" imageUrl={userProfile.avatarUrl}/></button><span className="profile-copy"><button type="button" className="profile-name" onClick={()=>setPage('profile')}><strong>{profileLoaded?displayUserName:'Cargando perfil…'}</strong></button><button type="button" className="profile-logout" onClick={()=>setModal('confirm-logout')}>Cerrar sesión</button></span><button type="button" className={`profile-settings ${page==='settings'?'active':''}`} onClick={()=>setPage('settings')} aria-label="Configuración"><Settings size={20} strokeWidth={2.25}/></button></div></div>
     </aside>
     {mobileNavOpen&&<button className="mobile-nav-backdrop" aria-label="Cerrar navegación" onClick={()=>setMobileNavOpen(false)}/>}
     <main className="main-shell">
-      <header className="topbar"><button className="mobile-menu-button" aria-label="Abrir navegación" aria-expanded={mobileNavOpen} onClick={()=>setMobileNavOpen(open=>!open)}><Menu size={18}/></button><div className="breadcrumbs"><span>{activeClinicName}</span><ChevronRight size={14}/><strong>{({overview:'Resumen',agenda:'Agenda',payments:'Pagos',recall:'Seguimiento',reminders:'Recordatorios',whatsapp:'WhatsApp',patients:'Pacientes',consents:'Consentimientos',contracts:'Contratos',team:'Equipo y sucursales',settings:'Configuración',profile:'Mi perfil'})[page]}</strong></div><div className="topbar-actions"><button className="search-shortcut" onClick={openPatientSearch}><Search size={15}/><span>Buscar</span></button><span className="topbar-divider"/><IconButton className="theme-toggle-button" aria-label={theme==='dark'?'Activar modo claro':'Activar modo oscuro'} aria-pressed={theme==='dark'} title={theme==='dark'?'Cambiar a modo claro':'Cambiar a modo oscuro'} onClick={()=>setTheme(current=>current==='dark'?'light':'dark')}>{theme==='dark'?<Sun size={18}/>:<Moon size={18}/>}</IconButton><IconButton className="mobile-install-button" type="button" aria-label="Instalar app para Android" title="Instalar app para Android" onClick={()=>setModal('install-app')}><Smartphone size={18}/></IconButton><NotificationCenter key={notificationScope} {...notificationFeed}/><button type="button" className="topbar-profile-button" aria-label="Abrir mi perfil" onClick={()=>setPage('profile')}><Avatar initials={profileInitials(displayUserName)} tone="navy" imageUrl={userProfile.avatarUrl}/></button></div>{sharedPageStatus === 'loading' && <div className="clinic-loading-track" role="progressbar" aria-label="Cargando datos de la clínica" />}</header>
+      <span className="canvas-corner canvas-corner-tl" aria-hidden="true"/>
+      <span className="canvas-corner canvas-corner-tr" aria-hidden="true"/>
+      <span className="canvas-corner canvas-corner-bl" aria-hidden="true"/>
+      <span className="canvas-corner canvas-corner-br" aria-hidden="true"/>
+      <header className="topbar"><span className="bar-corner bar-corner-left" aria-hidden="true"/><span className="bar-field" aria-hidden="true"/><span className="bar-corner bar-corner-right" aria-hidden="true"/><button className="mobile-menu-button" aria-label="Abrir navegación" aria-expanded={mobileNavOpen} onClick={()=>setMobileNavOpen(open=>!open)}><Menu size={18}/></button><div className="breadcrumbs"><span>{activeClinicName}</span><ChevronRight size={14}/><strong>{({overview:'Resumen',agenda:'Agenda',payments:'Pagos',recall:'Seguimiento',reminders:'Recordatorios',whatsapp:'WhatsApp',messages:'Instagram y Messenger',patients:'Pacientes',consents:'Consentimientos',contracts:'Contratos',team:'Equipo y sucursales',settings:'Configuración',profile:'Mi perfil'})[page]}</strong></div><div className="topbar-actions"><button className="search-shortcut" onClick={openPatientSearch}><Search size={15}/><span>Buscar</span></button><span className="topbar-divider"/><IconButton className="theme-toggle-button" aria-label={theme==='dark'?'Activar modo claro':'Activar modo oscuro'} aria-pressed={theme==='dark'} title={theme==='dark'?'Cambiar a modo claro':'Cambiar a modo oscuro'} onClick={()=>setTheme(current=>current==='dark'?'light':'dark')}>{theme==='dark'?<Sun size={18}/>:<Moon size={18}/>}</IconButton><IconButton className="mobile-install-button" type="button" aria-label="Instalar app para Android" title="Instalar app para Android" onClick={()=>setModal('install-app')}><Smartphone size={18}/></IconButton><NotificationCenter key={notificationScope} {...notificationFeed}/><button type="button" className="topbar-profile-button" aria-label="Abrir mi perfil" onClick={()=>setPage('profile')}><Avatar initials={profileInitials(displayUserName)} tone="navy" imageUrl={userProfile.avatarUrl}/></button></div>{sharedPageStatus === 'loading' && <div className="clinic-loading-track" role="progressbar" aria-label="Cargando datos de la clínica" />}</header>
     <div className="content-area">
         {!sharedMode && <div className="demo-storage-banner" role="status"><ShieldCheck size={15}/> Modo de demostración: usa solo datos ficticios. Los cambios se guardan en este navegador; no es un sistema seguro para información real de pacientes. Conecta el proyecto Supabase de la clínica antes de usarlo en operación.</div>}
         {sharedMode && <SharedDataStatus status={sharedPageStatus} memberships={sharedDirectory.memberships} chooseClinic={sharedDirectory.chooseClinic} retry={sharedPageRetry}/>}
         <div className="shared-page-content" aria-busy={sharedMode && page !== 'profile' && sharedPageStatus === 'loading'} inert={sharedMode && page !== 'profile' && sharedPageStatus !== 'ready'}>
-        {page==='overview' && <Overview sharedMode={sharedMode} canCreateAppointment={can('agenda.create')} timeZone={clinicTimeZone} patients={workspacePatients} appointments={workspaceAppointments} patientActivities={workspacePatientActivities} pendingDocs={pendingDocs} setPage={setPage} setModal={setModal} notify={notify} onNewAppointment={openNewAppointment} onOpenPatient={patient=>{setSelectedPatient(patient);setPatientRecordTab('overview');setModalReturn(null);setModal('patient')}} onOpenDocument={openPatientDocument}/>}
+        {page==='overview' && <Overview userName={displayUserName} canCreateAppointment={can('agenda.create')} timeZone={clinicTimeZone} patients={workspacePatients} appointments={workspaceAppointments} payments={workspacePayments} setPage={setPage} notify={notify} onNewAppointment={openNewAppointment} onOpenPatient={patient=>{setSelectedPatient(patient);setPatientRecordTab('overview');setModalReturn(null);setModal('patient')}}/>}
         {page==='patients' && <PatientsPage key={`${activeWorkspaceSelection.businessId}:${activeWorkspaceSelection.branchId}`} patients={filteredPatients} allPatients={workspacePatients} query={query} setQuery={setQuery} searchRef={patientSearchRef} setModal={setModal} canCreatePatient={can('patients.create')} sharedMode={sharedMode} onOpen={p=>{setSelectedPatient(p);setPatientRecordTab('overview');setModalReturn(null);setModal('patient')}}/>}
         {!sharedMode&&page==='agenda' && <AgendaPage allProviders={providers.filter(provider=>provider.active)} allAppointments={appointments} clinicId={sharedDirectory.clinicId} currentAccountProviderId={providers.find(provider=>provider.userId&&provider.userId===userProfile.userId)?.id||''} accountReady={profileLoaded&&sharedDirectory.status==='ready'} listEnd={agendaListEnd} setListEnd={setAgendaListEnd} timeZone={clinicTimeZone} appointments={filteredAppointments} payments={workspacePayments} providerFilter={providerFilter} setProviderFilter={setProviderFilter} providerOptions={providerOptions} branchFilter={branchFilter} setBranchFilter={updateAgendaBranchFilter} branchOptions={branchOptions} businessFilter={businessFilter} setBusinessFilter={updateAgendaBusinessFilter} businessOptions={businessOptions} period={period} setPeriod={setPeriod} onNewAppointment={openNewAppointment} canCreateAppointment onEditAppointment onCancelAppointment notify={notify} agendaDate={agendaDate} setAgendaDate={setAgendaDate} onOpenAppointment={appointment=>{setSelectedAppointment(appointment);setModal('appointment')}}/>}
         {sharedMode&&page==='agenda'&&<AgendaPage allProviders={providers.filter(provider=>provider.active)} allAppointments={appointments} clinicId={sharedDirectory.clinicId} currentAccountProviderId={providers.find(provider=>provider.userId&&provider.userId===userProfile.userId)?.id||''} accountReady={profileLoaded&&sharedDirectory.status==='ready'} listEnd={agendaListEnd} setListEnd={setAgendaListEnd} timeZone={clinicTimeZone} appointments={filteredAppointments} payments={[]} sharedMode providerFilter={providerFilter} setProviderFilter={setProviderFilter} providerOptions={providerOptions} branchFilter={branchFilter} setBranchFilter={updateAgendaBranchFilter} branchOptions={branchOptions} businessFilter={businessFilter} setBusinessFilter={updateAgendaBusinessFilter} businessOptions={businessOptions} period={period} setPeriod={setPeriod} onNewAppointment={openNewAppointment} canCreateAppointment={can('agenda.create')} canEditAppointment={can('agenda.edit')} canCancelAppointment={can('agenda.cancel')} notify={notify} agendaDate={agendaDate} setAgendaDate={setAgendaDate} onOpenAppointment={appointment=>{setSelectedAppointment(appointment);setModal('appointment')}}/>}
@@ -1812,19 +2026,21 @@ function App({ children }) {
         {!sharedMode&&page==='reminders'&&<RemindersPage reminders={workspaceReminders}/>}
         {sharedMode&&page==='reminders'&&<RemindersPage sharedMode reminders={workspaceReminders}/>}
         {page==='recall'&&<PatientRecallPage patients={workspacePatients} appointments={workspaceAppointments} packages={recallPackages} packageStatus={sharedMode ? sharedRecallPackageState.status : 'ready'} timeZone={clinicTimeZone} onRetryPackages={()=>setSharedRecallReload(value=>value+1)} onOpenPatient={patient=>{setSelectedPatient(patient);setPatientRecordTab('overview');setModalReturn(null);setModal('patient')}} onNewAppointment={(patient,purchase)=>openNewAppointment(agendaDate,'17:00',patient.id,'',purchase?.id||'',purchase?.serviceId||'',purchase?.serviceName||'')}/>}
-      {page==='consents'&&<ConsentsPage patients={workspacePatients} templates={consentTemplatesForPage} notify={notify} onOpenDocument={openPatientDocument} onPrepareConsent={template=>openConsentPreparation('',null,template?.id||template?.title||'')} onNewTemplate={()=>openConsentTemplateCreation()} onNewVersion={template=>openConsentTemplateCreation(null, template)} sharedMode={sharedMode} canPrepare={can('documents.create')} canManageTemplates={can('documents.manage_templates')}/>}
+      {page==='consents'&&<ConsentsPage patients={workspacePatients} services={serviceCatalog} templates={consentTemplatesForPage} notify={notify} onPrepareConsent={template=>openConsentPreparation('',null,template?.id||template?.title||'')} onNewTemplate={()=>openConsentTemplateCreation()} onEditTemplate={template=>openConsentTemplateCreation(null, template)} onRenameTemplate={renameConsentTemplate} onArchiveTemplate={archiveConsentTemplate} onLinkTemplate={linkConsentToRecord} sharedMode={sharedMode} canPrepare={can('documents.create')} canManageTemplates={can('documents.manage_templates')}/>}
         {page==='contracts'&&<ContractsPage patients={workspacePatients} templates={contractTemplatesForPage} setModal={setModal} notify={notify} onOpenDocument={openPatientDocument} onNewContract={()=>openContractPreparation()} onNewTemplate={()=>openContractTemplateCreation()} sharedMode={sharedMode} canPrepare={can('documents.create')} canManageTemplates={can('documents.manage_templates')}/>}
         {!sharedMode&&page==='team' && <TeamPage businesses={businesses} branches={branches} providers={providers} setModal={setModal} notify={notify} onEditBranch={branch=>{setSelectedBranchRecord(branch);setModal('edit-branch')}} onEditProvider={provider=>{setSelectedProvider(provider);setModal('edit-provider')}}/>}
         {sharedMode&&page==='team'&&<><TeamPage sharedMode clinicId={sharedDirectory.clinicId} businesses={businesses} branches={branches} providers={providers} setModal={setModal} notify={notify} onEditBranch={branch=>{setSelectedBranchRecord(branch);setModal('edit-branch')}} onEditProvider={provider=>{setSelectedProvider(provider);setModal('edit-provider')}} canManageBusinesses={can('team.manage_branches')} canManageProviders={can('team.manage_professionals')}/>{sharedDirectory.role==='admin'&&<ClinicAccessManager clinicId={sharedDirectory.clinicId}/>}</>}
         {page==='whatsapp'&&<WhatsAppInbox sharedMode={sharedMode} clinicId={sharedDirectory.clinicId} role={sharedDirectory.role} permissions={sharedDirectory.permissions}/>}
+        {page==='messages'&&<SocialInbox/>}
         {page==='settings'&&<SettingsPage currentUserId={userProfile.userId} publicBranches={branches} publicProviders={providers} services={serviceCatalog} promotionData={promotionData} onSavePromotion={saveClinicPromotion} patients={patients} onRequestApproved={sharedDirectory.refresh} clinicName={activeClinicName} sharedMode={sharedMode} clinicId={sharedDirectory.clinicId} role={sharedDirectory.role} permissions={sharedDirectory.permissions} branches={workspaceBranches} providers={workspaceProviders} timeZone={sharedDirectory.timeZone} onCatalogChange={setServiceCatalog} onSaveClinicName={saveClinicName}/>}
         {page==='profile'&&<ProfilePage profile={{...userProfile,name:displayUserName}} clinicName={activeClinicName} memberships={sharedDirectory.memberships} clinicId={sharedDirectory.clinicId} onSelectClinic={sharedDirectory.chooseClinic} sharedMode={sharedMode} onProfileChange={setUserProfile} notify={notify}/>}
         </div>
+        <footer className="clinic-footer"><span>Elixir Clinic ©</span> · Solución digital by <a href="https://mkzsolutions.com.mx" target="_blank" rel="noreferrer">MKZ Solutions</a></footer>
       </div>
     </main>
     {modal==='install-app' && <Modal className="mobile-install-modal" title="Instalar Elixir Clinic para Android" subtitle="Escanea el código con tu teléfono o copia el enlace." close={()=>setModal(null)}><MobileInstallLink /></Modal>}
     {modal==='confirm-logout'&&<Modal title="Cerrar sesión" subtitle="¿Quieres salir de tu cuenta en este dispositivo?" close={()=>setModal(null)}><div className="modal-actions"><button type="button" className="button secondary" onClick={()=>setModal(null)}>Cancelar</button><form action={async formData=>{await unlinkPushOnSignOut(formData);await signOut(formData)}}><button type="submit" className="button primary">Cerrar sesión</button></form></div></Modal>}
-    {modal==='patient' && selectedPatient && <PatientModal patient={selectedPatient} activeRecordTab={patientRecordTab} setActiveRecordTab={setPatientRecordTab} clinicalBackground={sharedMode?selectedPatient.clinicalBackground:demoClinicalBackgrounds.find(item=>item.patientId===selectedPatient.id)||selectedPatient.clinicalBackground} packagePanel={<PatientPackagePanel key={selectedPatient.id} patient={selectedPatient} clinicId={sharedDirectory.clinicId} sharedMode={sharedMode} timeZone={clinicTimeZone} canCreate={can('payments.create')} services={serviceCatalog} promotions={promotionData.rows} demoPurchases={demoPackages} appointments={demoAppointments} payments={demoPayments} onDemoPurchase={purchase=>setDemoPackages(items=>[purchase,...items.filter(item=>item.id!==purchase.id)])}/>} appointments={workspaceAppointments} activities={workspacePatientActivities.filter(activity=>activity.patientId===selectedPatient.id)} clinicalHistory={sharedMode?(selectedPatient.clinicalHistory||[]):demoClinicalHistory.filter(item=>item.patientId===selectedPatient.id)} botoxTreatments={sharedMode?(selectedPatient.botoxTreatments||[]):demoBotoxTreatments.filter(item=>item.patientId===selectedPatient.id)} procedures={sharedMode?(selectedPatient.procedures||[]):demoProcedures.filter(item=>item.patientId===selectedPatient.id)} recordFiles={sharedMode?(selectedPatient.recordFiles||[]):demoRecordFiles.filter(item=>item.patientId===selectedPatient.id)} sharedMode={sharedMode} canEditPatient={can('patients.edit')} canDiagnose={can('clinical.edit')} canWriteClinical={can('clinical.create')} canPrepareContract={can('documents.create')} canPrepareConsent={can('documents.create')} canCreateAppointment={can('agenda.create')} close={()=>setModal(null)} notify={notify} onAddActivity={()=>openPatientRecordModal('new-patient-activity')} onClinicalBackground={()=>openPatientRecordModal('patient-clinical-background')} onNewEncounter={()=>openPatientRecordModal('new-clinical-encounter')} onNewBotoxTreatment={()=>openPatientRecordModal('new-botox-treatment')} onNewProcedure={()=>openProcedure(null)} onEditProcedure={openProcedure} onDeleteProcedure={deleteProcedure} procedurePending={procedurePending} onAddRecordFile={()=>openPatientRecordModal('new-patient-file')} onOpenRecordFile={openPatientFile} onEdit={()=>openPatientRecordModal('edit-patient')} onDiagnosis={()=>openPatientRecordModal('diagnosis')} onNewAppointment={()=>openNewAppointment(agendaDate,'17:00',selectedPatient.id)} onPrepareContract={()=>openContractPreparation(selectedPatient.id,'patient')} onPrepareConsent={()=>openConsentPreparation(selectedPatient.id,'patient')} onOpenContract={()=>openPatientDocument(selectedPatient,'contract','patient')} onOpenConsent={()=>openPatientDocument(selectedPatient,'consent','patient')} onOpenDocumentRecord={record=>openPatientDocumentRecord(selectedPatient,record,'patient')}/>}
+    {modal==='patient' && selectedPatient && <PatientModal patient={selectedPatient} activeRecordTab={patientRecordTab} setActiveRecordTab={setPatientRecordTab} clinicalBackground={sharedMode?selectedPatient.clinicalBackground:demoClinicalBackgrounds.find(item=>item.patientId===selectedPatient.id)||selectedPatient.clinicalBackground} packagePanel={<PatientPackagePanel key={selectedPatient.id} patient={selectedPatient} clinicId={sharedDirectory.clinicId} sharedMode={sharedMode} timeZone={clinicTimeZone} canCreate={can('payments.create')} services={serviceCatalog} promotions={promotionData.rows} demoPurchases={demoPackages} appointments={demoAppointments} payments={demoPayments} onDemoPurchase={purchase=>setDemoPackages(items=>[purchase,...items.filter(item=>item.id!==purchase.id)])}/>} appointments={workspaceAppointments} activities={workspacePatientActivities.filter(activity=>activity.patientId===selectedPatient.id)} clinicalHistory={sharedMode?(selectedPatient.clinicalHistory||[]):demoClinicalHistory.filter(item=>item.patientId===selectedPatient.id)} botoxTreatments={sharedMode?(selectedPatient.botoxTreatments||[]):demoBotoxTreatments.filter(item=>item.patientId===selectedPatient.id)} procedures={sharedMode?(selectedPatient.procedures||[]):demoProcedures.filter(item=>item.patientId===selectedPatient.id)} recordFiles={sharedMode?(selectedPatient.recordFiles||[]):demoRecordFiles.filter(item=>item.patientId===selectedPatient.id)} onSaveSessionMedia={saveSessionMedia} resolvePatientFileUrl={resolvePatientFileUrl} sharedMode={sharedMode} canEditPatient={can('patients.edit')} canDiagnose={can('clinical.edit')} canWriteClinical={can('clinical.create')} canPrepareContract={can('documents.create')} canPrepareConsent={can('documents.create')} canCreateAppointment={can('agenda.create')} close={()=>setModal(null)} notify={notify} onAddActivity={()=>openPatientRecordModal('new-patient-activity')} onClinicalBackground={()=>openPatientRecordModal('patient-clinical-background')} onNewEncounter={()=>openPatientRecordModal('new-clinical-encounter')} onNewBotoxTreatment={()=>openPatientRecordModal('new-botox-treatment')} onNewProcedure={()=>openProcedure(null)} onEditProcedure={openProcedure} onDeleteProcedure={deleteProcedure} procedurePending={procedurePending} onAddRecordFile={()=>openPatientRecordModal('new-patient-file')} onOpenRecordFile={openPatientFile} onEdit={()=>openPatientRecordModal('edit-patient')} onDiagnosis={()=>openPatientRecordModal('diagnosis')} onNewAppointment={()=>openNewAppointment(agendaDate,'17:00',selectedPatient.id)} onPrepareContract={()=>openContractPreparation(selectedPatient.id,'patient')} onPrepareConsent={()=>openConsentPreparation(selectedPatient.id,'patient','',[...(selectedPatient.consentHistory||[])].reverse().find(record=>record.status!=='Reemplazado'&&record.service)?.service||'')} onOpenContract={()=>openPatientDocument(selectedPatient,'contract','patient')} onOpenConsent={()=>openPatientDocument(selectedPatient,'consent','patient')} onOpenDocumentRecord={record=>openPatientDocumentRecord(selectedPatient,record,'patient')}/>}
     <dialog ref={procedureDeletionDialog} className="point-removal-dialog" aria-labelledby="procedure-delete-title"
       aria-describedby="procedure-delete-description" onClose={() => setPendingProcedureDeletion(null)}>
       <div className="point-removal-heading">
@@ -1846,22 +2062,22 @@ function App({ children }) {
     {modal==='patient-clinical-background' && selectedPatient && <ClinicalBackgroundModal patient={selectedPatient} clinicalBackground={sharedMode?selectedPatient.clinicalBackground:demoClinicalBackgrounds.find(item=>item.patientId===selectedPatient.id)||selectedPatient.clinicalBackground} sharedMode={sharedMode} close={returnToPatientRecord} onSubmit={savePatientClinicalHistory}/>}
     {modal==='new-clinical-encounter' && selectedPatient && <ClinicalEncounterModal patient={selectedPatient} appointments={workspaceAppointments.filter(item=>item.patientId===selectedPatient.id||item.patient===selectedPatient.name)} sharedMode={sharedMode} close={returnToPatientRecord} onSubmit={addClinicalEncounter}/>}
     {modal==='new-botox-treatment' && selectedPatient && <BotoxTreatmentModal patient={selectedPatient} appointments={workspaceAppointments.filter(item=>item.patientId===selectedPatient.id||item.patient===selectedPatient.name)} sharedMode={sharedMode} close={returnToPatientRecord} onSubmit={addBotoxTreatment}/>}
-    {modal==='new-patient-procedure' && selectedPatient && <ProcedureModal patient={selectedPatient} appointments={workspaceAppointments.filter(item=>item.patientId===selectedPatient.id||item.patient===selectedPatient.name)} record={editingProcedure} pending={procedurePending} sharedMode={sharedMode} close={returnToPatientRecord} onSubmit={saveProcedure}/>}
+    {modal==='new-patient-procedure' && selectedPatient && <ProcedureModal patient={selectedPatient} services={serviceCatalog} templates={consentTemplatesForPage} record={editingProcedure} recordFiles={sharedMode?(selectedPatient.recordFiles||[]):demoRecordFiles.filter(item=>item.patientId===selectedPatient.id)} pending={procedurePending} sharedMode={sharedMode} close={returnToPatientRecord} onSubmit={saveProcedure} onSignConsent={signConsentForService}/>}
     {modal==='new-patient-file' && selectedPatient && <PatientFileModal patient={selectedPatient} sharedMode={sharedMode} close={returnToPatientRecord} onSubmit={attachPatientFile}/>}
     {modal==='diagnosis' && selectedPatient && <DiagnosisModal patient={selectedPatient} sharedMode={sharedMode} close={returnToPatientRecord} onAccept={acceptDiagnosis}/>}
     {modal==='contract-prompt' && selectedPatient && <ContractPromptModal patient={selectedPatient} close={returnToPatientRecord} onViewContract={()=>{setSelectedContractRecordId(latestDocumentRecord(selectedPatient,'contract')?.id || '');setModal('contract-view')}} onPrepareContract={()=>openContractPreparation(selectedPatient.id, 'patient')}/>}
-    {modal==='contract-view' && selectedPatient && <ContractViewerModal sharedMode={sharedMode} patient={viewedContractPatient || selectedPatient} close={()=>modalReturn==='patient'?returnToPatientRecord():setModal(modalReturn || null)} onPrint={()=>window.print()} onDiagnosis={()=>openPatientRecordModal('diagnosis')} onSign={()=>simulateSignature('contract')} onPrepare={()=>openContractPreparation(selectedPatient.id, modalReturn)}/>}
-    {modal==='consent-view' && selectedPatient && <ConsentViewerModal sharedMode={sharedMode} patient={selectedPatient} document={selectedConsent} content={selectedConsentRecord?.contentSnapshot ?? ''} status={selectedConsentRecord?.status || selectedPatient.consent} signedAt={selectedConsentRecord?.signedAt || null} close={()=>modalReturn==='patient'?returnToPatientRecord():setModal(modalReturn || null)} onPrint={()=>window.print()} onSign={()=>simulateSignature('consent')}/>}
+    {modal==='contract-view' && selectedPatient && <ContractViewerModal sharedMode={sharedMode} patient={viewedContractPatient || selectedPatient} staffName={displayUserName} staffSignatureUrl={userProfile.signatureUrl} close={()=>modalReturn==='patient'?returnToPatientRecord():setModal(modalReturn || null)} onPrint={()=>{const previous=document.title;document.title=clinicFileStamp(selectedPatient.name);window.print();window.setTimeout(()=>{document.title=previous;},400);}} onDownload={signatures=>downloadClinicDocument({title:selectedContractRecord?.title||selectedPatient.contractTemplateTitle||'Contrato',patientName:selectedPatient.name,fileName:clinicFileStamp(selectedPatient.name),body:fillDocumentPlaceholders(selectedContractRecord?.contentSnapshot||selectedPatient.contractContent||'',selectedPatient),signatures})} onDiagnosis={()=>openPatientRecordModal('diagnosis')} onSign={()=>simulateSignature('contract')} onSaveSignature={file=>saveDocumentSignature('contract',file)} onSaveStaffSignature={saveAccountSignature} onPrepare={()=>openContractPreparation(selectedPatient.id, modalReturn)}/>}
+    {modal==='consent-view' && selectedPatient && <ConsentViewerModal sharedMode={sharedMode} patient={selectedPatient} staffName={displayUserName} staffSignatureUrl={userProfile.signatureUrl} document={selectedConsent} content={withPatientWord(fillDocumentPlaceholders(selectedConsentRecord?.contentSnapshot ?? '', {...selectedPatient, treatment: selectedConsentRecord?.service || selectedPatient.treatment}))} status={selectedConsentRecord?.status || selectedPatient.consent} signedAt={selectedConsentRecord?.signedAt || null} close={()=>modalReturn==='patient'?returnToPatientRecord():setModal(modalReturn || null)} onPrint={()=>window.print()} onDownload={()=>downloadClinicDocument({title:selectedConsent||'Consentimiento',patientName:selectedPatient.name,body:withPatientWord(fillDocumentPlaceholders(selectedConsentRecord?.contentSnapshot ?? '', selectedPatient))})} onChangeService={()=>openConsentPreparation(selectedPatient.id,'consent-view','',selectedConsentRecord?.service||'')} onSign={()=>simulateSignature('consent')} onSaveSignature={file=>saveDocumentSignature('consent',file)}/>}
     {modal==='new-patient' && <Modal title="Agregar paciente" subtitle="Crea el expediente; el profesional se elige en cada cita." close={()=>setModal(null)}><form onSubmit={addPatient} className="form-stack"><label className="whatsapp-opt-in"><input type="checkbox" name="firstVisit"/> Primera vez</label><label>Nombre completo<input name="name" autoFocus placeholder="Ej. Andrea García" required/></label><div className="form-grid"><label>Correo electrónico<input name="email" type="email" placeholder="correo@ejemplo.com"/></label><label>Teléfono<input name="phone" placeholder="Teléfono de contacto"/></label></div><label>Tratamiento o servicio<input name="treatment" placeholder="Por definir"/></label><label>Sucursal<select name="branchId" defaultValue={activeWorkspaceSelection.branchId || workspaceBranches.find(item=>item.active)?.id || ''}><option value="">Sin asignar</option>{workspaceBranches.filter(item=>item.active).map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</select></label><div className="form-note"><ShieldCheck size={15}/> {sharedMode?"Se guardará en el directorio compartido del consultorio.":"Prototipo de demostración: no ingreses datos reales de pacientes."}</div><div className="modal-actions"><button type="button" className="button secondary" onClick={()=>setModal(null)}>Cancelar</button><button className="button primary" type="submit"><Plus size={16}/> Crear expediente</button></div></form></Modal>}
     {modal==='edit-patient' && selectedPatient && <Modal title="Editar expediente" subtitle={`${selectedPatient.id} · Actualiza sus datos de contacto y atención.`} close={returnToPatientRecord}><form onSubmit={updatePatient} className="form-stack"><input type="hidden" name="id" value={selectedPatient.id}/><label>Nombre completo<input name="name" defaultValue={selectedPatient.name} autoFocus required/></label><div className="form-grid"><label>Correo electrónico<input name="email" type="email" defaultValue={selectedPatient.email||''} placeholder="correo@ejemplo.com"/></label><label>Teléfono<input name="phone" defaultValue={selectedPatient.phone||''} placeholder="Teléfono de contacto"/></label></div><label>Tratamiento o servicio<input name="treatment" defaultValue={selectedPatient.treatment||''} placeholder="Por definir"/></label><div className="form-grid"><label>Sucursal<select name="branchId" defaultValue={workspaceBranches.find(item=>item.name===selectedPatient.branch)?.id||selectedPatient.branchId||''}><option value="">Sin asignar</option>{workspaceBranches.filter(item=>item.active).map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label>Profesional de referencia<select name="providerId" defaultValue={workspaceProviders.find(item=>item.name===selectedPatient.clinician)?.id||selectedPatient.providerId||''}><option value="">Sin asignar</option>{workspaceProviders.filter(item=>item.active).map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</select></label></div><div className="form-note"><ShieldCheck size={15}/> Este profesional solo se sugiere al agendar; cada cita puede tener otro.</div><label>Estado<select name="status" defaultValue={selectedPatient.status}><option>Activo</option><option>Seguimiento</option><option>Nuevo</option><option>Inactivo</option></select></label><label className="whatsapp-opt-in"><input type="checkbox" name="whatsappOptIn" defaultChecked={Boolean(selectedPatient.whatsappOptIn)}/> Autoriza avisos de citas por WhatsApp</label><label>Origen de la autorización<select name="whatsappOptInSource" defaultValue={selectedPatient.whatsappOptInSource||''}><option value="">Seleccionar si autoriza…</option><option value="written">Consentimiento escrito</option><option value="verbal">Autorización verbal</option><option value="electronic">Consentimiento electrónico</option></select></label><div className="form-note"><ShieldCheck size={15}/> Registra solo una autorización ya otorgada por el paciente. Esto no envía mensajes.</div><div className="form-note"><ShieldCheck size={15}/> {sharedMode?"Cambios guardados en el directorio compartido.":"Datos guardados solo en este navegador de demostración."}</div><div className="modal-actions"><button type="button" className="button secondary" onClick={returnToPatientRecord}>Cancelar</button><button className="button primary" type="submit"><Check size={15}/> Guardar cambios</button></div></form></Modal>}    {modal==='new-appointment' && <NewAppointmentModal serviceCatalog={serviceCatalog} promotions={promotionData.rows} sharedMode={sharedMode} clinicId={sharedDirectory.clinicId} timeZone={clinicTimeZone} historyAppointments={demoAppointments} demoPurchases={demoPackages} demoPayments={demoPayments} canCreatePatient={can('patients.create')} onCreatePatient={createAppointmentPatient} close={()=>setModal(null)} onSubmit={createAppointment} defaultDate={appointmentDefaults.date} defaultTime={appointmentDefaults.time} defaultPatientId={appointmentDefaults.patientId} defaultProviderId={appointmentDefaults.providerId} defaultPackageId={appointmentDefaults.packageId} defaultServiceId={appointmentDefaults.serviceId} defaultServiceName={appointmentDefaults.serviceName} defaultDuration={appointmentDefaults.availability?.duration} defaultBusinessId={activeWorkspaceSelection.businessId} defaultBranchId={appointmentDefaults.availability?.branchId || activeWorkspaceSelection.branchId} patients={workspacePatients} businesses={workspaceBusinesses} branches={workspaceBranches} providers={workspaceProviders} appointments={workspaceAppointments}/>}
     {modal==='new-business' && <Modal title="Agregar negocio" subtitle="Crea un negocio para organizar sus sucursales y agenda." close={()=>setModal(null)}><form className="form-stack" onSubmit={createBusiness}><label>Nombre del negocio<input name="name" placeholder={sharedMode?'Nombre del negocio':'Nombre de demostración'} required autoFocus/></label><div className="form-note"><ShieldCheck size={15}/> {sharedMode?'Se guardará en el catálogo compartido.':'Solo se guarda en este navegador de demostración.'}</div><div className="modal-actions"><button type="button" className="button secondary" onClick={()=>setModal(null)}>Cancelar</button><button className="button primary"><Plus size={15}/> Agregar negocio</button></div></form></Modal>}
     {modal==='new-branch' && <Modal title="Agregar sucursal" subtitle="Asigna la nueva ubicación a uno de tus negocios." close={()=>setModal(null)}><form className="form-stack" onSubmit={createBranch}><label>Negocio<select name="businessId" required defaultValue=""><option value="" disabled>Seleccionar negocio…</option>{businesses.filter(item=>item.active).map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label>Nombre de sucursal<input name="name" placeholder={sharedMode?'Nombre de sucursal':'Nombre de demostración'} required/></label><label>Dirección<input name="address" placeholder={sharedMode?'Dirección de la sucursal':'Dirección de demostración'}/></label><label>Teléfono<input name="phone" placeholder="686 308 6854"/></label><label>Horario de atención<input name="hours" placeholder="Lunes a sábados, 9:00 a.m. a 7:00 p.m."/></label><div className="form-note"><ShieldCheck size={15}/> {sharedMode?'Se guardará en el catálogo compartido.':'Solo se guarda en este navegador de demostración.'}</div><div className="modal-actions"><button type="button" className="button secondary" onClick={()=>setModal(null)}>Cancelar</button><button className="button primary" type="submit" disabled={!businesses.some(item=>item.active)}><Plus size={15}/> Agregar sucursal</button></div></form></Modal>}
     {modal==='edit-branch' && selectedBranchRecord && <Modal title="Editar sucursal" subtitle={`${businesses.find(item=>item.id===selectedBranchRecord.businessId)?.name||'Negocio'} · La sucursal seguirá asociada a este negocio.`} close={()=>{setModal(null);setSelectedBranchRecord(null)}}><form className="form-stack" onSubmit={updateBranch}><label>Nombre de sucursal<input name="name" defaultValue={selectedBranchRecord.name} required autoFocus/></label><label>Dirección<input name="address" defaultValue={selectedBranchRecord.address||''} placeholder="Dirección de la sucursal"/></label><label>Teléfono<input name="phone" defaultValue={selectedBranchRecord.phone||''} placeholder="686 308 6854"/></label><label>Horario de atención<input name="hours" defaultValue={selectedBranchRecord.hours||''} placeholder="Lunes a sábados, 9:00 a.m. a 7:00 p.m."/></label><div className="form-note"><ShieldCheck size={15}/> {sharedMode?'El cambio se guarda en el catálogo compartido.':'El cambio se guarda en este navegador de demostración.'}</div><div className="modal-actions"><button type="button" className="button secondary" onClick={()=>{setModal(null);setSelectedBranchRecord(null)}}>Cancelar</button><button className="button primary"><Check size={15}/> Guardar cambios</button></div></form></Modal>}
     {(modal==='new-provider'||modal==='edit-provider') && <ProfessionalEditor key={`${sharedDirectory.clinicId || 'demo'}:${modal}:${selectedProvider?.id || 'new'}`} Modal={Modal} provider={modal==='edit-provider'?selectedProvider:null} providers={providers} branches={branches} sharedMode={sharedMode} clinicId={sharedDirectory.clinicId} onSave={saveProfessional} onSelectExisting={provider=>{setSelectedProvider(provider);setModal('edit-provider')}} close={()=>{setModal(null);setSelectedProvider(null)}}/>}
-    {modal==='new-consent-template' && <Modal title={consentTemplateDraft?'Nueva versión de consentimiento':'Crear formato de consentimiento'} subtitle={consentTemplateDraft?'Actualiza el texto aprobado; los documentos ya preparados conservan su copia y versión.':'Agrega el texto oficial que proporcione y valide la clínica.'} close={closeConsentTemplateCreation}><form className="form-stack" onSubmit={createConsentTemplate}><label>Nombre del formato<input name="title" defaultValue={consentTemplateDraft?.title||''} placeholder="Ej. Consentimiento para tratamiento" required autoFocus/></label><label>Tipo<select name="type" defaultValue={consentTemplateDraft?.type||'Documento clínico'}><option>Documento clínico</option><option>Protección de datos</option><option>Autorización</option></select></label><label>Contenido del documento<textarea name="content" defaultValue={consentTemplateDraft?.content||''} rows="8" placeholder="Pega aquí el texto revisado por la clínica. No agregues datos de pacientes." required/></label><div className="form-note"><ShieldCheck size={15}/> {sharedMode?'El formato se comparte con el equipo clínico y queda versionado.':'El formato queda guardado solo en este navegador.'}</div><div className="modal-actions"><button type="button" className="button secondary" onClick={closeConsentTemplateCreation}>Cancelar</button><button className="button primary" disabled={!can('documents.manage_templates')}><Plus size={15}/> {consentTemplateDraft?'Guardar nueva versión':'Guardar formato'}</button></div></form></Modal>}
-    {modal==='send-consent' && <Modal title="Preparar consentimiento" subtitle="Guarda una copia del documento en el expediente. La firma electrónica requiere una integración posterior." close={closeConsentPreparation}><form className="form-stack" onSubmit={prepareConsent}><label>Paciente<SearchablePatientSelect patients={patients} defaultValue={consentDefaults.patientId}/></label><label>Documento<select name="templateId" required defaultValue={consentDefaults.templateId}><option value="" disabled>Seleccionar formato…</option>{consentTemplatesForPage.filter(template=>template.content?.trim()).map(template=><option key={template.id||template.title} value={template.id||template.title}>{template.title}{template.version?` · ${template.version}`:''}</option>)}</select></label><label>Si es un consentimiento de uso de imagen, registra la decisión<select name="imageUseAuthorized" defaultValue=""><option value="">Sin decisión / no aplica</option><option value="true">Sí autoriza el uso de imagen</option><option value="false">No autoriza el uso de imagen</option></select></label>{!consentTemplatesForPage.some(template=>template.content?.trim())&&<div className="form-note"><FileText size={15}/> No hay formatos con texto oficial. Agrega el documento validado por la clínica antes de solicitar una firma. <button type="button" className="text-link" onClick={()=>openConsentTemplateCreation('send-consent')}>Crear formato</button></div>}<div className="form-note"><ShieldCheck size={15}/> El contenido se guarda como copia inmutable en el expediente; no se envía para firma.</div><div className="modal-actions"><button type="button" className="button secondary" onClick={closeConsentPreparation}>Cancelar</button><button className="button primary" disabled={!consentTemplatesForPage.some(template=>template.content?.trim())||!can('documents.create')}><FileCheck2 size={16}/> Preparar documento</button></div></form></Modal>}
+    {modal==='new-consent-template' && <Modal className="consent-editor-modal" title={consentTemplateDraft?'Editar formato':'Crear formato de consentimiento'} subtitle={consentTemplateDraft?'Los documentos ya preparados conservan su copia. Lo que ves aquí es el texto guardado del formato.':'Agrega el texto oficial que proporcione y valide la clínica.'} close={closeConsentTemplateCreation}><form className="form-stack" onSubmit={createConsentTemplate}><label>Nombre del formato<input name="title" defaultValue={consentTemplateDraft?.title||''} placeholder="Ej. Consentimiento para tratamiento" required autoFocus/></label><label>Tipo<select name="type" defaultValue={consentTemplateDraft?.type||'Documento clínico'}><option>Documento clínico</option><option>Protección de datos</option><option>Autorización</option></select></label><label>Contenido del documento<textarea className="consent-editor-paper" name="content" defaultValue={consentTemplateDraft?.content||''} rows="14" placeholder="Pega aquí el texto revisado por la clínica. Usa {{paciente}}, {{fecha}} y {{tratamiento}} donde deba completarse después." required/></label>{consentTemplateDraft&&<div className="form-note"><ShieldCheck size={15}/> Si aparece un nombre como “Ian Ramirez Tamayo”, está escrito dentro del formato. No se eligió un expediente. Cámbialo por {'{{paciente}}'} si debe llenarse al preparar el documento.</div>}<div className="form-note"><ShieldCheck size={15}/> {sharedMode?'El formato se comparte con el equipo clínico y queda versionado.':'El formato queda guardado solo en este navegador.'}</div><div className="modal-actions"><button type="button" className="button secondary" onClick={closeConsentTemplateCreation}>Cancelar</button><button className="button primary" disabled={!can('documents.manage_templates')}><Plus size={15}/> {consentTemplateDraft?'Guardar cambios':'Guardar formato'}</button></div></form></Modal>}
+    {modal==='send-consent' && <Modal title="Servicio" subtitle="Elige el servicio. Si tiene un consentimiento vinculado, se marca solo y puedes cambiarlo." close={closeConsentPreparation}><form className="form-stack" onSubmit={prepareConsent}><label>Paciente<SearchablePatientSelect patients={patients} defaultValue={consentDefaults.patientId}/></label><ConsentServiceAndFormat services={serviceCatalog} templates={consentTemplatesForPage} defaultTemplateId={consentDefaults.templateId} defaultService={consentDefaults.service}/><label>Si es un consentimiento de uso de imagen, registra la decisión<select name="imageUseAuthorized" defaultValue=""><option value="">Sin decisión / no aplica</option><option value="true">Sí autoriza el uso de imagen</option><option value="false">No autoriza el uso de imagen</option></select></label>{!consentTemplatesForPage.some(template=>template.content?.trim())&&<div className="form-note"><FileText size={15}/> No hay formatos con texto oficial. Agrega el documento validado por la clínica antes de solicitar una firma. <button type="button" className="text-link" onClick={()=>openConsentTemplateCreation('send-consent')}>Crear formato</button></div>}<div className="form-note"><ShieldCheck size={15}/> El contenido se guarda como copia inmutable en el expediente; no se envía para firma.</div><div className="modal-actions"><button type="button" className="button secondary" onClick={closeConsentPreparation}>Cancelar</button><button className="button primary" disabled={!consentTemplatesForPage.some(template=>template.content?.trim())||!can('documents.create')}><FileCheck2 size={16}/> Preparar documento</button></div></form></Modal>}
     {modal==='new-contract-template' && <Modal title="Crear formato de contrato" subtitle="Agrega el texto oficial que proporcione y valide la clínica." close={closeContractTemplateCreation}><form className="form-stack" onSubmit={createContractTemplate}><label>Nombre del formato<input name="title" placeholder="Ej. Prestación de servicios" required autoFocus/></label><label>Tipo<select name="type"><option>Prestación de servicios</option><option>Plan de tratamiento</option><option>Otro</option></select></label><label>Contenido del contrato<textarea name="content" rows="10" placeholder="Pega el texto oficial revisado por la clínica." required/></label><div className="form-note"><ShieldCheck size={15}/> {sharedMode?'El formato se comparte con el equipo clínico y queda versionado.':'Se guarda localmente. La plantilla no añade ni valida cláusulas legales.'}</div><div className="modal-actions"><button type="button" className="button secondary" onClick={closeContractTemplateCreation}>Cancelar</button><button className="button primary" disabled={!can('documents.manage_templates')}><FilePlus2 size={15}/> Guardar formato</button></div></form></Modal>}
-    {modal==='new-contract' && <NewContractModal sharedMode={sharedMode} canPrepare={can('documents.create')} close={closeContractPreparation} onSubmit={prepareContract} onReviewDiagnosis={patientId=>{const patient=patients.find(item=>item.id===patientId);if(patient){setSelectedPatient(patient);setModalReturn('new-contract');setModal('diagnosis')}}} onAddTemplate={()=>openContractTemplateCreation('new-contract')} patients={patients} templates={contractTemplatesForPage} defaultPatientId={contractDefaults.patientId} canManageTemplates={can('documents.manage_templates')}/>}
+    {modal==='new-contract' && <NewContractModal sharedMode={sharedMode} canPrepare={can('documents.create')} close={closeContractPreparation} onSubmit={prepareContract} onReviewDiagnosis={patientId=>{const patient=patients.find(item=>item.id===patientId);if(patient){setSelectedPatient(patient);setModalReturn('new-contract');setModal('diagnosis')}}} onAddTemplate={()=>openContractTemplateCreation('new-contract')} patients={patients} services={serviceCatalog} templates={contractTemplatesForPage} defaultPatientId={contractDefaults.patientId} canManageTemplates={can('documents.manage_templates')}/>}
     {toast&&<div className="toast"><CheckCircle2 size={17}/>{toast}<button onClick={()=>setToast('')} aria-label="Cerrar"><X size={15}/></button></div>}
     {children}
   </div>;
@@ -1883,7 +2099,7 @@ function profileInitials(name = '') {
   return parts.slice(0, 2).map(part => Array.from(part)[0]?.toLocaleUpperCase('es-MX') || '').join('') || 'U';
 }
 
-function SignaturePad({ onSave, onCancel, saving }) {
+function SignaturePad({ onSave, onCancel, saving, confirmLabel = 'Firmar', tall = false }) {
   const canvasRef = useRef(null);
   const drawingRef = useRef(false);
   const [hasInk, setHasInk] = useState(false);
@@ -1927,8 +2143,8 @@ function SignaturePad({ onSave, onCancel, saving }) {
   };
   return <div className="signature-pad-wrap">
     <p>Dibuja tu firma en el recuadro. Puedes usar el mouse, el dedo o un lápiz táctil.</p>
-    <canvas ref={canvasRef} className="signature-pad" width="1200" height="360" aria-label="Área para dibujar la firma" onPointerDown={start} onPointerMove={draw} onPointerUp={stop} onPointerCancel={stop}/>
-    <div className="signature-pad-actions"><button type="button" className="button secondary" onClick={clear} disabled={!hasInk || saving}>Limpiar</button><span/><button type="button" className="button secondary" onClick={onCancel} disabled={saving}>Cancelar</button><button type="button" className="button primary" onClick={save} disabled={!hasInk || saving}>{saving?'Guardando…':'Guardar firma'}</button></div>
+    <canvas ref={canvasRef} className="signature-pad" width={tall ? 1400 : 1200} height={tall ? 680 : 360} aria-label="Área para dibujar la firma" onPointerDown={start} onPointerMove={draw} onPointerUp={stop} onPointerCancel={stop}/>
+    <div className="signature-pad-actions"><button type="button" className="button secondary" onClick={clear} disabled={!hasInk || saving}>Limpiar</button><span/>{onCancel&&<button type="button" className="button secondary" onClick={onCancel} disabled={saving}>Cancelar</button>}<button type="button" className="button primary" onClick={save} disabled={!hasInk || saving}>{saving?'Guardando…':confirmLabel}</button></div>
   </div>;
 }
 
@@ -2263,7 +2479,7 @@ function ProfilePage({ profile, clinicName, memberships, clinicId, onSelectClini
         <div className="profile-signature-actions"><button className="button outline compact" type="button" onClick={()=>signatureInputRef.current?.click()} disabled={signatureBusy}><Upload size={15}/>{signatureBusy?'Subiendo…':profile.signatureUrl?'Subir otra imagen':'Subir firma'}</button><button className="button outline compact" type="button" onClick={()=>{setSignatureError('');setSignatureModal('draw')}} disabled={signatureBusy}><PenLine size={15}/>Firmar a mano</button>{profile.signatureUrl&&<button className="profile-photo-remove" type="button" onClick={removeSignature} disabled={signatureBusy}><Trash2 size={14}/>Quitar firma</button>}</div>
       </div><details className="profile-extra profile-additional-details" open={additionalOpen} onToggle={event=>setAdditionalOpen(event.currentTarget.open)}><summary><ChevronRight size={16}/> Datos adicionales</summary><div className="form-grid profile-additional-grid"><label>Tipo de personal<select name="tipoPersonal" value={form.tipoPersonal} onChange={update}><option value="">Sin especificar</option>{profileStaffTypes.map(type=><option key={type} value={type}>{type}</option>)}</select></label><label>Cédula de especialidad<input name="specialtyCertificationNumber" value={form.specialtyCertificationNumber} onChange={update} placeholder="Número de cédula de especialidad"/></label><label>CURP<input name="curp" value={form.curp} onChange={updateCurp} onInvalid={event=>event.currentTarget.setCustomValidity(event.currentTarget.value ? curpValidationMessage : '')} placeholder="CURP de 18 caracteres" minLength="18" maxLength="18" autoCapitalize="characters"/></label><label>País de nacimiento<select name="paisNacimiento" value={form.paisNacimiento} onChange={update}><option value="">Sin especificar</option>{profileBirthCountries.map(country=><option key={country} value={country}>{country}</option>)}</select></label></div></details>{error&&<p className="profile-error" role="alert">{error}</p>}<div className="profile-save-row"><span className={`profile-save-feedback${noChangesMessageVisible?' is-visible':''}`} aria-live="polite" aria-hidden={!noChangesMessageVisible}>Sin cambios que guardar.</span><button className="button primary" data-no-changes={!hasUnsavedChanges} disabled={saving} onClick={event=>{if(!hasUnsavedChanges){event.preventDefault();showNoChangesMessage();}}}>{saving?'Guardando…':'Guardar cambios'}</button></div></div></section>
       </form>
-    {signatureModal==='draw'&&<Modal title="Firmar a mano" subtitle="Dibuja tu firma para guardarla en tu perfil." close={()=>!signatureBusy&&setSignatureModal('')} className="signature-draw-modal"><SignaturePad saving={signatureBusy} onCancel={()=>setSignatureModal('')} onSave={async file=>{try{await saveSignatureFile(file)}catch(signatureSaveError){setSignatureError(signatureSaveError.message||'No se pudo guardar la firma.')}}}/></Modal>}
+    {signatureModal==='draw'&&<Modal title="Firmar a mano" subtitle="Dibuja tu firma para guardarla en tu perfil." close={()=>!signatureBusy&&setSignatureModal('')} className="signature-draw-modal"><SignaturePad confirmLabel="Guardar en mi perfil" saving={signatureBusy} onCancel={()=>setSignatureModal('')} onSave={async file=>{try{await saveSignatureFile(file)}catch(signatureSaveError){setSignatureError(signatureSaveError.message||'No se pudo guardar la firma.')}}}/></Modal>}
     {signatureModal==='preview'&&profile.signatureUrl&&<Modal title="Firma del perfil" subtitle="Firma guardada para tu perfil profesional." close={()=>setSignatureModal('')} className="signature-viewer-modal"><img className="profile-signature-viewer" src={profile.signatureUrl} alt="Firma guardada en el perfil"/><div className="modal-actions"><button type="button" className="button secondary" onClick={()=>setSignatureModal('')}>Cerrar</button><button type="button" className="button outline" onClick={downloadSignature}><Download size={15}/> Descargar firma</button></div></Modal>}
   </div>;
 }
@@ -2289,23 +2505,21 @@ function SettingsPage({currentUserId,clinicName,sharedMode,onSaveClinicName,clin
   </div>;
 }
 
-function Overview({patients,appointments,patientActivities,pendingDocs,setPage,setModal,notify,onNewAppointment,onOpenPatient,onOpenDocument,sharedMode=false,canCreateAppointment=true,timeZone='America/Tijuana'}) {
+function Overview({patients,appointments,payments=[],setPage,onNewAppointment,onOpenPatient,canCreateAppointment=true,timeZone='America/Tijuana',userName=''}) {
   const dateParts=new Intl.DateTimeFormat('en-US',{timeZone,year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date());
   const todayKey=`${dateParts.find(part=>part.type==='year')?.value}-${dateParts.find(part=>part.type==='month')?.value}-${dateParts.find(part=>part.type==='day')?.value}`;
   const todayLabel = new Intl.DateTimeFormat('es-MX', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone }).format(new Date()).toUpperCase();
   const todayAppointments=appointments.filter(appointment=>appointment.date===todayKey&&appointment.status!=='Cancelada').sort((a,b)=>a.time.localeCompare(b.time));
   const activePatients=patients.filter(patient=>patient.status==='Activo').length;
   const monthAppointments=appointments.filter(appointment=>appointment.date?.startsWith(todayKey.slice(0,7))&&appointment.status!=='Cancelada').length;
-  const recentActivities=[...patientActivities].sort((a,b)=>b.createdAt.localeCompare(a.createdAt)).slice(0,5);
-  const pendingTasks=patients.flatMap(patient=>[
-    ...(patient.contract==='Pendiente'?[{icon:FileText,tint:'peach',title:patient.contractType||'Contrato de prestación',subtitle:`${patient.name} · ${patient.treatment}`,patient,kind:'contract'}]:[]),
-    ...(patient.consent==='Pendiente'?[{icon:FileCheck2,tint:'lavender',title:patient.consentDocument||'Consentimiento informado',subtitle:`${patient.name} · ${patient.treatment}`,patient,kind:'consent'}]:[]),
-  ]).slice(0,3);
-  return <div className="overview-dashboard"><div className="welcome-line"><div className="date-pill"><span/> {todayLabel}</div><div className="demo-pill"><CircleHelp size={14}/> {sharedMode?'Datos compartidos':'Datos de demostración'}</div></div><PageTitle title="Buenos días" description="Aquí tienes el pulso de tu clínica para hoy." action={canCreateAppointment&&<button className="button primary" onClick={()=>onNewAppointment?.()}><Plus size={16}/> Nueva cita</button>}/>
-    <div className="metric-grid" role="list" aria-label="Resumen de actividad de la clínica"><MetricCard label="Citas de hoy" value={String(todayAppointments.length).padStart(2,'0')} change={`${todayAppointments.filter(item=>item.status==='Por confirmar').length} por confirmar`}/><MetricCard label="Pacientes activos" value={String(activePatients)} change={`${patients.length} expedientes en este navegador`}/><MetricCard label="Firmas pendientes" value={String(pendingDocs).padStart(2,'0')} change="Requieren seguimiento" attention/><MetricCard label="Citas este mes" value={String(monthAppointments)} change="Registradas en la agenda"/></div>
-    <div className="dashboard-grid"><section className="panel agenda-panel"><div className="panel-heading"><div><div className="panel-title">Agenda de hoy <span className="live-pill"><span/> EN CURSO</span></div><p className="panel-subtitle">La actividad de tu equipo clínico</p></div><button className="text-link" onClick={()=>setPage('agenda')}>Ver agenda <ArrowRight size={14}/></button></div><div className="appointment-list">{todayAppointments.slice(0,4).map((a,i)=><div className={`appointment-row ${i===0?'current':''}`} key={`${a.patient}-${a.time}`}><div className="time-col"><strong>{a.time}</strong><span>{a.duration}</span></div><div className="timeline-mark"><i/></div><Avatar initials={a.initials} tone={a.tone}/><div className="appointment-info"><strong>{a.patient}</strong><span>{a.service} <i>·</i> {a.clinician}</span></div><Badge variant={a.status==='Confirmada'?'confirmed':'pending'}><span className="badge-dot"/>{a.status}</Badge></div>)}{todayAppointments.length===0&&<div className="empty-inline">No hay citas registradas para hoy.</div>}</div><button className="panel-footer-link" onClick={()=>setPage('agenda')}>Ver las {todayAppointments.length} citas de hoy <ArrowRight size={14}/></button></section>
-      <section className="panel activity-panel"><div className="panel-heading"><div><div className="panel-title">Pendientes por atender</div><p className="panel-subtitle">Documentos listos para seguimiento</p></div></div><div className="task-list">{pendingTasks.map((task,index)=><TaskItem key={`${task.kind}-${task.subtitle}-${index}`} icon={task.icon} tint={task.tint} title={task.title} subtitle={task.subtitle} time="Pendiente" action="Revisar" onClick={()=>onOpenDocument(task.patient,task.kind)}/>)}{pendingTasks.length===0&&<div className="empty-inline">No hay documentos pendientes.</div>}</div><button className="panel-footer-link" onClick={()=>setPage('consents')}>Ir al centro de documentos <ArrowRight size={14}/></button></section>
-    </div><div className="bottom-grid"><section className="panel patient-panel"><div className="panel-heading"><div><div className="panel-title">Pacientes recientes</div><p className="panel-subtitle">Últimos expedientes con actividad</p></div><button className="text-link" onClick={()=>setPage('patients')}>Ver pacientes <ArrowRight size={14}/></button></div><div className="mini-patients">{patients.slice(0,4).map(p=><button className="mini-patient" key={p.id} onClick={()=>onOpenPatient(p)}><Avatar initials={p.initials} tone={p.tone}/><div><strong>{p.name}</strong><span>{p.treatment}</span></div><span className="mini-date">{p.last.split(',')[0]}</span><ChevronRight size={15} className="muted-icon"/></button>)}</div></section><section className="panel recent-activity-panel"><div className="panel-heading"><div><div className="panel-title">Seguimientos recientes</div><p className="panel-subtitle">Últimas notas del equipo</p></div><button className="text-link" onClick={()=>setPage('patients')}>Ver expedientes <ArrowRight size={14}/></button></div><div className="recent-activity-list">{recentActivities.map(activity=>{const patient=patients.find(item=>item.id===activity.patientId);if(!patient)return null;return <button className="recent-activity-item" key={activity.id} onClick={()=>onOpenPatient(patient)}><span className="recent-activity-icon"><FileText size={15}/></span><span className="recent-activity-copy"><strong>{patient.name} · {activity.type}</strong><span>{activity.note}</span></span><time>{new Intl.DateTimeFormat('es-MX',{day:'numeric',month:'short'}).format(new Date(activity.createdAt))}</time><ChevronRight size={14}/></button>})}{recentActivities.length===0&&<div className="empty-inline recent-activity-empty">Las notas de seguimiento aparecerán aquí.</div>}</div></section></div>
+  const money = new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 0 });
+  const todayPayments = payments.filter(payment => payment.date === todayKey);
+  const collected = todayPayments.reduce((sum, payment) => sum + (payment.direction === 'Reembolso' ? -Number(payment.amount || 0) : Number(payment.amount || 0)), 0);
+  return <div className="overview-dashboard"><div className="welcome-line"><div className="date-pill">{todayLabel}</div></div><PageTitle title="Buenos días" description={<>Bienvenido{userName ? <>, <span className="welcome-name">{userName}</span></> : null}</>} action={canCreateAppointment&&<button className="button primary" onClick={()=>onNewAppointment?.()}><Plus size={16}/> Nueva cita</button>}/>
+    <div className="metric-grid" role="list" aria-label="Resumen de actividad de la clínica"><MetricCard label="Citas de hoy" value={String(todayAppointments.length).padStart(2,'0')} change={`${todayAppointments.filter(item=>item.status==='Por confirmar').length} por confirmar`}/><MetricCard label="Pacientes activos" value={String(activePatients)} change={`${patients.length} expedientes`}/><MetricCard label="Recaudado hoy" value={money.format(collected)} change={`${todayPayments.length} movimientos`}/><MetricCard label="Citas este mes" value={String(monthAppointments)} change="Registradas en la agenda"/></div>
+    <div className="dashboard-grid"><section className="panel agenda-panel"><div className="panel-heading"><div><div className="panel-title">Agenda de hoy</div><p className="panel-subtitle">Citas de la clínica para esta fecha</p></div><button className="text-link" onClick={()=>setPage('agenda')}>Ver agenda <ArrowRight size={14}/></button></div><div className="appointment-list">{todayAppointments.slice(0,6).map(a=><div className="appointment-row" key={`${a.patient}-${a.time}-${a.id||''}`}><div className="time-col"><strong>{a.time}</strong><span>{a.duration}</span></div><div className="timeline-mark"><i/></div><Avatar initials={a.initials} tone={a.tone}/><div className="appointment-info"><strong>{a.patient}</strong><span>{a.service} <i>·</i> {a.clinician}</span></div><Badge variant={a.status==='Confirmada'?'confirmed':'pending'}>{a.status}</Badge></div>)}{todayAppointments.length===0&&<div className="empty-inline">No hay citas registradas para hoy.</div>}</div><button className="panel-footer-link" onClick={()=>setPage('agenda')}>Ver las {todayAppointments.length} citas de hoy <ArrowRight size={14}/></button></section>
+      <section className="panel activity-panel"><div className="panel-heading"><div><div className="panel-title">Ventas del día</div><p className="panel-subtitle">Ingresos y reembolsos con fecha de hoy</p></div><button className="text-link" onClick={()=>setPage('payments')}>Ver pagos <ArrowRight size={14}/></button></div><div className="day-sales"><strong>{money.format(collected)}</strong><span>Aproximado en pesos, según lo capturado en Pagos. No es un corte contable.</span></div><div className="task-list">{todayPayments.slice(0,5).map(payment=><div className="task-item" key={payment.id}><div className="task-copy"><strong>{payment.patientNameSnapshot || 'Paciente'}</strong><span>{payment.direction} · {payment.method}</span></div><b>{money.format(payment.direction==='Reembolso'?-payment.amount:payment.amount)}</b></div>)}{todayPayments.length===0&&<div className="empty-inline">Hoy no hay movimientos registrados.</div>}</div></section>
+    </div><div className="bottom-grid overview-patients-only"><section className="panel patient-panel"><div className="panel-heading"><div><div className="panel-title">Últimos pacientes</div><p className="panel-subtitle">Expedientes abiertos recientemente</p></div><button className="text-link" onClick={()=>setPage('patients')}>Ver pacientes <ArrowRight size={14}/></button></div><div className="mini-patients">{patients.slice(0,6).map(p=><button className="mini-patient" key={p.id} onClick={()=>onOpenPatient(p)}><Avatar initials={p.initials} tone={p.tone}/><div><strong>{p.name}</strong><span>{p.treatment}</span></div><span className="mini-date">{String(p.last||'').split(',')[0]}</span><ChevronRight size={15} className="muted-icon"/></button>)}</div></section></div>
   </div>;
 }
 function MetricCard({label,value,change,attention=false}) { return <article className={`metric-card${attention?' attention':''}`} role="listitem"><span className="metric-label">{label}</span><strong className="metric-value">{value}</strong><span className={`metric-change${attention?' attention':''}`}>{attention&&<span className="attention-dot" aria-hidden="true"/>}{change}</span></article>; }
@@ -2318,8 +2532,8 @@ function PatientsPage({patients,allPatients,query,setQuery,searchRef,setModal,on
  const [providerFilter,setProviderFilter]=useState('Todas las personas');
  const [filtersOpen,setFiltersOpen]=useState(false);
  const [page,setPage]=useState(1);
- const [pageSize,setPageSize]=useState(20);
- useEffect(()=>setPage(1),[filter,documentFilter,branchFilter,providerFilter,query,pageSize]);
+ const pageSize=10;
+ useEffect(()=>setPage(1),[filter,documentFilter,branchFilter,providerFilter,query]);
  const branches=[...new Set(allPatients.map(patient=>patient.branch).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'es'));
  const providers=[...new Set(allPatients.map(patient=>patient.clinician).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'es'));
  const matchesFilter=patient=>filter==='Todos'||(filter==='Activos'?patient.status==='Activo':filter==='Nuevos'?patient.status==='Nuevo':patient.contract==='Pendiente'||patient.consent==='Pendiente');
@@ -2328,10 +2542,16 @@ function PatientsPage({patients,allPatients,query,setQuery,searchRef,setModal,on
  const matchesProvider=patient=>providerFilter==='Todas las personas'||patient.clinician===providerFilter;
  const filtered=patients.filter(patient=>matchesFilter(patient)&&matchesDocumentFilter(patient)&&matchesBranch(patient)&&matchesProvider(patient));
  const pageCount=Math.max(1,Math.ceil(filtered.length/pageSize));
- const shown=filtered.slice((page-1)*pageSize,page*pageSize);
+ const currentPage=Math.min(page,pageCount);
+ const shown=filtered.slice((currentPage-1)*pageSize,currentPage*pageSize);
+ const pageSlots=5;
+ const pageWindowLength=Math.min(pageSlots,pageCount);
+ let pageWindowStart=Math.max(1,currentPage-Math.floor(pageWindowLength/2));
+ pageWindowStart=Math.min(pageWindowStart,Math.max(1,pageCount-pageWindowLength+1));
+ const pageMarks=Array.from({length:pageSlots},(_,index)=>index<pageWindowLength?pageWindowStart+index:null);
  const pendingPatients=allPatients.filter(patient=>patient.contract==='Pendiente'||patient.consent==='Pendiente').length;
  const clearFilters=()=>{setQuery('');setFilter('Todos');setDocumentFilter('Todos');setBranchFilter('Todas las sucursales');setProviderFilter('Todas las personas');};
- return <><PageTitle eyebrow="DIRECTORIO CLÍNICO" title="Pacientes" description="Expedientes, documentos y seguimiento en un solo lugar." action={canCreatePatient&&<button className="button primary" onClick={()=>setModal('new-patient')}><Plus size={16}/> Agregar paciente</button>}/><div className="summary-strip patient-directory-summary"><div><UsersRound size={16}/><strong>{allPatients.length}</strong><span>pacientes en el directorio</span></div><i/><div><span className="summary-dot green"/><strong>{allPatients.filter(patient=>patient.status==='Activo').length}</strong><span>activos</span></div><i/><div><span className="summary-dot orange"/><strong>{pendingPatients}</strong><span>expedientes con documentos pendientes</span></div><div className="summary-side-note"><ShieldCheck size={14}/> {sharedMode?'Datos compartidos':'Datos de demostración'}</div></div><section className="panel data-panel patients-directory-table"><div className="table-toolbar"><div className="filter-tabs">{['Todos','Activos','Nuevos','Docs pendientes'].map(label=><button className={filter===label?'selected':''} onClick={()=>setFilter(label)} key={label}>{label}{label==='Todos'?<span>{allPatients.length}</span>:label==='Docs pendientes'?<span>{pendingPatients}</span>:null}</button>)}</div><div className="table-actions"><label className="input-search"><Search size={15}/><input ref={searchRef} value={query} onChange={event=>setQuery(event.target.value)} placeholder="Buscar nombre, expediente, correo…"/></label><button className="button outline compact" aria-expanded={filtersOpen} onClick={()=>setFiltersOpen(open=>!open)}><SlidersHorizontal size={15}/> Filtros</button><button className="icon-button outline" onClick={clearFilters} aria-label="Limpiar búsqueda y filtros"><ListFilter size={16}/></button></div></div>{filtersOpen&&<div className="agenda-filter-panel patient-filter-panel"><label className="select-filter"><Activity size={15}/><select aria-label="Filtrar pacientes por sucursal" value={branchFilter} onChange={event=>setBranchFilter(event.target.value)}><option>Todas las sucursales</option>{branches.map(branch=><option key={branch}>{branch}</option>)}</select><ChevronDown size={14}/></label><label className="select-filter"><UserRound size={15}/><select aria-label="Filtrar pacientes por profesional" value={providerFilter} onChange={event=>setProviderFilter(event.target.value)}><option>Todas las personas</option>{providers.map(provider=><option key={provider}>{provider}</option>)}</select><ChevronDown size={14}/></label><label className="select-filter"><FileCheck2 size={15}/><select aria-label="Filtrar pacientes por documento" value={documentFilter} onChange={event=>setDocumentFilter(event.target.value)}><option>Todos</option><option>Contrato pendiente</option><option>Consentimiento pendiente</option><option>Ambos pendientes</option></select><ChevronDown size={14}/></label><span className="panel-subtitle">Los filtros se combinan con la búsqueda, el estado y los documentos.</span></div>}<div className="table-wrap"><table><thead><tr><th>PACIENTE</th><th>ÚLTIMA ACTIVIDAD</th><th>TRATAMIENTO</th><th>CONTRATO</th><th>CONSENTIMIENTO</th><th>ESTADO</th><th></th></tr></thead><tbody>{shown.map(patient=><tr key={patient.id} onClick={()=>onOpen(patient)} className="clickable-row"><td><div className="patient-cell"><Avatar initials={patient.initials} tone={patient.tone}/><div><strong>{patient.name}</strong><span>{patient.id}</span></div></div></td><td className="last-cell">{patient.last}</td><td><span className="treatment-cell">{patient.treatment}</span></td><td><DocStatus status={patient.contract}/></td><td><DocStatus status={patient.consent}/></td><td><Badge variant={patient.status==='Activo'?'active':patient.status==='Nuevo'?'new':'followup'}><span className="badge-dot"/>{patient.status}</Badge></td><td><button className="row-more" aria-label={`Abrir expediente de ${patient.name}`} onClick={event=>{event.stopPropagation();onOpen(patient)}}><MoreHorizontal size={17}/></button></td></tr>)}</tbody></table>{shown.length===0&&<div className="empty-state"><Search size={20}/><strong>No encontramos pacientes</strong><span>Prueba con otros filtros o limpia la búsqueda.</span></div>}</div><div className="table-bottom"><span>Mostrando <strong>{filtered.length?((page-1)*pageSize)+1:0}–{Math.min(page*pageSize,filtered.length)}</strong> de <strong>{filtered.length}</strong> resultados</span><div className="pagination"><button aria-label="Página anterior" disabled={page<=1} onClick={()=>setPage(current=>Math.max(1,current-1))}><ChevronLeft size={15}/></button><span className="page-number active">{page} de {pageCount}</span><button aria-label="Página siguiente" disabled={page>=pageCount} onClick={()=>setPage(current=>Math.min(pageCount,current+1))}><ChevronRight size={15}/></button></div><label className="per-page">Filas por página <select aria-label="Filas por página" value={pageSize} onChange={event=>setPageSize(Number(event.target.value))}><option value={5}>5</option><option value={10}>10</option><option value={20}>20</option><option value={50}>50</option></select></label></div></section></>;
+ return <><PageTitle eyebrow="DIRECTORIO CLÍNICO" title="Pacientes" description="Expedientes, documentos y seguimiento en un solo lugar." action={canCreatePatient&&<button className="button primary" onClick={()=>setModal('new-patient')}><Plus size={16}/> Agregar paciente</button>}/><div className="summary-strip patient-directory-summary"><div><UsersRound size={16}/><strong>{allPatients.length}</strong><span>pacientes en el directorio</span></div><i/><div><span className="summary-dot green"/><strong>{allPatients.filter(patient=>patient.status==='Activo').length}</strong><span>activos</span></div><i/><div><span className="summary-dot orange"/><strong>{pendingPatients}</strong><span>expedientes con documentos pendientes</span></div><div className="summary-side-note"><ShieldCheck size={14}/> {sharedMode?'Datos compartidos':'Datos de demostración'}</div></div><section className="panel data-panel patients-directory-table"><div className="table-toolbar"><div className="filter-tabs">{['Todos','Activos','Nuevos','Docs pendientes'].map(label=><button className={filter===label?'selected':''} onClick={()=>setFilter(label)} key={label}>{label}{label==='Todos'?<span>{allPatients.length}</span>:label==='Docs pendientes'?<span>{pendingPatients}</span>:null}</button>)}</div><div className="table-actions"><label className="input-search"><Search size={15}/><input ref={searchRef} value={query} onChange={event=>setQuery(event.target.value)} placeholder="Buscar nombre, expediente, correo…"/></label><button className="button outline compact" aria-expanded={filtersOpen} onClick={()=>setFiltersOpen(open=>!open)}><SlidersHorizontal size={15}/> Filtros</button><button className="icon-button outline" onClick={clearFilters} aria-label="Limpiar búsqueda y filtros"><ListFilter size={16}/></button></div></div>{filtersOpen&&<div className="agenda-filter-panel patient-filter-panel"><label className="select-filter"><Activity size={15}/><select aria-label="Filtrar pacientes por sucursal" value={branchFilter} onChange={event=>setBranchFilter(event.target.value)}><option>Todas las sucursales</option>{branches.map(branch=><option key={branch}>{branch}</option>)}</select><ChevronDown size={14}/></label><label className="select-filter"><UserRound size={15}/><select aria-label="Filtrar pacientes por profesional" value={providerFilter} onChange={event=>setProviderFilter(event.target.value)}><option>Todas las personas</option>{providers.map(provider=><option key={provider}>{provider}</option>)}</select><ChevronDown size={14}/></label><label className="select-filter"><FileCheck2 size={15}/><select aria-label="Filtrar pacientes por documento" value={documentFilter} onChange={event=>setDocumentFilter(event.target.value)}><option>Todos</option><option>Contrato pendiente</option><option>Consentimiento pendiente</option><option>Ambos pendientes</option></select><ChevronDown size={14}/></label><span className="panel-subtitle">Los filtros se combinan con la búsqueda, el estado y los documentos.</span></div>}<div className="table-wrap"><table><thead><tr><th>PACIENTE</th><th>ÚLTIMA ACTIVIDAD</th><th>TRATAMIENTO</th><th>CONTRATO</th><th>CONSENTIMIENTO</th><th>ESTADO</th><th></th></tr></thead><tbody>{shown.map(patient=><tr key={patient.id} onClick={()=>onOpen(patient)} className="clickable-row"><td><div className="patient-cell"><Avatar initials={patient.initials} tone={patient.tone}/><div><strong>{patient.name}</strong><span>{patient.id}</span></div></div></td><td className="last-cell">{patient.last}</td><td><span className="treatment-cell">{patient.treatment}</span></td><td><DocStatus status={patient.contract}/></td><td><DocStatus status={patient.consent}/></td><td><Badge variant={patient.status==='Activo'?'active':patient.status==='Nuevo'?'new':'followup'}><span className="badge-dot"/>{patient.status}</Badge></td><td><button className="row-more" aria-label={`Abrir expediente de ${patient.name}`} onClick={event=>{event.stopPropagation();onOpen(patient)}}><MoreHorizontal size={17}/></button></td></tr>)}</tbody></table>{shown.length===0&&<div className="empty-state"><Search size={20}/><strong>No encontramos pacientes</strong><span>Prueba con otros filtros o limpia la búsqueda.</span></div>}</div>{filtered.length>0&&<div className="table-bottom"><nav className="consent-pager" aria-label="Páginas de pacientes"><button type="button" className="consent-pager-step" aria-label="Página anterior" disabled={currentPage<=1} onClick={()=>setPage(current=>Math.max(1,current-1))}><ChevronLeft size={16}/></button><span className="consent-pager-pages">{pageMarks.map((mark,index)=>mark?<button type="button" key={mark} className={mark===currentPage?'is-current':''} aria-current={mark===currentPage?'page':undefined} onClick={()=>setPage(mark)}>{mark}</button>:<span key={`slot-${index}`} className="consent-pager-slot" aria-hidden="true"/>)}</span><button type="button" className="consent-pager-step" aria-label="Página siguiente" disabled={currentPage>=pageCount} onClick={()=>setPage(current=>Math.min(pageCount,current+1))}><ChevronRight size={16}/></button><span className="consent-pager-count">{((currentPage-1)*pageSize)+1}–{Math.min(currentPage*pageSize,filtered.length)} de {filtered.length}</span></nav></div>}</section></>;
 }
 function agendaSlotTime(index) {
   const totalMinutes = 6 * 60 + index * 15;
@@ -2433,7 +2653,7 @@ function AppointmentModal({appointment,payments,businesses,branches,providers,se
       <label>Negocio<select name="businessId" value={businessId} onChange={event=>{const nextBusinessId=event.target.value;setBusinessId(nextBusinessId);const nextBranch=activeBranches.find(item=>item.businessId===nextBusinessId);setBranchId(nextBranch?.id||'');const nextProvider=activeProviders.find(item=>!item.branchIds?.length||item.branchIds.includes(nextBranch?.id));setProviderId(nextProvider?.id||'')}} required>{activeBusinesses.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
       <div className="form-grid"><label>Profesional<select name="providerId" value={providerId} onChange={event=>setProviderId(event.target.value)} required>{providersForBranch.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label>Sucursal<select name="branchId" value={branchId} onChange={event=>{const nextBranchId=event.target.value;setBranchId(nextBranchId);const nextProvider=activeProviders.find(item=>!item.branchIds?.length||item.branchIds.includes(nextBranchId));setProviderId(nextProvider?.id||'')}} required>{branchesForBusiness.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</select></label></div>
       <section className="appointment-reminder-card"><div className="appointment-reminder-heading"><strong>Avisos de la cita</strong><span>{appointment.status==='Confirmada'?'Programados':appointment.status==='Cancelada'?'Cancelados':appointment.status==='Completada'?'Cita completada':'Al confirmar'}</span></div><div className="appointment-reminder-row"><span>Confirmación</span><strong>2 días antes</strong></div><div className="appointment-reminder-row"><span>Recordatorio</span><strong>1 día antes</strong></div><div className="appointment-reminder-row"><span>Recordatorio del día</span><strong>5 horas antes</strong></div><p>La agenda de avisos se actualiza al confirmar, reprogramar o cancelar. El envío automático requiere conectar un proveedor.</p></section>
-      <div className="form-grid"><label>Fecha<input name="date" type="date" defaultValue={appointment.date} required/></label><label>Hora<input name="time" type="time" value={time} onChange={event=>setTime(event.target.value)} min="06:00" max={latestAppointmentStart(durationMinutes)} step="900" required/></label></div>
+      <div className="form-grid"><label>Fecha<ClinicDateField name="date" defaultValue={appointment.date} required/></label><label>Hora<ClinicTimeField name="time" value={time} onChange={event=>setTime(event.target.value)} min="06:00" max={latestAppointmentStart(durationMinutes)} step={900} required/></label></div>
       <div className="form-grid"><label>Duración (minutos)<input name="durationMinutes" type="number" min="15" max="720" step="15" value={durationMinutes} onChange={event=>updateDuration(event.target.value)}/></label><label>Modalidad<select name="modality" defaultValue={appointment.modality||'Presencial'}><option>Presencial</option><option>Virtual</option></select></label></div>
       <AppointmentColorPreview providerId={providerId} branchId={branchId} service={service} providers={providers}/>
       {appointment.packageId ? <div className="form-note">Sesión de paquete · {appointment.service}</div> : <AppointmentServicePicker manualInitiallyOpen={!serviceIds.length && Boolean(appointment.service)} onCloseManual={()=>{setService(appointment.service||'');setServiceId(appointment.serviceId||'')}} manualField={<label>Servicio manual<input name="service" value={service} onChange={event=>{setService(event.target.value);setServiceId('')}} maxLength="120" required/></label>} services={serviceCatalog} selectedIds={serviceIds} providers={providersForBranch} branchId={branchId} providerId={providerId} onChange={(next, nextProviderId)=>{if(nextProviderId)setProviderId(nextProviderId);setServiceIds(next);setServiceId(next[0]||'');setService(next.map(id=>serviceCatalog.find(option=>option.id===id)?.name).filter(Boolean).join(' + '));const selected=next.map(id=>serviceCatalog.find(option=>option.id===id));if(selected.length&&selected.every(option=>option?.durationMin))updateDuration(String(selected.reduce((total,option)=>total+Number(option.durationMax||option.durationMin),0)));}}/>}
@@ -2541,7 +2761,7 @@ function NewAppointmentModal({serviceCatalog=[],promotions=[],close,onSubmit,onC
       <input type="hidden" name="serviceIds" value={JSON.stringify(serviceIds)}/>
       <div className="appointment-patient-field"><label>Paciente<SearchablePatientSelect patients={patientsForAppointment} name="patientId" value={patientId} onChange={id=>{setPatientId(id);setPackageId('')}}/></label>{canCreatePatient&&<button type="button" className="button outline compact appointment-add-patient" onClick={()=>setQuickPatientOpen(open=>!open)} aria-expanded={quickPatientOpen}><Plus size={14}/>{quickPatientOpen?'Cerrar':'Nuevo paciente'}</button>}</div>
       {quickPatientOpen&&<section className="appointment-quick-patient" aria-label="Crear paciente para esta cita"><div className="appointment-quick-patient-heading"><strong>Nuevo expediente</strong><span>Se agregará a esta cita al guardarlo.</span></div><label>Nombre completo<input autoFocus value={quickPatientName} onChange={event=>setQuickPatientName(event.target.value)} placeholder="Ej. Andrea García" maxLength="160"/></label><div className="form-grid"><label>Correo electrónico<input type="text" inputMode="email" value={quickPatientEmail} onChange={event=>setQuickPatientEmail(event.target.value)} placeholder="correo@ejemplo.com" maxLength="254"/></label><label>Teléfono<input type="tel" value={quickPatientPhone} onChange={event=>setQuickPatientPhone(event.target.value)} placeholder="Teléfono de contacto" maxLength="40"/></label></div><label className="whatsapp-opt-in"><input type="checkbox" checked={quickFirstVisit} onChange={event=>setQuickFirstVisit(event.target.checked)}/> Primera vez</label><div className="appointment-quick-patient-actions"><button type="button" className="button secondary compact" onClick={()=>setQuickPatientOpen(false)}>Cancelar</button><button type="button" className="button primary compact" onClick={createAndSelectPatient} disabled={!quickPatientName.trim()||quickPatientSaving}><Plus size={14}/>{quickPatientSaving?'Guardando…':'Crear y seleccionar'}</button></div></section>}
-      <div className="form-grid"><label>Fecha<input name="date" type="date" value={date} onChange={event=>setDate(event.target.value)} required/></label><label>Hora<input name="time" type="time" value={time} onChange={event=>setTime(event.target.value)} min="06:00" max={latestAppointmentStart(durationMinutes)} step="900" required/></label></div>
+      <div className="form-grid"><label>Fecha<ClinicDateField name="date" value={date} onChange={event=>setDate(event.target.value)} required/></label><label>Hora<ClinicTimeField name="time" value={time} onChange={event=>setTime(event.target.value)} min="06:00" max={latestAppointmentStart(durationMinutes)} step={900} required/></label></div>
       <AppointmentServicePicker onCloseManual={()=>{setService('');setServiceId('');setPackageId('')}} manualField={<><label>Servicio manual<input autoFocus name="service" value={service} onChange={event=>setService(event.target.value)} onBlur={event=>applyServicePreset(event.target.value)} list="clinic-service-new-suggestions" placeholder="Captura un servicio manual" maxLength="120" required/></label><datalist id="clinic-service-new-suggestions">{[...new Set(['Consulta de valoración','Limpieza facial','Tratamiento facial','Seguimiento',...servicePresets.map(appointment=>appointment.service),...branchServices.map(item=>item.name)].filter(Boolean))].map(name=><option key={name} value={name}/>)}</datalist></>} services={serviceCatalog} selectedIds={serviceIds} providers={providersForBranch} branchId={branchId} providerId={providerId} onChange={(next, nextProviderId)=>{if(nextProviderId)setProviderId(nextProviderId);setServiceIds(next);setServiceId(next[0]||'');setService(next.map(id=>serviceCatalog.find(option=>option.id===id)?.name).filter(Boolean).join(' + '));setPackageId('');const selected=next.map(id=>serviceCatalog.find(option=>option.id===id));if(selected.length&&selected.every(option=>option?.durationMin))updateDuration(String(selected.reduce((total,option)=>total+Number(option.durationMax||option.durationMin),0)));}}/>
       {selectedPatient && <AppointmentHistory key={`${clinicId || 'demo'}:${patientId}`} patient={selectedPatient} sharedMode={sharedMode}
         clinicId={clinicId} appointments={historyAppointments} treatments={historyTreatments} date={date} time={time} timeZone={timeZone}/>}
@@ -2576,7 +2796,7 @@ function NewAppointmentModal({serviceCatalog=[],promotions=[],close,onSubmit,onC
   </Modal>;
 }
 
-function NewContractModal({close,onSubmit,onReviewDiagnosis,onAddTemplate,patients,templates,defaultPatientId,sharedMode=false,canPrepare=true}) {
+function NewContractModal({close,onSubmit,onReviewDiagnosis,onAddTemplate,patients,templates,services=[],defaultPatientId,sharedMode=false,canPrepare=true}) {
   const [patientId,setPatientId]=useState(defaultPatientId||'');
   const readyTemplates = templates.filter(template => template.content?.trim());
   const selectedPatient = patients.find(patient => patient.id === patientId);
@@ -2585,7 +2805,7 @@ function NewContractModal({close,onSubmit,onReviewDiagnosis,onAddTemplate,patien
     <form className="form-stack" onSubmit={onSubmit}>
       <label>Paciente<SearchablePatientSelect patients={patients} value={patientId} onChange={setPatientId}/></label>
       <label>Formato oficial<select name="contractTemplate" defaultValue="" required><option value="" disabled>Seleccionar formato…</option>{readyTemplates.map(template=><option key={template.id} value={template.id}>{template.title}{template.version?` · ${template.version}`:''} · {template.type}</option>)}</select></label>
-      <label>Servicio o tratamiento<input name="service" placeholder="Describe el servicio"/></label>
+      <label>Servicio<select name="service" required defaultValue=""><option value="" disabled>Elige el servicio de esta visita…</option>{services.filter(service=>service.active!==false&&service.name).map(service=><option key={service.id} value={service.name}>{service.name}</option>)}</select></label>
       {readyTemplates.length===0&&<div className="form-note"><FileText size={14}/> Agrega un formato oficial con contenido antes de preparar el documento. <button type="button" className="text-link" onClick={onAddTemplate}>Crear formato oficial</button></div>}
       {patients.length===0&&<div className="form-note"><ClipboardCheck size={14}/> No hay pacientes disponibles. Registra un paciente desde Pacientes para comenzar.</div>}
       {selectedPatient&&!diagnosisAccepted&&<div className="form-note"><ClipboardCheck size={14}/> Acepta el diagnóstico de {selectedPatient.name} antes de preparar el contrato. <button type="button" className="text-link" onClick={()=>onReviewDiagnosis?.(selectedPatient.id)}>Revisar diagnóstico</button></div>}
@@ -2624,7 +2844,7 @@ function PaymentModal({close,onSubmit,defaultDate,defaultAppointmentId,patients,
     try { await onSubmit(event,currency === 'USD' ? rate.quote : null); }
     finally { submitting.current=false; setSaving(false); }
   }
-  return <Modal title="Registrar movimiento" subtitle="Guarda un ingreso o reembolso como un registro independiente." close={close}><form onSubmit={submit} className="form-stack"><label>Paciente<SearchablePatientSelect patients={patients} name="patientId" value={patientId} onChange={id=>{setPatientId(id);setAppointmentId('');setPackageId('')}}/></label><label>Cita vinculada<select name="appointmentId" value={appointmentId} onChange={event=>{setAppointmentId(event.target.value);setPackageId('')}}><option value="">Sin cita vinculada</option>{appointmentOptions.map(item=><option key={item.id} value={item.id}>{item.date} · {item.time} · {item.service}</option>)}</select></label>{!appointmentId&&packageOptions.length>0&&<label>Paquete vinculado<select name="packageId" value={purchase?.id||''} onChange={event=>setPackageId(event.target.value)}><option value="">Sin paquete</option>{packageOptions.map(item=><option key={item.id} value={item.id}>{item.serviceName} · {item.outstandingAmount?formatCurrencyMXN(item.outstandingAmount)+' pendientes':'Liquidado'} · {item.id.slice(-6)}</option>)}</select></label>}<div className="form-grid"><label>Tipo<select name="direction" value={direction} onChange={event=>setDirection(event.target.value)}><option>Ingreso</option>{canRefund&&<option>Reembolso</option>}</select></label><label>Moneda del movimiento<select value={currency} onChange={event=>{setCurrency(event.target.value);setAmount('')}}><option>MXN</option><option>USD</option></select></label><label>{`Monto (${currency})`}<input name="amount" type="number" min="0.01" max={currency==='USD'?9999999999.99:direction==='Reembolso'?refundAvailability.available:purchase?.outstandingAmount} step="0.01" placeholder="0.00" required value={amount} onChange={event=>setAmount(event.target.value)}/></label></div><div className="form-grid"><label>Fecha<input name="date" type="date" value={transactionDate} onChange={event=>setTransactionDate(event.target.value)} required/></label><label>Método<select name="method" defaultValue="Transferencia"><option>Efectivo</option><option>Tarjeta</option><option>Transferencia</option><option>Otro</option></select></label></div>{currency==='USD'&&<ExchangeRatePreview rate={rate} amount={amount} currency={currency} disabled={!transactionDate || saving}/>}<label>Nota opcional<input name="note" maxLength="240" placeholder="Referencia, concepto o motivo"/></label>{direction==='Reembolso'&&patient&&<div className="form-note"><CalendarDays size={15}/>{purchase?`Saldo del paquete ${purchase.serviceName}`:linkedAppointment?`${linkedAppointment.service} · ${linkedAppointment.date}`:`Saldo del expediente de ${patient.name}`} · Saldo: {formatCurrencyMXN(refundAvailability.balance)} · Anticipos reservados: {formatCurrencyMXN(refundAvailability.protectedDeposits)} · Disponible para reembolso: {formatCurrencyMXN(refundAvailability.available)}</div>}<div className="form-note"><ShieldCheck size={15}/> Los movimientos se conservan en el historial. Para corregir un ingreso registra un reembolso, no edites el movimiento.</div><div className="modal-actions"><button type="button" className="button secondary" onClick={close}>Cancelar</button><button className="button primary" type="submit" disabled={saving || (currency==='USD' && !rate.quote)}><DollarSign size={15}/>{saving?'Guardando…':'Guardar movimiento'}</button></div></form></Modal>;
+  return <Modal title="Registrar movimiento" subtitle="Guarda un ingreso o reembolso como un registro independiente." close={close}><form onSubmit={submit} className="form-stack"><label>Paciente<SearchablePatientSelect patients={patients} name="patientId" value={patientId} onChange={id=>{setPatientId(id);setAppointmentId('');setPackageId('')}}/></label><label>Cita vinculada<select name="appointmentId" value={appointmentId} onChange={event=>{setAppointmentId(event.target.value);setPackageId('')}}><option value="">Sin cita vinculada</option>{appointmentOptions.map(item=><option key={item.id} value={item.id}>{item.date} · {item.time} · {item.service}</option>)}</select></label>{!appointmentId&&packageOptions.length>0&&<label>Paquete vinculado<select name="packageId" value={purchase?.id||''} onChange={event=>setPackageId(event.target.value)}><option value="">Sin paquete</option>{packageOptions.map(item=><option key={item.id} value={item.id}>{item.serviceName} · {item.outstandingAmount?formatCurrencyMXN(item.outstandingAmount)+' pendientes':'Liquidado'} · {item.id.slice(-6)}</option>)}</select></label>}<div className="form-grid"><label>Tipo<select name="direction" value={direction} onChange={event=>setDirection(event.target.value)}><option>Ingreso</option>{canRefund&&<option>Reembolso</option>}</select></label><label>Moneda del movimiento<select value={currency} onChange={event=>{setCurrency(event.target.value);setAmount('')}}><option>MXN</option><option>USD</option></select></label><label>{`Monto (${currency})`}<input name="amount" type="number" min="0.01" max={currency==='USD'?9999999999.99:direction==='Reembolso'?refundAvailability.available:purchase?.outstandingAmount} step="0.01" placeholder="0.00" required value={amount} onChange={event=>setAmount(event.target.value)}/></label></div><div className="form-grid"><label>Fecha<ClinicDateField name="date" value={transactionDate} onChange={event=>setTransactionDate(event.target.value)} required/></label><label>Método<select name="method" defaultValue="Transferencia"><option>Efectivo</option><option>Tarjeta</option><option>Transferencia</option><option>Otro</option></select></label></div>{currency==='USD'&&<ExchangeRatePreview rate={rate} amount={amount} currency={currency} disabled={!transactionDate || saving}/>}<label>Nota opcional<input name="note" maxLength="240" placeholder="Referencia, concepto o motivo"/></label>{direction==='Reembolso'&&patient&&<div className="form-note"><CalendarDays size={15}/>{purchase?`Saldo del paquete ${purchase.serviceName}`:linkedAppointment?`${linkedAppointment.service} · ${linkedAppointment.date}`:`Saldo del expediente de ${patient.name}`} · Saldo: {formatCurrencyMXN(refundAvailability.balance)} · Anticipos reservados: {formatCurrencyMXN(refundAvailability.protectedDeposits)} · Disponible para reembolso: {formatCurrencyMXN(refundAvailability.available)}</div>}<div className="form-note"><ShieldCheck size={15}/> Los movimientos se conservan en el historial. Para corregir un ingreso registra un reembolso, no edites el movimiento.</div><div className="modal-actions"><button type="button" className="button secondary" onClick={close}>Cancelar</button><button className="button primary" type="submit" disabled={saving || (currency==='USD' && !rate.quote)}><DollarSign size={15}/>{saving?'Guardando…':'Guardar movimiento'}</button></div></form></Modal>;
 }
 
 function PatientRecallPage({patients,appointments,packages=[],packageStatus='ready',timeZone,onRetryPackages,onOpenPatient,onNewAppointment}) {
@@ -2876,7 +3096,7 @@ function AgendaPage({canCreateAppointment=true,canEditAppointment=true,canCancel
   const monthLength=new Date(Date.UTC(selectedDate.getUTCFullYear(),selectedDate.getUTCMonth()+1,0,12)).getUTCDate();
   const monthCells=Array.from({length:Math.ceil((monthOffset+monthLength)/7)*7},(_,index)=>index-monthOffset+1);
   const yearMonths=Array.from({length:12},(_,month)=>new Date(Date.UTC(selectedDate.getUTCFullYear(),month,1,12)));
-  return <><PageTitle title="Agenda" description="Coordina las citas de cada profesional, sucursal y negocio." action={<div className="agenda-title-actions">{sharedMode&&<div className="agenda-account-scope" role="group" aria-label="Citas por cuenta"><button type="button" aria-pressed={!onlyMine} onClick={()=>setOnlyMine(false)}>Todas las citas</button><button type="button" aria-pressed={onlyMine} disabled={!accountReady} onClick={()=>{setOnlyMine(true);setSelectedProviderIds([]);setProviderFilter('')}}><UserRound size={14}/> Mis citas</button></div>}{canCreateAppointment&&<button className="button primary" onClick={()=>onNewAppointment()}><Plus size={16}/> Nueva cita</button>}</div>}/><section className={`panel calendar-panel ${filtersOpen?'mobile-filters-open':''} ${availabilityActive?'availability-active':''} ${compactView?'compact-view-active':''}`}><div className="calendar-toolbar"><div className="calendar-left"><div className="date-navigator"><button aria-label="Periodo anterior" onClick={()=>changeDate(-1)}><ChevronLeft size={17}/></button><label className="agenda-date-picker"><CalendarDays size={14}/><span>{dateLabel}</span><input type="date" aria-label="Elegir fecha de agenda" value={agendaDate} onChange={event=>setAgendaDate(event.target.value)}/></label><button aria-label="Periodo siguiente" onClick={()=>changeDate(1)}><ChevronRight size={17}/></button></div><button className="button outline compact" onClick={goToToday}>Hoy</button></div><div className="calendar-right"><button className="button outline compact agenda-print-button" onClick={()=>window.print()}><Printer size={14}/> Imprimir</button><button className="button outline compact agenda-filter-toggle" aria-expanded={filtersOpen} onClick={()=>setFiltersOpen(open=>!open)}><Filter size={14}/> Filtrar{activeFilterCount>0&&<span className="filter-count">{activeFilterCount}</span>}</button><label className="agenda-mobile-period"><select aria-label="Vista de agenda" value={period} onChange={event=>setPeriod(event.target.value)}>{['Día','Compacta','Semana','Mes','Año','Lista'].map(view=><option key={view}>{view}</option>)}</select><ChevronDown size={14}/></label><div className="period-toggle">{['Día','Compacta','Semana','Mes','Año','Lista'].map(x=><button onClick={()=>setPeriod(x)} className={period===x?'active':''} key={x}>{x}</button>)}</div><div className="agenda-options"><button type="button" className="icon-button outline" aria-label="Opciones de agenda" aria-expanded={optionsOpen} onClick={()=>setOptionsOpen(open=>!open)}><MoreHorizontal size={18}/></button>{optionsOpen&&<div className="agenda-options-menu"><button type="button" className="agenda-mobile-print" onClick={()=>{setOptionsOpen(false);window.print()}}><Printer size={14}/> Imprimir</button><button type="button" onClick={()=>{goToToday();setPeriod('Día');clearFilters();setOptionsOpen(false)}}><CalendarDays size={14}/> Restablecer vista</button></div>}</div></div></div><AgendaIdentityFilters providers={providers} providerIds={selectedProviderIds} setProviderIds={ids=>{setOnlyMine(false);setSelectedProviderIds(ids)}} colorOptions={compactView?compactColors.filter(color=>providers.some(provider=>provider.id===color.id)||compactColorIds.includes(color.id)):colorOptions} colors={compactView?compactColorIds:selectedColors} setColors={compactView?setCompactColorIds:setSelectedColors} query={appointmentQuery} setQuery={setAppointmentQuery} availabilityControls={period==='Día'&&<AgendaAvailabilityControls active={availabilityActive} onToggle={()=>setShowAvailability(value=>!value)} duration={availableDuration} onDurationChange={setAvailableDuration}/>}/>{filtersOpen&&<div className="agenda-filter-panel"><label className="select-filter"><Activity size={15}/><select aria-label="Filtrar por sucursal" value={branchFilter} onChange={e=>setBranchFilter(e.target.value)}>{branches.map(b=><option key={b.id || b.name} value={b.id}>{b.name}</option>)}</select><ChevronDown size={14}/></label><label className="select-filter"><Building2 size={15}/><select aria-label="Filtrar por negocio" value={businessFilter} onChange={e=>{setBusinessFilter(e.target.value);setBranchFilter("")}}>{businessOptions.map(b=><option key={b.id || b.name} value={b.id}>{b.name}</option>)}</select><ChevronDown size={14}/></label><label className="select-filter"><ListFilter size={15}/><select aria-label="Filtrar citas por estado" value={statusFilter} onChange={event=>setStatusFilter(event.target.value)}><option>Todos los estados</option><option>Por confirmar</option><option>Confirmada</option><option>Completada</option><option>Cancelada</option></select><ChevronDown size={14}/></label><button className="text-link" onClick={clearFilters}>Limpiar filtros <X size={13}/></button></div>}{onlyMine&&accountReady&&!currentAccountProviderId&&<div className="agenda-account-note" role="status"><UserRound size={18}/><div><strong>Tu cuenta aún no está vinculada a un profesional</strong><p>Vincula tu cuenta desde Equipo y sucursales para ver tus citas. Puedes volver a «Todas las citas» para consultar la agenda.</p></div></div>}<div className="agenda-summary"><div className="day-summary"><div className="day-number">{dailyView||period==='Lista'?new Intl.DateTimeFormat('es-MX',{day:'2-digit',timeZone:'UTC'}).format(selectedDate):period==='Semana'?`${weekStart.getUTCDate()}–${new Date(Date.UTC(weekStart.getUTCFullYear(),weekStart.getUTCMonth(),weekStart.getUTCDate()+6,12)).getUTCDate()}`:period==='Mes'?new Intl.DateTimeFormat('es-MX',{month:'short',timeZone:'UTC'}).format(selectedDate):selectedDate.getUTCFullYear()}</div><div>{(dailyView||period==='Lista')&&<strong>{new Intl.DateTimeFormat('es-MX',{weekday:'long',timeZone:'UTC'}).format(selectedDate)}</strong>}<span>{period==='Semana'?dateLabel:dailyView||period==='Lista'?new Intl.DateTimeFormat('es-MX',{month:'long',year:'numeric',timeZone:'UTC'}).format(selectedDate):''}</span></div><Badge variant="active"><span className="badge-dot"/>{appointmentsInRange.length} {appointmentsInRange.length===1?'cita':'citas'}</Badge></div><p className="agenda-color-explanation">{availabilityActive ? 'En verde, horarios que admiten la duración elegida.' : compactView ? 'Color por profesional.' : 'Color por profesional, sucursal y procedimiento. El estado aparece en cada cita.'}</p></div>
+  return <><PageTitle title="Agenda" description="Coordina las citas de cada profesional, sucursal y negocio." action={<div className="agenda-title-actions">{sharedMode&&<div className="agenda-account-scope" role="group" aria-label="Citas por cuenta"><button type="button" aria-pressed={!onlyMine} onClick={()=>setOnlyMine(false)}>Todas las citas</button><button type="button" aria-pressed={onlyMine} disabled={!accountReady} onClick={()=>{setOnlyMine(true);setSelectedProviderIds([]);setProviderFilter('')}}><UserRound size={14}/> Mis citas</button></div>}{canCreateAppointment&&<button className="button primary" onClick={()=>onNewAppointment()}><Plus size={16}/> Nueva cita</button>}</div>}/><section className={`panel calendar-panel ${filtersOpen?'mobile-filters-open':''} ${availabilityActive?'availability-active':''} ${compactView?'compact-view-active':''}`}><div className="calendar-toolbar"><div className="calendar-left"><div className="date-navigator"><button aria-label="Periodo anterior" onClick={()=>changeDate(-1)}><ChevronLeft size={17}/></button><label className="agenda-date-picker"><ClinicDateField aria-label="Elegir fecha de agenda" value={agendaDate} onChange={event=>setAgendaDate(event.target.value)}/></label><button aria-label="Periodo siguiente" onClick={()=>changeDate(1)}><ChevronRight size={17}/></button></div><button className="button outline compact" onClick={goToToday}>Hoy</button></div><div className="calendar-right"><button className="button outline compact agenda-print-button" onClick={()=>window.print()}><Printer size={14}/> Imprimir</button><button className="button outline compact agenda-filter-toggle" aria-expanded={filtersOpen} onClick={()=>setFiltersOpen(open=>!open)}><Filter size={14}/> Filtrar{activeFilterCount>0&&<span className="filter-count">{activeFilterCount}</span>}</button><label className="agenda-mobile-period"><select aria-label="Vista de agenda" value={period} onChange={event=>setPeriod(event.target.value)}>{['Día','Compacta','Semana','Mes','Año','Lista'].map(view=><option key={view}>{view}</option>)}</select><ChevronDown size={14}/></label><div className="period-toggle">{['Día','Compacta','Semana','Mes','Año','Lista'].map(x=><button onClick={()=>setPeriod(x)} className={period===x?'active':''} key={x}>{x}</button>)}</div><div className="agenda-options"><button type="button" className="icon-button outline" aria-label="Opciones de agenda" aria-expanded={optionsOpen} onClick={()=>setOptionsOpen(open=>!open)}><MoreHorizontal size={18}/></button>{optionsOpen&&<div className="agenda-options-menu"><button type="button" className="agenda-mobile-print" onClick={()=>{setOptionsOpen(false);window.print()}}><Printer size={14}/> Imprimir</button><button type="button" onClick={()=>{goToToday();setPeriod('Día');clearFilters();setOptionsOpen(false)}}><CalendarDays size={14}/> Restablecer vista</button></div>}</div></div></div><AgendaIdentityFilters providers={providers} providerIds={selectedProviderIds} setProviderIds={ids=>{setOnlyMine(false);setSelectedProviderIds(ids)}} colorOptions={compactView?compactColors.filter(color=>providers.some(provider=>provider.id===color.id)||compactColorIds.includes(color.id)):colorOptions} colors={compactView?compactColorIds:selectedColors} setColors={compactView?setCompactColorIds:setSelectedColors} query={appointmentQuery} setQuery={setAppointmentQuery} availabilityControls={period==='Día'&&<AgendaAvailabilityControls active={availabilityActive} onToggle={()=>setShowAvailability(value=>!value)} duration={availableDuration} onDurationChange={setAvailableDuration}/>}/>{filtersOpen&&<div className="agenda-filter-panel"><label className="select-filter"><Activity size={15}/><select aria-label="Filtrar por sucursal" value={branchFilter} onChange={e=>setBranchFilter(e.target.value)}>{branches.map(b=><option key={b.id || b.name} value={b.id}>{b.name}</option>)}</select><ChevronDown size={14}/></label><label className="select-filter"><Building2 size={15}/><select aria-label="Filtrar por negocio" value={businessFilter} onChange={e=>{setBusinessFilter(e.target.value);setBranchFilter("")}}>{businessOptions.map(b=><option key={b.id || b.name} value={b.id}>{b.name}</option>)}</select><ChevronDown size={14}/></label><label className="select-filter"><ListFilter size={15}/><select aria-label="Filtrar citas por estado" value={statusFilter} onChange={event=>setStatusFilter(event.target.value)}><option>Todos los estados</option><option>Por confirmar</option><option>Confirmada</option><option>Completada</option><option>Cancelada</option></select><ChevronDown size={14}/></label><button className="text-link" onClick={clearFilters}>Limpiar filtros <X size={13}/></button></div>}{onlyMine&&accountReady&&!currentAccountProviderId&&<div className="agenda-account-note" role="status"><UserRound size={18}/><div><strong>Tu cuenta aún no está vinculada a un profesional</strong><p>Vincula tu cuenta desde Equipo y sucursales para ver tus citas. Puedes volver a «Todas las citas» para consultar la agenda.</p></div></div>}<div className="agenda-summary"><div className="day-summary"><div className="day-number">{dailyView||period==='Lista'?new Intl.DateTimeFormat('es-MX',{day:'2-digit',timeZone:'UTC'}).format(selectedDate):period==='Semana'?`${weekStart.getUTCDate()}–${new Date(Date.UTC(weekStart.getUTCFullYear(),weekStart.getUTCMonth(),weekStart.getUTCDate()+6,12)).getUTCDate()}`:period==='Mes'?new Intl.DateTimeFormat('es-MX',{month:'short',timeZone:'UTC'}).format(selectedDate):selectedDate.getUTCFullYear()}</div><div>{(dailyView||period==='Lista')&&<strong>{new Intl.DateTimeFormat('es-MX',{weekday:'long',timeZone:'UTC'}).format(selectedDate)}</strong>}<span>{period==='Semana'?dateLabel:dailyView||period==='Lista'?new Intl.DateTimeFormat('es-MX',{month:'long',year:'numeric',timeZone:'UTC'}).format(selectedDate):''}</span></div><Badge variant="active"><span className="badge-dot"/>{appointmentsInRange.length} {appointmentsInRange.length===1?'cita':'citas'}</Badge></div><p className="agenda-color-explanation">{availabilityActive ? 'En verde, horarios que admiten la duración elegida.' : compactView ? 'Color por profesional.' : 'Color por profesional, sucursal y procedimiento. El estado aparece en cada cita.'}</p></div>
   {period==='Día'&&dayProviders.length>1&&<p className="agenda-mobile-hint">Desliza la agenda para ver más profesionales.</p>}
   {availabilityActive && (availability.status !== 'ready' || availabilityNeedsHours || !hasFreeBlocks) && <div className="agenda-availability-status" role="status">
     {availability.status === 'loading' && 'Cargando disponibilidad…'}
@@ -2934,7 +3154,7 @@ function AgendaPage({canCreateAppointment=true,canEditAppointment=true,canCancel
   {period==='Semana'&&<div className="agenda-week">{weekDays.map(date=>{const dayAppointments=appointmentsFor(dateKey(date));return <section className={`week-day ${dateKey(date)===agendaDate?'selected':''}`} key={dateKey(date)}><button className="week-day-heading" onClick={()=>{setAgendaDate(dateKey(date));setPeriod('Día')}}><span>{weekdayFormatter.format(date)}</span><strong>{date.getUTCDate()}</strong></button><div className="week-day-events">{dayAppointments.map(item=><AgendaEventCard appointment={item} variant="week-event" compact onOpen={onOpenAppointment} key={item.id||`${item.date}-${item.time}-${item.patient}`}/>)}{!dayAppointments.length&&<span className="week-empty">Sin citas</span>}</div></section>})}</div>}
   {period==='Mes'&&<div className="agenda-month"><div className="month-weekdays">{['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'].map(day=><span key={day}>{day}</span>)}</div><div className="month-grid">{monthCells.map((day,index)=>{const valid=day>0&&day<=monthLength;const date=valid?new Date(Date.UTC(selectedDate.getUTCFullYear(),selectedDate.getUTCMonth(),day,12)):null;const dayAppointments=date?appointmentsFor(dateKey(date)):[];return <button key={index} disabled={!valid} className={`month-cell ${valid?'':'outside'} ${valid&&dateKey(date)===agendaDate?'selected':''} ${valid&&dayAppointments.length?'has-events':''}`} onClick={()=>{if(date){setAgendaDate(dateKey(date));setPeriod('Día')}}}>{valid&&<><strong>{day}</strong>{dayAppointments.slice(0,3).map(item=><span className="month-event agenda-colored-event" style={colorStyle(item.agendaColor)} title={`${item.clinician} · ${item.service} · ${item.status}`} key={`${item.time}-${item.patient}`}>{item.time} {item.patient}</span>)}{dayAppointments.length>3&&<small>+{dayAppointments.length-3} más</small>}</>}</button>})}</div></div>}
   {period==='Año'&&<div className="agenda-year">{yearMonths.map(date=>{const monthAppointments=appointmentsInRange.filter(item=>{const itemDate=new Date(`${item.date||agendaDate}T12:00:00Z`);return itemDate.getUTCMonth()===date.getUTCMonth()});return <button className="year-month" key={date.getUTCMonth()} onClick={()=>{setAgendaDate(dateKey(date));setPeriod('Mes')}}><strong>{new Intl.DateTimeFormat('es-MX',{month:'long',timeZone:'UTC'}).format(date)}</strong><span>{monthAppointments.length} {monthAppointments.length===1?'cita':'citas'}</span><i>{monthAppointments.length?`${new Set(monthAppointments.map(item=>item.date)).size} días con actividad`:'Sin actividad registrada'}</i></button>})}</div>}
-  {period==='Lista'&&<div className="agenda-list-wrap"><div className="agenda-list-controls"><label>Desde<input type="date" aria-label="Lista desde" value={agendaDate} onChange={event=>setAgendaDate(event.target.value)}/></label><label>Hasta<input type="date" aria-label="Lista hasta" min={agendaDate} value={listEnd>=agendaDate?listEnd:agendaDate} onChange={event=>setListEnd(event.target.value)}/></label><label>Ordenar<select aria-label="Ordenar citas" value={listSort} onChange={event=>setListSort(event.target.value)}><option value="date">Fecha y hora · ascendente</option><option value="date-desc">Fecha y hora · descendente</option><option value="patient">Paciente</option><option value="provider">Profesional</option></select></label></div><table className="agenda-list-table"><thead><tr><th>HORA</th><th>PACIENTE</th><th>SERVICIO</th><th>PROFESIONAL</th><th>SUCURSAL</th><th>ESTADO</th><th></th></tr></thead><tbody>{sortAgendaAppointments(appointmentsInRange,listSort).map(appointment=><tr key={appointment.id||`${appointment.date}-${appointment.time}-${appointment.patient}`} onClick={()=>onOpenAppointment(appointment)} className="clickable-row"><td><strong>{appointment.time}</strong><span>{appointment.duration||'45 min'}</span></td><td><div className="patient-cell"><Avatar initials={appointment.initials} tone={appointment.tone}/><div><strong>{appointment.patient}</strong><span>{appointment.date}</span></div></div></td><td>{appointment.service}</td><td><span className="agenda-list-professional"><i className="agenda-color-dot" style={colorStyle(appointment.agendaColor)}/>{appointment.clinician}</span><small className="agenda-list-color">{agendaPalette.find(color=>color.id===appointment.agendaColor)?.label}</small></td><td>{appointment.branch}</td><td><Badge variant={appointment.status==='Confirmada'?'confirmed':appointment.status==='Completada'?'active':appointment.status==='Cancelada'?'':'pending'}><span className="badge-dot"/>{appointment.status||'Por confirmar'}</Badge>{appointment.arrivedAt&&<small>Llegó a recepción</small>}</td><td><button className="row-action" aria-label={`Abrir cita de ${appointment.patient}`} onClick={event=>{event.stopPropagation();onOpenAppointment(appointment)}}>Abrir <ArrowRight size={13}/></button></td></tr>)}</tbody></table>{appointmentsInRange.length===0&&<div className="empty-state"><CalendarDays size={20}/><strong>Sin citas para estos filtros</strong><span>Prueba otro estado o fecha, o agrega una cita.</span>{canCreateAppointment&&<button className="button primary compact" onClick={()=>onNewAppointment()}><Plus size={14}/> Nueva cita</button>}</div>}</div>}
+  {period==='Lista'&&<div className="agenda-list-wrap"><div className="agenda-list-controls"><label>Desde<ClinicDateField aria-label="Lista desde" value={agendaDate} onChange={event=>setAgendaDate(event.target.value)}/></label><label>Hasta<ClinicDateField aria-label="Lista hasta" min={agendaDate} value={listEnd>=agendaDate?listEnd:agendaDate} onChange={event=>setListEnd(event.target.value)}/></label><label>Ordenar<select aria-label="Ordenar citas" value={listSort} onChange={event=>setListSort(event.target.value)}><option value="date">Fecha y hora · ascendente</option><option value="date-desc">Fecha y hora · descendente</option><option value="patient">Paciente</option><option value="provider">Profesional</option></select></label></div><table className="agenda-list-table"><thead><tr><th>HORA</th><th>PACIENTE</th><th>SERVICIO</th><th>PROFESIONAL</th><th>SUCURSAL</th><th>ESTADO</th><th></th></tr></thead><tbody>{sortAgendaAppointments(appointmentsInRange,listSort).map(appointment=><tr key={appointment.id||`${appointment.date}-${appointment.time}-${appointment.patient}`} onClick={()=>onOpenAppointment(appointment)} className="clickable-row"><td><strong>{appointment.time}</strong><span>{appointment.duration||'45 min'}</span></td><td><div className="patient-cell"><Avatar initials={appointment.initials} tone={appointment.tone}/><div><strong>{appointment.patient}</strong><span>{appointment.date}</span></div></div></td><td>{appointment.service}</td><td><span className="agenda-list-professional"><i className="agenda-color-dot" style={colorStyle(appointment.agendaColor)}/>{appointment.clinician}</span><small className="agenda-list-color">{agendaPalette.find(color=>color.id===appointment.agendaColor)?.label}</small></td><td>{appointment.branch}</td><td><Badge variant={appointment.status==='Confirmada'?'confirmed':appointment.status==='Completada'?'active':appointment.status==='Cancelada'?'':'pending'}><span className="badge-dot"/>{appointment.status||'Por confirmar'}</Badge>{appointment.arrivedAt&&<small>Llegó a recepción</small>}</td><td><button className="row-action" aria-label={`Abrir cita de ${appointment.patient}`} onClick={event=>{event.stopPropagation();onOpenAppointment(appointment)}}>Abrir <ArrowRight size={13}/></button></td></tr>)}</tbody></table>{appointmentsInRange.length===0&&<div className="empty-state"><CalendarDays size={20}/><strong>Sin citas para estos filtros</strong><span>Prueba otro estado o fecha, o agrega una cita.</span>{canCreateAppointment&&<button className="button primary compact" onClick={()=>onNewAppointment()}><Plus size={14}/> Nueva cita</button>}</div>}</div>}
   <section className="agenda-print-sheet" aria-label="Agenda imprimible"><header className="agenda-print-heading"><div><span>Agenda clínica</span><h1>Agenda de citas</h1><p>{dateLabel}</p></div><strong>{appointmentsInRange.length} {appointmentsInRange.length===1?'cita':'citas'}</strong></header>{appointmentsInRange.length>0?<table className="agenda-print-table"><thead><tr><th>Fecha y hora</th><th>Paciente</th><th>Servicio</th><th>Profesional</th><th>Sucursal</th><th>Modalidad</th><th>Color</th><th>Estado</th></tr></thead><tbody>{sortAgendaAppointments(appointmentsInRange,period==='Lista'?listSort:'date').map(appointment=><tr key={`print-${appointment.id||`${appointment.date}-${appointment.time}-${appointment.patient}`}`}><td>{appointment.date||agendaDate} · {appointment.time} · {appointment.duration||'45 min'}</td><td>{appointment.patient}</td><td>{appointment.service||'—'}</td><td>{appointment.clinician||'Sin profesional'}</td><td>{appointment.branch||'—'}</td><td>{appointment.modality||'Presencial'}</td><td><span className="agenda-print-color" style={colorStyle(appointment.agendaColor)}/>{agendaPalette.find(color=>color.id===appointment.agendaColor)?.label||'Sin color asignado'}</td><td>{appointment.status||'Por confirmar'}</td></tr>)}</tbody></table>:<p className="agenda-print-empty">No hay citas para imprimir con el periodo y los filtros actuales.</p>}</section>
 <div className="calendar-bottom"><span>Mostrando <strong>{appointmentsInRange.length}</strong> {appointmentsInRange.length===1?'cita':'citas'} en este periodo según tus filtros</span><button className="text-link" onClick={clearFilters}>Limpiar filtros <X size={13}/></button></div></section></>;
 }
@@ -2973,20 +3193,177 @@ function SearchablePatientSelect({patients,defaultValue='',name='patient',value,
   </div>;
 }
 
-function ConsentsPage({patients,templates,notify,onOpenDocument,onPrepareConsent,onNewTemplate,onNewVersion,sharedMode=false,canPrepare=true,canManageTemplates=true}) {
-  const pending=patients.filter(patient=>patient.consent==='Pendiente');
-  const signed=patients.filter(patient=>patient.consent==='Firmado');
-  const readyTemplates=templates.filter(template=>template.content?.trim());
+function foldConsentSearch(value) {
+  return String(value || '').normalize('NFD').replace(/\p{M}/gu, '').toLocaleLowerCase('es');
+}
+function NamePickerModal({title, subtitle, items, selectedId, placeholder, emptyLabel, onSelect, onClose}) {
+  const [query,setQuery]=useState('');
+  const [page,setPage]=useState(1);
+  const pageSize=5;
+  const needle=foldConsentSearch(query.trim());
+  const filtered=items.filter(item=>!needle||foldConsentSearch(item.label).includes(needle));
+  const pageCount=Math.max(1,Math.ceil(filtered.length/pageSize));
+  const currentPage=Math.min(page,pageCount);
+  useEffect(()=>{setPage(1)},[query]);
+  const shown=filtered.slice((currentPage-1)*pageSize,currentPage*pageSize);
+  const pageSlots=5;
+  const pageWindowLength=Math.min(pageSlots,pageCount);
+  let pageWindowStart=Math.max(1,currentPage-Math.floor(pageWindowLength/2));
+  pageWindowStart=Math.min(pageWindowStart,Math.max(1,pageCount-pageWindowLength+1));
+  const pageMarks=Array.from({length:pageSlots},(_,index)=>index<pageWindowLength?pageWindowStart+index:null);
+  const modal=<Modal className="name-picker-modal" title={title} subtitle={subtitle} close={onClose}>
+    <div className="consent-library-search consent-format-search"><Search size={16}/><input value={query} onChange={event=>setQuery(event.target.value)} placeholder={placeholder} aria-label={placeholder}/></div>
+    <div className="consent-format-list">{shown.map(item=><button type="button" key={item.id} className={item.id===selectedId?'is-selected':''} aria-pressed={item.id===selectedId} onClick={()=>onSelect(item)}>{item.icon||<img className="picker-mark" src="/elixirclinic-logo.png" alt=""/>}<span>{item.label}</span></button>)}{items.length===0&&<div className="empty-inline">{emptyLabel}</div>}{items.length>0&&filtered.length===0&&<div className="empty-inline">Nada coincide con ese nombre.</div>}</div>
+    {filtered.length>0&&<nav className="consent-pager" aria-label={title}><button type="button" className="consent-pager-step" aria-label="Página anterior" disabled={currentPage<=1} onClick={()=>setPage(current=>Math.max(1,current-1))}><ChevronLeft size={16}/></button><span className="consent-pager-pages">{pageMarks.map((mark,index)=>mark?<button type="button" key={mark} className={mark===currentPage?'is-current':''} aria-current={mark===currentPage?'page':undefined} onClick={()=>setPage(mark)}>{mark}</button>:<span key={`slot-${index}`} className="consent-pager-slot" aria-hidden="true"/>)}</span><button type="button" className="consent-pager-step" aria-label="Página siguiente" disabled={currentPage>=pageCount} onClick={()=>setPage(current=>Math.min(pageCount,current+1))}><ChevronRight size={16}/></button></nav>}
+  </Modal>;
+  return createPortal(modal, document.body);
+}
+function ConsentServiceAndFormat({services, templates, defaultTemplateId='', defaultService=''}) {
+  const ready=templates.filter(template=>String(template.content||'').trim());
+  const templateKey=template=>String(template.id||template.title);
+  const catalog=services.filter(service=>service.active!==false&&service.name);
+  const [serviceName,setServiceName]=useState(defaultService||'');
+  const [pickedByHand,setPickedByHand]=useState(false);
+  const [selectedId,setSelectedId]=useState(()=>ready.some(template=>templateKey(template)===String(defaultTemplateId))?String(defaultTemplateId):'');
+  const [open,setOpen]=useState('');
+  const suggested=suggestConsentTemplate(serviceName, templates);
+  useEffect(()=>{
+    if(pickedByHand) return;
+    const next=suggested?String(suggested.id||suggested.title):'';
+    if(next && ready.some(template=>templateKey(template)===next)) setSelectedId(next);
+    else if(!serviceName && defaultTemplateId && ready.some(template=>templateKey(template)===String(defaultTemplateId))) setSelectedId(String(defaultTemplateId));
+    else if(serviceName) setSelectedId('');
+  },[serviceName,defaultTemplateId,pickedByHand,templates]);
+  const selectedFormat=ready.find(template=>templateKey(template)===selectedId);
+  return <div className="choice-pair">
+    <input type="hidden" name="service" value={serviceName}/>
+    <input type="hidden" name="templateId" value={selectedId}/>
+    <button type="button" className="choice-card" onClick={()=>setOpen('service')}><span><small>Servicio</small><strong>{serviceName||'Elegir servicio'}</strong></span><em>{serviceName?'Cambiar':'Buscar'}</em></button>
+    <button type="button" className="choice-card" onClick={()=>setOpen('format')}><span><small>Formato{suggested&&!pickedByHand?' · ligado al servicio':''}</small><strong>{selectedFormat?.title||'Elegir formato'}</strong></span><em>{selectedFormat?'Cambiar':'Buscar'}</em></button>
+    {open==='service'&&<NamePickerModal title="Elegir servicio" subtitle="Busca por nombre y elige el de esta visita." placeholder="Buscar servicio por nombre" emptyLabel="No hay servicios activos en el catálogo." items={catalog.map(service=>({id:service.name,label:service.name}))} selectedId={serviceName} onClose={()=>setOpen('')} onSelect={item=>{setServiceName(item.label);setPickedByHand(false);setOpen('');}}/>}
+    {open==='format'&&<NamePickerModal title="Elegir formato" subtitle="Si el servicio tiene uno vinculado, ya queda marcado. Puedes elegir otro." placeholder="Buscar formato por nombre" emptyLabel="No hay formatos con texto para preparar." items={ready.map(template=>({id:templateKey(template),label:template.title,icon:<span className={`consent-file-icon ${template.color||'blue'}`}><FileText size={18}/></span>}))} selectedId={selectedId} onClose={()=>setOpen('')} onSelect={item=>{setPickedByHand(true);setSelectedId(item.id);setOpen('');}}/>}
+  </div>;
+}
+function fileToDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => typeof reader.result === 'string' ? resolve(reader.result) : reject(new Error('No se pudo leer la firma.'));
+    reader.onerror = () => reject(new Error('No se pudo leer la firma.'));
+    reader.readAsDataURL(file);
+  });
+}
+function dataUrlToFile(dataUrl, name) {
+  const [header, payload] = String(dataUrl || '').split(',');
+  const mime = header?.match(/:(.*?);/)?.[1] || 'image/png';
+  const binary = atob(payload || '');
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  return new File([bytes], name, { type: mime });
+}
+function withPatientWord(text) {
+  return String(text || '').replace(/usuario/gi, match => match === match.toUpperCase() ? 'PACIENTE' : match[0] === match[0].toUpperCase() ? 'Paciente' : 'paciente');
+}
+function clinicFileStamp(patientName) {
+  const date = new Intl.DateTimeFormat('en-CA', { year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+  const name = String(patientName || 'paciente').replace(/[<>:"/\\|?*\u0000-\u001f]/g, '').replace(/\s+/g, ' ').trim() || 'paciente';
+  return `${name}-${date}`;
+}
+function downloadClinicDocument({title, patientName, body, signatures = [], fileName = ''}) {
+  const figures = signatures.filter(item => item?.src).map(item => `<figure><figcaption>${item.label}</figcaption><img alt="${item.label}" src="${item.src}" style="max-height:96px"></figure>`).join('');
+  const downloadName = fileName || clinicFileStamp(patientName);
+  const html=`<!doctype html><html lang="es"><meta charset="utf-8"><title>${downloadName}</title><body style="font-family:sans-serif;padding:32px;line-height:1.5"><h1>${title}</h1><p>${patientName}</p><pre style="white-space:pre-wrap">${body}</pre>${figures}</body></html>`;
+  const link=document.createElement('a');
+  link.href=URL.createObjectURL(new Blob([html],{type:'text/html'}));
+  link.download=`${downloadName}.html`;
+  link.click();
+  URL.revokeObjectURL(link.href);
+}
+function consentInline(text, keyPrefix) {
+  const labels = { paciente: 'Nombre del paciente', domicilio: 'Domicilio', telefono: 'Teléfono', correo: 'Correo', fecha: 'Fecha', tratamiento: 'Servicio' };
+  return withPatientWord(text).split(/(\{\{\s*(?:paciente|domicilio|telefono|correo|fecha|tratamiento)\s*\}\})/gi).filter(part => part !== '').map((part, index) => {
+    const token = part.match(/^\{\{\s*(paciente|domicilio|telefono|correo|fecha|tratamiento)\s*\}\}$/i);
+    if (!token) return <span key={`${keyPrefix}-${index}`}>{part}</span>;
+    return <span className="consent-token" key={`${keyPrefix}-${index}`}>{labels[token[1].toLowerCase()]}</span>;
+  });
+}
+function isConsentHeading(line) {
+  const trimmed = line.trim();
+  if (!trimmed || trimmed.length > 90) return false;
+  if (/^[-–—].+[-–—]$/.test(trimmed)) return true;
+  const letters = trimmed.normalize('NFD').replace(/\p{M}/gu, '').replace(/[^A-Za-z]/g, '');
+  return letters.length >= 6 && letters === letters.toUpperCase();
+}
+function ConsentFormattedCopy({ content }) {
+  const lines = String(content || '').split('\n');
+  return <div className="consent-formatted">{lines.map((line, index) => {
+    const trimmed = line.trim();
+    if (!trimmed) return <div className="consent-gap" key={index}/>;
+    if (isConsentHeading(trimmed)) return <h3 className="consent-preview-title" key={index}>{trimmed.replace(/^[-–—\s]+|[-–—\s]+$/g, '')}</h3>;
+    const numbered = trimmed.match(/^(\d+\s*[\.\)\-–]+)\s*(.*)$/);
+    if (numbered) return <p key={index}><strong>{numbered[1]}</strong> {consentInline(numbered[2], index)}</p>;
+    const labeled = trimmed.match(/^([^:]{2,48}):\s*(.+)$/);
+    if (labeled && !labeled[1].includes('{{')) return <p key={index}><strong>{labeled[1]}:</strong> {consentInline(labeled[2], index)}</p>;
+    return <p key={index}>{consentInline(trimmed, index)}</p>;
+  })}</div>;
+}
+function ConsentsPage({patients,services=[],templates,notify,onPrepareConsent,onNewTemplate,onEditTemplate,onRenameTemplate,onArchiveTemplate,onLinkTemplate,sharedMode=false,canPrepare=true,canManageTemplates=true}) {
+  const [nameQuery,setNameQuery]=useState('');
+  const [page,setPage]=useState(1);
+  const [pageSize,setPageSize]=useState(6);
+  const gridRef=useRef(null);
+  const [menuTemplate,setMenuTemplate]=useState(null);
+  const [previewTemplate,setPreviewTemplate]=useState(null);
+  const [renameTemplate,setRenameTemplate]=useState(null);
+  const [linkTemplate,setLinkTemplate]=useState(null);
+  const [deleteTemplate,setDeleteTemplate]=useState(null);
+  const nameNeedle=foldConsentSearch(nameQuery.trim());
+  const filtered=templates.filter(template=>!nameNeedle||foldConsentSearch(template.title).includes(nameNeedle));
+  const pageCount=Math.max(1,Math.ceil(filtered.length/pageSize));
+  const currentPage=Math.min(page,pageCount);
+  useEffect(()=>{
+    const grid=gridRef.current;
+    if(!grid) return;
+    let frame=0;
+    const measure=()=>{
+      const columns=getComputedStyle(grid).gridTemplateColumns.split(' ').filter(Boolean).length||1;
+      const gap=Number.parseFloat(getComputedStyle(grid).rowGap)||10;
+      const sample=[...grid.querySelectorAll('.consent-card')].reduce((tallest,card)=>Math.max(tallest,card.getBoundingClientRect().height),0);
+      const rowHeight=sample||110;
+      const top=grid.getBoundingClientRect().top;
+      const available=Math.max(rowHeight,window.innerHeight-Math.max(top,0)-84);
+      const rows=Math.max(1,Math.floor((available+gap)/(rowHeight+gap)));
+      const fitted=columns*rows;
+      const next=columns===1?Math.max(5,fitted):fitted;
+      setPageSize(current=>current===next?current:next);
+    };
+    const schedule=()=>{cancelAnimationFrame(frame);frame=requestAnimationFrame(measure)};
+    schedule();
+    const observer=new ResizeObserver(schedule);
+    observer.observe(grid);
+    window.addEventListener('resize',schedule);
+    return ()=>{cancelAnimationFrame(frame);observer.disconnect();window.removeEventListener('resize',schedule)};
+  },[templates.length,nameQuery]);
+  useEffect(()=>{setPage(1)},[nameQuery,pageSize]);
+  const shown=filtered.slice((currentPage-1)*pageSize,currentPage*pageSize);
+  const pageSlots=5;
+  const pageWindowLength=Math.min(pageSlots,pageCount);
+  let pageWindowStart=Math.max(1,currentPage-Math.floor(pageWindowLength/2));
+  pageWindowStart=Math.min(pageWindowStart,Math.max(1,pageCount-pageWindowLength+1));
+  const pageMarks=Array.from({length:pageSlots},(_,index)=>index<pageWindowLength?pageWindowStart+index:null);
   return <div className="consents-page">
-    <PageTitle eyebrow="DOCUMENTACIÓN DIGITAL" title="Consentimientos" description="Gestiona formatos, solicitudes de firma y documentos informados." action={canPrepare&&<button className="button primary" onClick={()=>onPrepareConsent()}><Plus size={16}/> Preparar documento</button>}/>
-    <div className="document-stats">
-      <div className="doc-stat"><div className="metric-icon lavender"><FileCheck2 size={18}/></div><div><span>Firmas pendientes</span><strong>{String(pending.length).padStart(2,'0')}</strong></div><small>Expedientes que necesitan seguimiento</small></div>
-      <div className="doc-stat"><div className="metric-icon mint"><CheckCircle2 size={18}/></div><div><span>Firmados</span><strong>{String(signed.length).padStart(2,'0')}</strong></div><small>Según los expedientes guardados aquí</small></div>
-      <div className="doc-stat"><div className="metric-icon peach"><FileText size={18}/></div><div><span>Formatos con contenido</span><strong>{String(readyTemplates.length).padStart(2,'0')}</strong></div><small>Con texto guardado para preparar solicitudes</small></div>
+    <PageTitle eyebrow="DOCUMENTACIÓN DIGITAL" title="Consentimientos" description="Gestiona formatos, solicitudes de firma y documentos informados." action={canPrepare&&<button className="button primary" onClick={()=>onPrepareConsent()}>Preparar documento</button>}/>
+    <div className="section-heading"><span className="consent-format-badge">{templates.length} formatos</span></div>
+    <div className="consent-library-bar">
+      <label className="consent-library-search"><Search size={16}/><input value={nameQuery} onChange={event=>setNameQuery(event.target.value)} placeholder="Buscar formato por nombre" aria-label="Buscar formato por nombre"/></label>
+      {canManageTemplates&&<button type="button" className="consent-create" aria-label="Crear formato" onClick={onNewTemplate}><Plus size={20}/></button>}
     </div>
-    <div className="section-heading"><div><h2>Biblioteca de formatos</h2><p>{sharedMode?'Formatos de la clínica, con una copia de su contenido guardada al preparar cada expediente.':templates.some(template=>template.isDemoPlaceholder)?'Las muestras sirven para recorrer el flujo; sustitúyelas por texto aprobado por la clínica antes de usarlas.' : 'Agrega el texto oficial aprobado por la clínica. Los formatos sin contenido no se pueden solicitar ni firmar.'}</p></div>{canManageTemplates&&<button className="button outline compact" onClick={onNewTemplate}><Plus size={15}/> Crear formato</button>}</div>
-    <div className="consent-grid">{templates.map(template=>{const linked=patients.filter(patient=>patient.consentDocument===template.title).length;const ready=Boolean(template.content?.trim());return <div className="panel consent-card" key={template.id||template.title}><div className="consent-card-top"><div className={`consent-file-icon ${template.color||'blue'}`}><FileText size={20}/></div>{canPrepare&&<button className="more-button" aria-label={`Solicitar ${template.title}`} title={ready?'Solicitar firma':'Agrega texto oficial antes de solicitar'} disabled={!ready} onClick={()=>onPrepareConsent(template)}><MoreHorizontal size={18}/></button>}</div><span className="document-type">{template.type}{template.version?` · ${template.version}`:''}</span><h3>{template.title}</h3><span className="document-version">{!ready?'Falta agregar el texto oficial aprobado por la clínica':template.isDemoPlaceholder?'Muestra de flujo únicamente; no es texto legal.':'Texto disponible para revisión'}</span><div className="consent-card-bottom"><span><UsersRound size={13}/>{linked} expedientes vinculados</span>{canManageTemplates&&<button onClick={()=>onNewVersion(template)}>Nueva versión</button>}{canPrepare&&<button disabled={!ready} title={ready?(template.isDemoPlaceholder&&!sharedMode?'Probar flujo de demostración':'Solicitar firma'):'Agrega texto oficial antes de solicitar'} onClick={()=>onPrepareConsent(template)}>{template.isDemoPlaceholder&&!sharedMode?'Probar flujo':'Solicitar firma'} <ArrowRight size={13}/></button>}</div></div>})}{templates.length===0&&<div className="empty-inline">Aún no hay formatos. Agrega el documento validado por la clínica.</div>}</div>
-    <section className="panel pending-docs-panel"><div className="panel-heading"><div><div className="panel-title">Firmas que requieren atención</div><p className="panel-subtitle">Solicitudes pendientes en los expedientes</p></div><span className="panel-subtitle">{pending.length} pendientes</span></div><div className="pending-rows">{pending.map(patient=><div className="pending-row" key={patient.id}><Avatar initials={patient.initials} tone={patient.tone}/><div><strong>{patient.name}</strong><span>{patient.id} · {patient.treatment}</span></div><div className="pending-doc-name"><FileCheck2 size={15}/>{patient.consentDocument||'Consentimiento informado'}</div><Badge variant="pending"><span className="badge-dot"/>Esperando firma</Badge><button className="row-action" onClick={()=>onOpenDocument(patient,'consent')}>Revisar <ArrowRight size={13}/></button></div>)}{pending.length===0&&<div className="empty-inline"><CheckCircle2 size={17}/> Todo está al día, no hay firmas pendientes.</div>}</div></section>
+    <div className="consent-grid" ref={gridRef}>{shown.map(template=><article className="consent-card" key={template.id||template.title} role="button" tabIndex={0} aria-label={`Vista previa de ${template.title}`} onClick={()=>setPreviewTemplate(template)} onKeyDown={event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();setPreviewTemplate(template)}}}><div className="consent-card-main"><span className={`consent-file-icon ${template.color||'blue'}`}><FileText size={18}/></span><h3>{template.title}</h3></div><div className="consent-card-tools">{(canManageTemplates||canPrepare)&&<button type="button" className="consent-gear" aria-label={`Opciones de ${template.title}`} onClick={event=>{event.stopPropagation();setMenuTemplate(template)}}><Settings size={18} strokeWidth={2.25}/></button>}{canManageTemplates&&<button type="button" className="consent-delete" aria-label={`Eliminar ${template.title}`} onClick={event=>{event.stopPropagation();setDeleteTemplate(template)}}><Trash2 size={16}/></button>}</div></article>)}{templates.length===0&&<div className="empty-inline">Aún no hay formatos. Agrega el documento validado por la clínica.</div>}{templates.length>0&&filtered.length===0&&<div className="empty-inline"><Search size={17}/> Ningún formato coincide con ese nombre.</div>}</div>
+    {filtered.length>0&&<nav className="consent-pager" aria-label="Páginas de formatos"><button type="button" className="consent-pager-step" aria-label="Página anterior" disabled={currentPage<=1} onClick={()=>setPage(current=>Math.max(1,current-1))}><ChevronLeft size={16}/></button><span className="consent-pager-pages">{pageMarks.map((mark,index)=>mark?<button type="button" key={mark} className={mark===currentPage?'is-current':''} aria-current={mark===currentPage?'page':undefined} onClick={()=>setPage(mark)}>{mark}</button>:<span key={`slot-${index}`} className="consent-pager-slot" aria-hidden="true"/>)}</span><button type="button" className="consent-pager-step" aria-label="Página siguiente" disabled={currentPage>=pageCount} onClick={()=>setPage(current=>Math.min(pageCount,current+1))}><ChevronRight size={16}/></button><span className="consent-pager-count">{filtered.length?((currentPage-1)*pageSize)+1:0}–{Math.min(currentPage*pageSize,filtered.length)} de {filtered.length}</span></nav>}
+    {menuTemplate&&<Modal className="consent-menu-modal" title={menuTemplate.title} subtitle="Acciones del formato" close={()=>setMenuTemplate(null)}><div className="consent-action-list">{canManageTemplates&&<button type="button" onClick={()=>{const template=menuTemplate;setMenuTemplate(null);onEditTemplate(template)}}><Settings size={16}/> Editar</button>}{canManageTemplates&&<button type="button" onClick={()=>{setRenameTemplate(menuTemplate);setMenuTemplate(null)}}><PenLine size={16}/> Cambiar nombre</button>}{canPrepare&&<button type="button" onClick={()=>{const template=menuTemplate;setMenuTemplate(null);onPrepareConsent(template)}}><FileCheck2 size={16}/> Solicitar firma</button>}{canPrepare&&<button type="button" onClick={()=>{setLinkTemplate(menuTemplate);setMenuTemplate(null)}}><UsersRound size={16}/> Vincular expediente</button>}</div></Modal>}
+    {previewTemplate&&<Modal className="consent-preview-modal" title={previewTemplate.title} subtitle="Los recuadros se completan al preparar un expediente. Un nombre escrito en el texto forma parte del formato, no de un paciente elegido." close={()=>setPreviewTemplate(null)}><article className="consent-preview-sheet"><ConsentFormattedCopy content={previewTemplate.content}/></article></Modal>}
+    {renameTemplate&&<Modal title="Cambiar nombre" subtitle="Los expedientes que ya usaron este formato conservan el nombre con el que se guardaron." close={()=>setRenameTemplate(null)}><form className="form-stack" onSubmit={event=>{event.preventDefault();const title=String(new FormData(event.currentTarget).get('title')||'').trim();if(!title)return;onRenameTemplate(renameTemplate,title);setRenameTemplate(null)}}><label>Nombre del formato<input name="title" defaultValue={renameTemplate.title} required autoFocus/></label><div className="modal-actions"><button type="button" className="button secondary" onClick={()=>setRenameTemplate(null)}>Cancelar</button><button className="button primary">Guardar nombre</button></div></form></Modal>}
+    {linkTemplate&&<Modal title="Vincular expediente" subtitle={`${linkTemplate.title}. Se guarda una copia en el expediente junto con el servicio.`} close={()=>setLinkTemplate(null)}><form className="form-stack" onSubmit={async event=>{event.preventDefault();const form=new FormData(event.currentTarget);const patientId=String(form.get('patient')||'');const service=String(form.get('service')||'').trim();if(!patientId||!service){notify('Elige un paciente y un servicio.');return}await onLinkTemplate({patientId,template:linkTemplate,service});setLinkTemplate(null)}}><label>Paciente<SearchablePatientSelect patients={patients}/></label><label>Servicio<select name="service" required defaultValue=""><option value="" disabled>Seleccionar servicio…</option>{services.filter(service=>service.active!==false&&service.name).map(service=><option key={service.id} value={service.name}>{service.name}</option>)}</select></label><div className="modal-actions"><button type="button" className="button secondary" onClick={()=>setLinkTemplate(null)}>Cancelar</button><button className="button primary">Vincular</button></div></form></Modal>}
+    {deleteTemplate&&<Modal title="Quitar formato" subtitle="Se elimina de la biblioteca. Los expedientes que ya lo usaron conservan su copia." close={()=>setDeleteTemplate(null)}><p className="consent-delete-copy">{deleteTemplate.title}</p><div className="modal-actions"><button type="button" className="button secondary" onClick={()=>setDeleteTemplate(null)}>Cancelar</button><button type="button" className="button primary consent-delete-confirm" onClick={async()=>{const template=deleteTemplate;setDeleteTemplate(null);await onArchiveTemplate(template)}}><Trash2 size={15}/> Eliminar de la biblioteca</button></div></Modal>}
   </div>;
 }
 
@@ -3006,7 +3383,108 @@ function TeamPage({businesses,branches,providers,setModal,notify,onEditBranch,on
   return <><PageTitle title="Equipo y sucursales" description="Administra los negocios, ubicaciones y profesionales que aparecen en la agenda."/><div className="team-layout"><section className="panel team-panel"><div className="panel-heading padded"><div><div className="panel-title">Equipo clínico</div><p className="panel-subtitle">{providers.filter(item=>item.active).length} profesionales activos</p></div>{canManageProviders&&<button className="more-button" onClick={()=>setModal('new-provider')} aria-label="Agregar profesional"><Plus size={18}/></button>}</div><div className="team-list">{accountDirectory.error&&<p className="professional-error" role="alert">{accountDirectory.error} <button className="button outline compact" onClick={accountDirectory.reload}>Reintentar</button></p>}{providers.filter(item=>item.active).map(provider=><div className="team-member" key={provider.id}><Avatar initials={provider.initials||provider.name.split(/\s+/).slice(0,2).map(part=>part[0]).join('').toUpperCase()} tone={provider.tone||'blue'} imageUrl={accountFor(provider)?.avatarUrl} size="large"/><div className="team-person"><div className="professional-name-line"><strong>{professionalName(provider)}</strong>{provider.userId&&<span className="professional-link-icon" role="img" aria-label="Cuenta vinculada" title={accountFor(provider)?.email?`Cuenta vinculada: ${accountFor(provider).email}`:'Cuenta vinculada'}><Link2 size={14}/></span>}</div><span>{provider.role}</span><small><Activity size={12}/>{branchNamesForProvider(provider)}</small></div><span className="team-presence"><i/> Activo</span>{canManageProviders&&<button className="row-more" onClick={()=>onEditProvider(provider)} aria-label={`Editar profesional ${professionalName(provider)}`}><MoreHorizontal size={17}/></button>}</div>)}</div></section><section className="panel team-panel branch-panel"><div className="panel-heading padded"><div><div className="panel-title">Sucursales</div><p className="panel-subtitle">{branches.filter(item=>item.active).length} ubicaciones habilitadas</p></div>{canManageBusinesses&&<button className="icon-button outline" onClick={()=>setModal('new-branch')} aria-label="Agregar sucursal"><Plus size={16}/></button>}</div>{branches.filter(item=>item.active).map((branch,index)=><div className="branch-row" key={branch.id}><div className={`branch-icon branch-${index%3}`}><Activity size={16}/></div><div><strong>{branch.name}</strong><span>{branch.address||'Dirección pendiente'}</span>{branch.phone&&<small>{branch.phone}</small>}{branch.hours&&<small>{branch.hours}</small>}</div><span className="branch-active"><i/>Activa</span>{canManageBusinesses&&<button className="row-more" onClick={()=>onEditBranch(branch)} aria-label={`Editar sucursal ${branch.name}`}><Settings2 size={15}/></button>}</div>)}</section><section className="panel team-panel business-panel"><div className="panel-heading padded"><div><div className="panel-title">Negocios</div><p className="panel-subtitle">Agendas y sucursales agrupadas por negocio</p></div>{canManageBusinesses&&<button className="button outline compact" onClick={()=>setModal('new-business')}><Plus size={15}/> Agregar negocio</button>}</div><div className="business-list">{businesses.filter(item=>item.active).map(business=>{const count=branches.filter(branch=>branch.active&&branch.businessId===business.id).length;return <div className="business-row" key={business.id}><div className="branch-icon"><Building2 size={16}/></div><div><strong>{business.name}</strong><span>{count} {count===1?'sucursal activa':'sucursales activas'}</span></div><Badge variant="active"><span className="badge-dot"/>Activo</Badge></div>})}{businesses.filter(item=>item.active).length===0&&<div className="empty-inline">Aún no hay negocios. Agrega uno para empezar.</div>}</div></section></div></>;
 }
 
-function PatientModal({patient,activeRecordTab,setActiveRecordTab,clinicalBackground=null,packagePanel,appointments,activities,clinicalHistory=[],botoxTreatments=[],procedures=[],recordFiles=[],sharedMode=false,canEditPatient=true,canCreateAppointment=true,canDiagnose=true,canWriteClinical=true,canPrepareContract=true,canPrepareConsent=true,close,notify,onAddActivity,onClinicalBackground,onNewEncounter,onNewBotoxTreatment,onNewProcedure,onEditProcedure,onDeleteProcedure,procedurePending,onAddRecordFile,onOpenRecordFile,onEdit,onDiagnosis,onNewAppointment,onPrepareContract,onPrepareConsent,onOpenContract,onOpenConsent,onOpenDocumentRecord}) {
+function sessionMediaPrefix(sessionId) { return `[sesión:${sessionId}]`; }
+function SessionPhotoStrip({ files, resolveUrl }) {
+  const [urls,setUrls]=useState({});
+  useEffect(()=>{
+    let active=true;
+    files.forEach(file=>{
+      resolveUrl(file).then(url=>{ if(active && url) setUrls(current=>current[file.id]===url?current:({...current,[file.id]:url})); }).catch(()=>{});
+    });
+    return ()=>{ active=false; };
+  },[files.map(file=>file.id).join('|')]);
+  if(!files.length) return null;
+  return <div className="session-photo-strip">{files.map(file=><button type="button" key={file.id} onClick={()=>urls[file.id]&&window.open(urls[file.id],'_blank','noopener,noreferrer')}><img src={urls[file.id]||''} alt={file.title.replace(sessionMediaPrefix(''),'').trim()||'Foto de la sesión'}/></button>)}</div>;
+}
+function SessionMediaBar({ sessionId, files, onOpen, resolveUrl }) {
+  const prefix=sessionMediaPrefix(sessionId);
+  const mine=files.filter(file=>String(file.title||'').startsWith(prefix));
+  const photos=mine.filter(file=>file.kind==='clinical_photo');
+  const docs=mine.filter(file=>file.kind!=='clinical_photo');
+  return <div className="session-media">
+    <div className="session-media-actions">
+      <button type="button" className="session-media-button" disabled={photos.length>=4} onClick={()=>onOpen(sessionId,'photo')}><Camera size={16}/><span><strong>Fotos</strong><small>{photos.length}/4</small></span></button>
+      <button type="button" className="session-media-button" onClick={()=>onOpen(sessionId,'file')}><FilePlus2 size={16}/><span><strong>Archivos</strong><small>{docs.length?`${docs.length} adjuntos`:'PDF o imagen'}</small></span></button>
+    </div>
+    <SessionPhotoStrip files={photos} resolveUrl={resolveUrl}/>
+    {docs.length>0&&<div className="session-file-list">{docs.map(file=><span key={file.id}>{file.title.replace(prefix,'').trim()}</span>)}</div>}
+  </div>;
+}
+function SessionPhotoSlots({ shots, onRemove, reserved = 0, total = 4 }) {
+  const slots = Array.from({ length: total }, (_, index) => {
+    if (index < reserved) return { kind: 'saved', key: `saved-${index}` };
+    const shot = shots[index - reserved];
+    return shot ? { kind: 'shot', key: shot.url, shot, number: index + 1 } : { kind: 'empty', key: `empty-${index}` };
+  });
+  return <div className="session-photo-slots">{slots.map(slot => slot.kind === 'shot'
+    ? <button type="button" key={slot.key} onClick={() => onRemove(slot.shot)}><img src={slot.shot.url} alt={`Foto ${slot.number}`}/></button>
+    : <span key={slot.key} className={`session-photo-slot ${slot.kind === 'saved' ? 'is-saved' : ''}`}>{slot.kind === 'saved' ? 'Guardada' : ''}</span>)}</div>;
+}
+function SessionCameraStage({ open, onClose, onCapture, disabled }) {
+  const videoRef=useRef(null);
+  const streamRef=useRef(null);
+  const [facing,setFacing]=useState('environment');
+  useEffect(()=>{ if(!open) setFacing('environment'); },[open]);
+  useEffect(()=>{
+    if(!open) return undefined;
+    let cancelled=false;
+    let localStream=null;
+    navigator.mediaDevices.getUserMedia({ video:{ facingMode: { ideal: facing } }, audio:false }).then(stream=>{
+      if(cancelled){ stream.getTracks().forEach(track=>track.stop()); return; }
+      localStream=stream;
+      streamRef.current=stream;
+      if(videoRef.current){ videoRef.current.srcObject=stream; videoRef.current.play(); }
+    }).catch(()=>{ if(cancelled) return; if(facing==='environment') onClose(); else setFacing('environment'); });
+    return ()=>{ cancelled=true; localStream?.getTracks().forEach(track=>track.stop()); if(streamRef.current===localStream) streamRef.current=null; };
+  },[open,facing]);
+  if(!open) return null;
+  const capture=()=>{
+    const video=videoRef.current; if(!video?.videoWidth||disabled) return;
+    const scale=Math.min(1,1024/Math.max(video.videoWidth,video.videoHeight));
+    const canvas=document.createElement('canvas');
+    canvas.width=Math.max(1,Math.round(video.videoWidth*scale));
+    canvas.height=Math.max(1,Math.round(video.videoHeight*scale));
+    canvas.getContext('2d').drawImage(video,0,0,canvas.width,canvas.height);
+    canvas.toBlob(blob=>{
+      if(!blob) return;
+      onCapture(new File([blob],`foto-${Date.now()}.jpg`,{type:'image/jpeg'}));
+      onClose();
+    },'image/jpeg',0.55);
+  };
+  return createPortal(<div className="session-camera-stage" role="dialog" aria-label="Tomar foto">
+    <video ref={videoRef} className={facing==='user'?'is-front':''} playsInline autoPlay muted/>
+    <button type="button" className="session-camera-back" onClick={onClose}><ArrowLeft size={18}/> Volver</button>
+    <button type="button" className="session-camera-flip" onClick={()=>setFacing(current=>current==='environment'?'user':'environment')}><SwitchCamera size={18}/> {facing==='environment'?'Frontal':'Trasera'}</button>
+    <button type="button" className="button session-camera session-camera-shutter" onClick={capture} disabled={disabled}><Camera size={18}/> Capturar</button>
+  </div>, document.body);
+}
+function SessionCaptureModal({ mode, sessionId, existingPhotos, saving, onClose, onSave }) {
+  const remaining=Math.max(0,4-existingPhotos);
+  const [shots,setShots]=useState([]);
+  const [documents,setDocuments]=useState([]);
+  const [cameraOn,setCameraOn]=useState(false);
+  const addGallery=list=>{
+    const room=remaining-shots.length;
+    const next=[...list].filter(file=>file.type?.startsWith('image/')).slice(0,room).map(file=>({file,url:URL.createObjectURL(file)}));
+    setShots(current=>[...current,...next].slice(0,remaining));
+  };
+  const close=()=>{ shots.forEach(shot=>URL.revokeObjectURL(shot.url)); setCameraOn(false); onClose(); };
+  const photoMode=mode==='photo';
+  const modal=<Modal className="name-picker-modal session-capture-modal" title={photoMode?'Fotos de la sesión':'Archivos de la sesión'} subtitle={photoMode?`Puedes tomar o elegir hasta ${remaining} ${remaining===1?'foto':'fotos'}. Se guardan comprimidas.`:'PDF, JPG o PNG. Las imágenes se comprimen antes de guardarse.'} close={close}>
+    {photoMode&&remaining===0&&<p className="form-note">Esta sesión ya tiene las 4 fotos.</p>}
+    {photoMode&&remaining>0&&<>
+      <div className="session-photo-actions"><button type="button" className="button session-camera" onClick={()=>setCameraOn(true)} disabled={shots.length>=remaining}><Camera size={16}/> Tomar foto</button><label className={`button session-photo-pick ${shots.length>=remaining?'is-disabled':''}`}><Upload size={16}/> Elegir fotos<input className="profile-photo-input" type="file" accept="image/*" multiple disabled={shots.length>=remaining} onChange={event=>{ addGallery(event.target.files||[]); event.target.value=''; }}/></label></div>
+      <SessionCameraStage open={cameraOn} disabled={shots.length>=remaining} onClose={()=>setCameraOn(false)} onCapture={file=>setShots(current=>current.length>=remaining?current:[...current,{file,url:URL.createObjectURL(file)}])}/>
+      <SessionPhotoSlots shots={shots} reserved={existingPhotos} onRemove={shot=>setShots(current=>current.filter(item=>item.url!==shot.url))}/>
+    </>}
+    {!photoMode&&<label className="session-file-picker">Selecciona uno o varios archivos<input type="file" accept="application/pdf,image/jpeg,image/png" multiple onChange={event=>setDocuments([...(event.target.files||[])])}/></label>}
+    {!photoMode&&documents.length>0&&<ul className="session-file-list">{documents.map(file=><li key={file.name}>{file.name}</li>)}</ul>}
+    <div className="modal-actions"><button type="button" className="button secondary" onClick={close} disabled={saving}>Cancelar</button><button type="button" className="button primary" disabled={saving||(photoMode?shots.length===0:documents.length===0)} onClick={async()=>{ await onSave(sessionId, photoMode?shots.map(shot=>shot.file):documents, photoMode?'photo':'file'); close(); }}>{saving?'Guardando…':'Guardar en la sesión'}</button></div>
+  </Modal>;
+  return createPortal(modal, document.body);
+}
+function PatientModal({patient,activeRecordTab,setActiveRecordTab,clinicalBackground=null,packagePanel,appointments,activities,clinicalHistory=[],botoxTreatments=[],procedures=[],recordFiles=[],sharedMode=false,canEditPatient=true,canCreateAppointment=true,canDiagnose=true,canWriteClinical=true,canPrepareContract=true,canPrepareConsent=true,close,notify,onAddActivity,onClinicalBackground,onNewEncounter,onNewBotoxTreatment,onNewProcedure,onEditProcedure,onDeleteProcedure,procedurePending,onAddRecordFile,onOpenRecordFile,onEdit,onDiagnosis,onNewAppointment,onPrepareContract,onPrepareConsent,onOpenContract,onOpenConsent,onOpenDocumentRecord,onSaveSessionMedia,resolvePatientFileUrl}) {
+  const [sessionMedia,setSessionMedia]=useState(null);
   const selectRecordTab=(event,tab)=>{setActiveRecordTab(tab);event.currentTarget.closest('.modal')?.scrollTo({top:0,behavior:'instant'});};
   const patientAppointments=appointments.filter(appointment=>appointment.patientId===patient.id||appointment.patient===patient.name).sort((a,b)=>`${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`));
   const sortedActivities=[...activities].sort((a,b)=>b.createdAt.localeCompare(a.createdAt));
@@ -3019,6 +3497,7 @@ function PatientModal({patient,activeRecordTab,setActiveRecordTab,clinicalBackgr
   const contractStatus=contractReady?'Pendiente de firma':contractSignedCurrent?'Firmado':patient.contract==='Firmado'?(diagnosisAccepted?'Versión anterior':'Histórico firmado'):'Por preparar';
   const contractDescription=contractReady?'Hay un contrato preparado para esta valoración.':patient.contract==='Firmado'&&!contractSignedCurrent?(diagnosisAccepted?'El contrato firmado corresponde a una valoración anterior. Prepara la versión actual.':'El contrato firmado se conserva en el historial; acepta un diagnóstico para continuar.'):diagnosisAccepted?'Prepara el contrato con el formato de servicios de la clínica.':'Disponible después de aceptar el diagnóstico.';
   const consentReady=patient.consent==='Pendiente'&&Boolean(patient.consentContentSnapshot?.trim());
+  const serviceLabel=[...(patient.consentHistory||[])].reverse().find(record=>record.status!=='Reemplazado'&&record.service)?.service||'';
   const backgroundAnswers=clinicalBackground?.answers||{};
   const imageConsent=(patient.consentHistory||[]).find(record=>/imagen/i.test(record.title||''));
   const imageDecision=typeof imageConsent?.imageUseAuthorized==='boolean'?(imageConsent.imageUseAuthorized?'Sí autoriza':'No autoriza'):'decisión no estructurada';
@@ -3027,7 +3506,7 @@ function PatientModal({patient,activeRecordTab,setActiveRecordTab,clinicalBackgr
   <section className="patient-workflow-progress" aria-label="Progreso de diagnóstico y documentos">
     <article className={diagnosisAccepted?'complete':''}><div><span className="patient-workflow-number">1</span><strong>Diagnóstico</strong><Badge variant={diagnosisAccepted?'confirmed':'pending'}><span className="badge-dot"/>{diagnosisAccepted?'Aceptado':'Pendiente'}</Badge></div><p>{diagnosisAccepted?'El expediente tiene un diagnóstico vigente.':'Registra y acepta el diagnóstico para habilitar el contrato.'}{canDiagnose&&<button type="button" className="text-link" onClick={onDiagnosis}>{diagnosisAccepted?'Revisar':'Registrar diagnóstico'}</button>}</p></article>
     <article className={contractReady||contractSignedCurrent?'complete':''}><div><span className="patient-workflow-number">2</span><strong>Contrato</strong><Badge variant={contractReady?'pending':contractSignedCurrent?'confirmed':patient.contract==='Firmado'?'new':'pending'}><span className="badge-dot"/>{contractStatus}</Badge></div><p>{contractDescription}{canPrepareContract&&diagnosisAccepted&&<button type="button" className="text-link" onClick={contractReady?onOpenContract:onPrepareContract}>{contractReady?'Revisar contrato':'Preparar contrato'}</button>}</p></article>
-    <article className={consentReady?'complete':''}><div><span className="patient-workflow-number">3</span><strong>Consentimiento</strong><Badge variant={patient.consent==='Firmado'?'confirmed':consentReady?'pending':'pending'}><span className="badge-dot"/>{patient.consent==='Firmado'?'Firmado':consentReady?'Pendiente de firma':'Por preparar'}</Badge></div><p>{consentReady?'Hay un consentimiento preparado para este expediente.':'Prepara el consentimiento informado que corresponda.'}{canPrepareConsent&&<button type="button" className="text-link" onClick={consentReady?onOpenConsent:onPrepareConsent}>{consentReady?'Revisar consentimiento':'Preparar consentimiento'}</button>}</p></article>
+    <article className={consentReady?'complete':''}><div><span className="patient-workflow-number">3</span><strong>Servicio</strong><Badge variant={patient.consent==='Firmado'?'confirmed':consentReady?'pending':'pending'}><span className="badge-dot"/>{patient.consent==='Firmado'?'Firmado':consentReady?'Pendiente de firma':'Por elegir'}</Badge></div><p>{serviceLabel?`Servicio: ${serviceLabel}. Puedes cambiarlo o revisar el consentimiento.`:'Elige el servicio de esta visita. Si tiene consentimiento, se selecciona solo.'}{canPrepareConsent&&<button type="button" className="text-link" onClick={onPrepareConsent}>{consentReady||serviceLabel?'Cambiar servicio':'Elegir servicio'}</button>}{canPrepareConsent&&(consentReady||patient.consent==='Firmado')&&<button type="button" className="text-link" onClick={onOpenConsent}>Ver consentimiento</button>}</p></article>
   </section>
 
   <div className="patient-record-tabs" role="tablist" aria-label="Secciones del expediente" onKeyDown={event=>{const tabs=[...event.currentTarget.querySelectorAll('[role="tab"]')];const index=tabs.indexOf(event.target);const next=event.key==='ArrowRight'?(index+1)%tabs.length:event.key==='ArrowLeft'?(index-1+tabs.length)%tabs.length:event.key==='Home'?0:event.key==='End'?tabs.length-1:index;if(next!==index){event.preventDefault();tabs[next].focus();tabs[next].click();}}}>
@@ -3047,14 +3526,13 @@ function PatientModal({patient,activeRecordTab,setActiveRecordTab,clinicalBackgr
   {canDiagnose&&<section className="patient-activity-box"><div className="panel-title"><span>Historial de diagnósticos</span><span>{diagnosisRecords.length}</span></div>{diagnosisRecords.map(record=><article className="patient-activity-row" key={record.id}><div className="patient-activity-meta"><strong>{record.status==='accepted'?'Vigente':record.status==='superseded'?'Sustituido':'Borrador'}</strong><time dateTime={record.acceptedAt||record.createdAt}>{(record.acceptedAt||record.createdAt)?new Intl.DateTimeFormat('es-MX',{dateStyle:'medium',timeStyle:'short'}).format(new Date(record.acceptedAt||record.createdAt)):'Fecha no registrada'}</time></div><p>{record.summary}</p><small>Aceptado por: {record.acceptedByLabel||'Usuario no identificado'}</small></article>)}{diagnosisRecords.length===0&&<div className="empty-inline">Aún no hay diagnósticos en el historial.</div>}</section>}
   </div>
   <div className="patient-record-panel" role="tabpanel" id="patient-record-panel-procedures" aria-labelledby="patient-record-tab-procedures" tabIndex={0} hidden={activeRecordTab!=='procedures'}>
-   <section className="patient-activity-box botox-treatment-box"><div className="panel-title"><span>Tratamientos de Botox</span><div className="record-actions"><span>{botoxTreatments.length} sesiones</span>{canWriteClinical&&<button className="button outline compact" onClick={onNewBotoxTreatment}><Plus size={13}/> Registrar sesión</button>}</div></div>{botoxTreatments.map(record=><article className="patient-activity-row clinical-encounter" key={record.id}><div className="patient-activity-meta"><strong>{record.product}</strong><time dateTime={record.performedAt}>{record.performedAt?new Intl.DateTimeFormat('es-MX',{dateStyle:'medium',timeStyle:'short'}).format(new Date(record.performedAt)):'Fecha no registrada'}</time></div><div className="botox-record-facts"><span><b>Lote:</b> {record.lotNumber}</span><span><b>Unidades totales:</b> {record.totalUnits}</span>{record.expirationDate&&<span><b>Caducidad:</b> {formatRecordDate(record.expirationDate)}</span>}</div><p><b>Áreas y unidades por área:</b> {record.treatmentAreas}</p>{record.followUp&&<p><b>Seguimiento:</b> {record.followUp}</p>}{record.consentDocumentId&&<p><b>Consentimiento vinculado:</b> {(patient.consentHistory||[]).find(item=>item.id===record.consentDocumentId)?.title||'Documento firmado'}</p>}{record.consentFileId&&<p><b>Consentimiento vinculado:</b> {(patient.recordFiles||[]).find(item=>item.id===record.consentFileId)?.title||'Archivo firmado'}</p>}</article>)}{botoxTreatments.length===0&&<div className="empty-inline">Aún no hay sesiones registradas.</div>}</section>
    <section className="procedure-record-box" aria-labelledby="procedure-notes-title">
     <header className="procedure-record-header">
      <div>
-      <h3 id="procedure-notes-title">Notas post procedimiento</h3>
-      <span>{procedures.length} {procedures.length === 1 ? 'registro' : 'registros'}</span>
+      <h3 id="procedure-notes-title">Sesiones</h3>
+      <span>{procedures.length + botoxTreatments.length} {procedures.length + botoxTreatments.length === 1 ? 'sesión' : 'sesiones'}</span>
      </div>
-     {canWriteClinical && <button type="button" className="button primary" onClick={onNewProcedure}><Plus size={16} aria-hidden="true"/> Registrar procedimiento</button>}
+     {canWriteClinical && <button type="button" className="button primary" onClick={onNewProcedure}><Plus size={16} aria-hidden="true"/> Registrar sesión</button>}
     </header>
     {procedures.map(record => (
      <article className="procedure-record-row" key={record.id}>
@@ -3066,28 +3544,46 @@ function PatientModal({patient,activeRecordTab,setActiveRecordTab,clinicalBackgr
        </div>
        <ProcedureRecordCounts zones={record.zones || []}/>
        {record.followUp && <p className="procedure-record-followup"><b>Indicaciones y seguimiento</b>{record.followUp}</p>}
+       <SessionMediaBar sessionId={record.id} files={recordFiles} onOpen={(id,mode)=>setSessionMedia({id,mode})} resolveUrl={resolvePatientFileUrl}/>
       </div>
       {activeRecordTab === 'procedures' && <ProcedureThumbnails zones={record.zones || []}/>}
       {canDiagnose && <div className="procedure-record-actions">
-       <button type="button" aria-label="Editar procedimiento" disabled={procedurePending} onClick={()=>onEditProcedure(record)}><PenLine size={15} aria-hidden="true"/> Editar</button>
-       <button type="button" aria-label="Eliminar procedimiento" disabled={procedurePending} onClick={()=>onDeleteProcedure(record)}><Trash2 size={15} aria-hidden="true"/> Eliminar</button>
+       <button type="button" aria-label="Editar sesión" disabled={procedurePending} onClick={()=>onEditProcedure(record)}><PenLine size={15} aria-hidden="true"/> Editar</button>
+       <button type="button" aria-label="Eliminar sesión" disabled={procedurePending} onClick={()=>onDeleteProcedure(record)}><Trash2 size={15} aria-hidden="true"/> Eliminar</button>
       </div>}
      </article>
     ))}
-    {procedures.length === 0 && <p className="procedure-record-empty">Registra el procedimiento, las zonas tratadas y las indicaciones posteriores.</p>}
+    {botoxTreatments.map(record => (
+     <article className="procedure-record-row" key={record.id}>
+      <div className="procedure-record-details">
+       <h4>{record.product || 'Sesión'}</h4>
+       <div className="procedure-record-meta">
+        <time dateTime={record.performedAt}><CalendarDays size={14} aria-hidden="true"/>{record.performedAt ? new Intl.DateTimeFormat('es-MX', {dateStyle:'medium', timeStyle:'short'}).format(new Date(record.performedAt)) : 'Fecha no registrada'}</time>
+        {record.lotNumber && <span><b>Lote:</b> {record.lotNumber}</span>}
+        {record.totalUnits && <span><b>Unidades:</b> {record.totalUnits}</span>}
+       </div>
+       {record.treatmentAreas && <p className="procedure-record-followup"><b>Áreas</b>{record.treatmentAreas}</p>}
+       {record.followUp && <p className="procedure-record-followup"><b>Indicaciones y seguimiento</b>{record.followUp}</p>}
+       <SessionMediaBar sessionId={record.id} files={recordFiles} onOpen={(id,mode)=>setSessionMedia({id,mode})} resolveUrl={resolvePatientFileUrl}/>
+      </div>
+     </article>
+    ))}
+    {procedures.length + botoxTreatments.length === 0 && <p className="procedure-record-empty">Registra la sesión, marca las zonas en el mapa y deja las indicaciones.</p>}
    </section>
   </div>
   <div className="patient-record-panel" role="tabpanel" id="patient-record-panel-documents" aria-labelledby="patient-record-tab-documents" tabIndex={0} hidden={activeRecordTab!=='documents'}>
-   <section className="patient-activity-box patient-files-box"><div className="panel-title"><span>Documentos, estudios y fotografías</span><div className="record-actions"><span>{recordFiles.length} archivos</span>{canWriteClinical&&<button className="button outline compact" onClick={onAddRecordFile}><Plus size={13}/> Adjuntar archivo</button>}</div></div>{recordFiles.map(file=><article className="patient-record-file" key={file.id}><div><strong>{file.title}</strong><span>{file.kind==='consent'?'Consentimiento':file.kind==='contract'?'Contrato':file.kind==='study'?'Estudio':file.kind==='clinical_photo'?'Foto clínica':'Otro documento'}{file.signedAt?` · Firmado ${formatRecordDate(file.signedAt)}`:''} · {(file.byteSize/1024).toFixed(0)} KB</span></div><button type="button" className="button outline compact" onClick={()=>onOpenRecordFile(file)}><ArrowUpRight size={14}/> Abrir</button></article>)}{recordFiles.length===0&&<div className="empty-inline">Aquí aparecen consentimientos firmados, estudios y fotos clínicas privadas.</div>}</section>
+   <section className="patient-activity-box patient-files-box"><div className="panel-title"><span>Documentos y estudios</span><div className="record-actions"><span>{recordFiles.filter(file=>!String(file.title||'').startsWith('[sesión:')).length} archivos</span>{canWriteClinical&&<button className="button outline compact" onClick={onAddRecordFile}><Plus size={13}/> Adjuntar archivo</button>}</div></div>{recordFiles.filter(file=>!String(file.title||'').startsWith('[sesión:')).map(file=><article className="patient-record-file" key={file.id}><div><strong>{file.title}</strong><span>{file.kind==='consent'?'Consentimiento':file.kind==='contract'?'Contrato':file.kind==='study'?'Estudio':file.kind==='clinical_photo'?'Foto clínica':'Otro documento'}{file.signedAt?` · Firmado ${formatRecordDate(file.signedAt)}`:''} · {(file.byteSize/1024).toFixed(0)} KB</span></div><button type="button" className="button outline compact" onClick={()=>onOpenRecordFile(file)}><ArrowUpRight size={14}/> Abrir</button></article>)}{recordFiles.length===0&&<div className="empty-inline">Aquí aparecen consentimientos firmados, estudios y fotos clínicas privadas.</div>}</section>
 
 
-  <section className="patient-document-history"><div className="panel-title"><span>Historial de documentos</span><span>{documentRecords.length}</span></div>{documentRecords.map(record=><details className="patient-document-record" key={record.id}><summary><span><strong>{record.kind==='contract'?'Contrato':'Consentimiento'} · {record.title}</strong><small>{record.templateVersion?`Formato v${record.templateVersion} · `:''}{record.requestedAt?formatRecordDate(record.requestedAt):'Fecha anterior no registrada'}{record.legacy?' · Registro anterior':''}</small></span><DocStatus status={record.status}/></summary><div className="patient-document-record-content">{record.service&&<p><strong>Servicio:</strong> {record.service}</p>}{record.createdByLabel&&<p><strong>Preparado por:</strong> {record.createdByLabel}</p>}{record.signedByLabel&&<p><strong>Firmado por:</strong> {record.signedByLabel}</p>}{record.contentSnapshot?<div className="template-content">{record.contentSnapshot}</div>:<p>Este documento anterior no tenía texto de plantilla guardado.</p>}{record.signedAt&&<small>{sharedMode?"Firma registrada":"Firma simulada registrada"} · {new Intl.DateTimeFormat('es-MX',{dateStyle:'medium',timeStyle:'short'}).format(new Date(record.signedAt))}</small>}<button type="button" className="button outline compact" onClick={()=>onOpenDocumentRecord?.(record)}><ArrowUpRight size={14}/> Abrir esta versión</button></div></details>)}{documentRecords.length===0&&<div className="empty-inline">Aún no hay documentos preparados.</div>}</section><div className={sharedMode?"patient-doc-box shared-readonly-docs":"patient-doc-box"}><div className="panel-title">Documentación del expediente</div><div><FileText size={16}/><span><strong>{patient.contractTemplateTitle||patient.contractType||'Contrato de prestación de servicios'}</strong><small>Contrato de servicios</small></span><DocStatus status={patient.contract}/><button className="icon-button" aria-label={documentHistory(patient,'contract').length?'Ver contrato':'Contrato aún no preparado'} disabled={!documentHistory(patient,'contract').length} onClick={onOpenContract}><ArrowUpRight size={15}/></button></div><div><FileCheck2 size={16}/><span><strong>{patient.consentDocument||'Consentimiento informado'}</strong><small>Documento clínico</small></span><DocStatus status={patient.consent}/><button className="icon-button" aria-label={documentHistory(patient,'consent').length?'Ver consentimiento':'Consentimiento aún no preparado'} disabled={!documentHistory(patient,'consent').length} onClick={onOpenConsent}><ArrowUpRight size={15}/></button></div></div>
+  <section className="patient-document-history"><div className="panel-title"><span>Historial de documentos</span><span>{documentRecords.length}</span></div>{documentRecords.map(record=><details className="patient-document-record" key={record.id}><summary><span><strong>{record.kind==='contract'?'Contrato':'Consentimiento'} · {record.title}</strong><small>{record.templateVersion?`Formato v${record.templateVersion} · `:''}{record.requestedAt?formatRecordDate(record.requestedAt):'Fecha anterior no registrada'}{record.legacy?' · Registro anterior':''}</small></span><DocStatus status={record.status}/></summary><div className="patient-document-record-content">{record.service&&<p><strong>Servicio:</strong> {record.service}</p>}{record.createdByLabel&&<p><strong>Preparado por:</strong> {record.createdByLabel}</p>}{record.signedByLabel&&<p><strong>Firmado por:</strong> {record.signedByLabel}</p>}{record.contentSnapshot?<div className="template-content">{fillDocumentPlaceholders(record.kind==='contract'?record.contentSnapshot:withPatientWord(record.contentSnapshot), patient)}</div>:<p>Este documento anterior no tenía texto de plantilla guardado.</p>}{record.signedAt&&<small>{sharedMode?"Firma registrada":"Firma simulada registrada"} · {new Intl.DateTimeFormat('es-MX',{dateStyle:'medium',timeStyle:'short'}).format(new Date(record.signedAt))}</small>}<button type="button" className="button outline compact" onClick={()=>onOpenDocumentRecord?.(record)}><ArrowUpRight size={14}/> Abrir esta versión</button></div></details>)}{documentRecords.length===0&&<div className="empty-inline">Aún no hay documentos preparados.</div>}</section><div className={sharedMode?"patient-doc-box shared-readonly-docs":"patient-doc-box"}><div className="panel-title">Documentación del expediente</div><div><FileText size={16}/><span><strong>{patient.contractTemplateTitle||patient.contractType||'Contrato de prestación de servicios'}</strong><small>Contrato de servicios</small></span><DocStatus status={patient.contract}/><button className="icon-button" aria-label={documentHistory(patient,'contract').length?'Ver contrato':'Contrato aún no preparado'} disabled={!documentHistory(patient,'contract').length} onClick={onOpenContract}><ArrowUpRight size={15}/></button></div><div><FileCheck2 size={16}/><span><strong>{patient.consentDocument||'Consentimiento informado'}</strong><small>Documento clínico</small></span><DocStatus status={patient.consent}/><button className="icon-button" aria-label={documentHistory(patient,'consent').length?'Ver consentimiento':'Consentimiento aún no preparado'} disabled={!documentHistory(patient,'consent').length} onClick={onOpenConsent}><ArrowUpRight size={15}/></button></div></div>
   </div>
   <div className="patient-record-panel" role="tabpanel" id="patient-record-panel-follow-up" aria-labelledby="patient-record-tab-follow-up" tabIndex={0} hidden={activeRecordTab!=='follow-up'}>
      <section className="patient-activity-box"><div className="panel-title"><span>Seguimiento</span><button className="button outline compact" onClick={onAddActivity}><Plus size={13}/> Agregar nota</button></div>{sortedActivities.slice(0,8).map(activity=><article className="patient-activity-row" key={activity.id}><div className="patient-activity-meta"><strong>{activity.type}</strong><time dateTime={activity.createdAt}>{new Intl.DateTimeFormat('es-MX',{dateStyle:'medium',timeStyle:'short'}).format(new Date(activity.createdAt))}</time></div><p>{activity.note}</p><small>{activity.author}</small></article>)}{sortedActivities.length===0&&<div className="empty-inline">Aún no hay seguimientos registrados.</div>}</section>
   </div>
-  <div className="modal-actions"><button className="button secondary" onClick={close}>Cerrar</button></div></Modal>;
- }
+  <div className="modal-actions"><button className="button secondary" onClick={close}>Cerrar</button></div>
+  {sessionMedia&&<SessionCaptureModal mode={sessionMedia.mode} sessionId={sessionMedia.id} existingPhotos={recordFiles.filter(file=>String(file.title||'').startsWith(sessionMediaPrefix(sessionMedia.id))&&file.kind==='clinical_photo').length} saving={false} onClose={()=>setSessionMedia(null)} onSave={onSaveSessionMedia}/>}
+  </Modal>;
+}
 
 function ClinicalBackgroundModal({patient,clinicalBackground,sharedMode,close,onSubmit}) {
   const answers=clinicalBackground?.answers||{};
@@ -3102,7 +3598,7 @@ function ClinicalBackgroundModal({patient,clinicalBackground,sharedMode,close,on
 function ClinicalEncounterModal({patient,appointments,sharedMode,close,onSubmit}) {
   const localNow = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0,16);
   return <Modal title="Nueva consulta clínica" subtitle={`${patient.name} · Historia clínica`} close={close} className="patient-record-modal"><form className="form-stack" onSubmit={onSubmit}>
-    <label>Fecha y hora<input type="datetime-local" name="occurredAt" defaultValue={localNow} required/></label>
+    <div className="form-grid"><label>Fecha<ClinicDateField name="occurredOn" defaultValue={localNow.slice(0,10)} required/></label><label>Hora<ClinicTimeField name="occurredTime" defaultValue={localNow.slice(11,16)} step={300} required/></label></div>
     {appointments.length>0&&<label>Cita relacionada<select name="appointmentId" defaultValue=""><option value="">Sin vincular</option>{appointments.map(item=><option key={item.id} value={item.databaseId||item.id}>{item.date} · {item.time} · {item.service}</option>)}</select></label>}
     <label>Motivo de consulta<textarea name="chiefComplaint" rows="2" maxLength="2000" required autoFocus/></label>
     <label>Antecedentes / historia<textarea name="history" rows="3" maxLength="5000"/></label>
@@ -3123,11 +3619,11 @@ function BotoxTreatmentModal({patient,appointments,sharedMode,close,onSubmit}) {
     ...(patient.consentHistory || []).filter(record => record.status === 'Firmado').map(record => ({ value: `document:${record.id}`, label: record.title })),
     ...(patient.recordFiles || []).filter(file => file.kind === 'consent' && file.signedAt).map(file => ({ value: `file:${file.id}`, label: file.title })),
   ];
-  return <Modal title="Registrar sesión de Botox" subtitle={`${patient.name} · Expediente clínico`} close={close} className="patient-record-modal"><form className="form-stack" onSubmit={onSubmit}>
-    <label>Fecha y hora<input type="datetime-local" name="performedAt" defaultValue={localNow} required/></label>
+  return <Modal title="Registrar sesión" subtitle={`${patient.name} · Expediente clínico`} close={close} className="patient-record-modal"><form className="form-stack" onSubmit={onSubmit}>
+    <div className="form-grid"><label>Fecha<ClinicDateField name="performedOn" defaultValue={localNow.slice(0,10)} required/></label><label>Hora<ClinicTimeField name="performedTime" defaultValue={localNow.slice(11,16)} step={300} required/></label></div>
     {appointments.length>0&&<label>Cita relacionada<select name="appointmentId" defaultValue=""><option value="">Sin vincular</option>{appointments.map(item=><option key={item.id} value={item.databaseId||item.id}>{item.date} · {item.time} · {item.service}</option>)}</select></label>}
     <div className="form-grid"><label>Producto / marca<input name="product" required maxLength="160" placeholder="Nombre del producto"/></label><label>Lote<input name="lotNumber" required maxLength="100" placeholder="Número de lote"/></label></div>
-    <div className="form-grid"><label>Fecha de caducidad<input type="date" name="expirationDate"/></label><label>Unidades totales<input type="number" name="totalUnits" min="0.01" max="10000" step="0.01" required/></label></div>
+    <div className="form-grid"><label>Fecha de caducidad<ClinicDateField name="expirationDate"/></label><label>Unidades totales<input type="number" name="totalUnits" min="0.01" max="10000" step="0.01" required/></label></div>
     <label>Consentimiento informado firmado<select name="consentReference" defaultValue=""><option value="">Sin vincular</option>{consentChoices.map(item=><option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
     <label>Áreas tratadas y unidades por área<textarea name="treatmentAreas" rows="3" maxLength="4000" placeholder="Registra las áreas y cantidades indicadas por la profesional." required/></label>
     <label>Seguimiento / respuesta<textarea name="followUp" rows="3" maxLength="4000" placeholder="Indicaciones de seguimiento, respuesta o revisión posterior."/></label>
@@ -3772,17 +4268,21 @@ function ProcedureAnatomyMap({ zones, toggleZone, setZoneDose, points, setPoints
   </section>;
 }
 
-function ProcedureModal({patient,appointments,record,pending,sharedMode,close,onSubmit}) {
+function ProcedureModal({patient,services=[],templates=[],record,recordFiles=[],pending,sharedMode,close,onSubmit,onSignConsent}) {
   const performedAt = record?.performedAt ? new Date(record.performedAt) : new Date();
-  const localDate = new Date(performedAt.getTime() - performedAt.getTimezoneOffset() * 60000).toISOString().slice(0,23);
-  const appointmentId = record?.appointmentId || '';
-  const consentId = record?.consentDocumentId || '';
-  const procedureTypes = ['Toxina botulínica', 'Ácido hialurónico', 'Bioestimulador', 'Endolift', 'Hilos tensores', 'Tratamiento facial', 'Otro'];
-  if (record?.procedureType && !procedureTypes.includes(record.procedureType)) procedureTypes.push(record.procedureType);
+  const localStamp = new Date(performedAt.getTime() - performedAt.getTimezoneOffset() * 60000).toISOString();
+  const activeService = record?.procedureType || [...(patient.consentHistory||[])].reverse().find(item => item.status !== 'Reemplazado' && item.service)?.service || (patient.treatment && patient.treatment !== 'Por definir' ? patient.treatment : '');
+  const [service,setService]=useState(activeService);
+  const [pickingService,setPickingService]=useState(false);
+  const [mapOpen,setMapOpen]=useState(false);
   const savedZones = record?.zones || [];
   const [zones,setZones]=useState(() => savedZones.filter(zone => !isProcedurePointRecord(zone)));
   const [points,setPoints]=useState(() => savedZones.find(isProcedurePointRecord)?.points || []);
   const [zoneOrder, setZoneOrder] = useState(() => savedZones.find(isProcedurePointRecord)?.zoneOrder || []);
+  const existingPhotos = recordFiles.filter(file => String(file.title||'').startsWith(sessionMediaPrefix(record?.id||'')) && file.kind === 'clinical_photo').length;
+  const room = Math.max(0, 4 - (record ? existingPhotos : 0));
+  const [shots,setShots]=useState([]);
+  const [cameraOn,setCameraOn]=useState(false);
   useEffect(() => {
     const selected = new Set([...zones.map(zone => zone.name), ...groupFacePointsByZone(points).keys()]);
     setZoneOrder(current => {
@@ -3790,7 +4290,10 @@ function ProcedureModal({patient,appointments,record,pending,sharedMode,close,on
       return next.length === current.length && next.every((name, index) => name === current[index]) ? current : next;
     });
   }, [zones, points]);
-  const consentChoices=(patient.consentHistory||[]).filter(item=>item.status==='Firmado');
+  const matchedConsent = suggestConsentTemplate(service, templates);
+  const consentSigned = (patient.consentHistory||[]).some(item => item.status === 'Firmado' && item.service === service);
+  const serviceItems = [...new Map([...(service ? [{id: service, label: service}] : []), ...services.map(item => ({id: item.name, label: item.name}))].map(item => [item.label, item])).values()];
+  const zoneCount = zones.length + groupFacePointsByZone(points).size;
   const toggleZone=name=>setZones(current=>current.some(item=>item.name===name)?current.filter(item=>item.name!==name):[...current,{name,dose:''}]);
   const setZoneDose = (name, value) => setZones(current => {
     const zone = current.find(item => item.name === name);
@@ -3798,32 +4301,58 @@ function ProcedureModal({patient,appointments,record,pending,sharedMode,close,on
     if (zone.fromPointNotes && !value) return current.filter(item => item.name !== name);
     return current.map(item => item.name === name ? {...item, dose: value} : item);
   });
-  return <Modal title={record ? "Editar nota post procedimiento" : "Nota post procedimiento"} subtitle={`${patient.name} · Registro clínico`} close={()=>{ if (!pending) close(); }} className="patient-record-modal procedure-modal"><form className="form-stack" onSubmit={event=>onSubmit(event, points.length ? [...zones, {kind: procedurePointRecordType, name: 'Puntos anatómicos', dose: String(points.length), points, zoneOrder}] : zones)}>
-    <div className="procedure-fields">
-    <label>Fecha y hora<input type="datetime-local" name="performedAt" step="0.001" defaultValue={localDate} required/></label>
-    {(appointments.length>0 || appointmentId)&&<label>Cita relacionada<select name="appointmentId" defaultValue={appointmentId}><option value="">Sin vincular</option>{appointmentId&&!appointments.some(item=>(item.databaseId||item.id)===appointmentId)&&<option value={appointmentId}>Cita vinculada</option>}{appointments.map(item=><option key={item.id} value={item.databaseId||item.id}>{item.date} · {item.time} · {item.service}</option>)}</select></label>}
-    <label>Procedimiento<select name="procedureType" defaultValue={record?.procedureType || procedureTypes[0]}>{procedureTypes.map(type=><option key={type}>{type}</option>)}</select></label>
-    <label>Producto / marca<input name="product" defaultValue={record?.product} maxLength="160" placeholder="Opcional"/></label>
-    <label>Lote<input name="lotNumber" defaultValue={record?.lotNumber} maxLength="100" placeholder="Opcional"/></label>
+  const addShots=files=>setShots(current=>{
+    const next=[...files].filter(file=>file.type?.startsWith('image/')).slice(0, room-current.length).map(file=>({file,url:URL.createObjectURL(file)}));
+    return [...current,...next].slice(0, room);
+  });
+  const zonesPayload = points.length ? [...zones, {kind: procedurePointRecordType, name: 'Puntos anatómicos', dose: String(points.length), points, zoneOrder}] : zones;
+  return <Modal title={record ? "Editar sesión" : "Registrar sesión"} subtitle={`${patient.name} · Servicio, nota y fotos de esta visita`} close={()=>{ if (!pending) { setCameraOn(false); close(); } }} className="patient-record-modal procedure-modal"><form className="form-stack" onSubmit={event=>onSubmit(event, zonesPayload, shots.map(shot=>shot.file))}>
+    <input type="hidden" name="procedureType" value={service}/>
+    <button type="button" className="choice-card session-service-card" onClick={()=>setPickingService(true)}><span><strong>{service || 'Elige el servicio'}</strong><small>{service ? 'Servicio de esta sesión. Toca para cambiarlo.' : 'Por defecto es el servicio activo de la visita.'}</small></span><em>Cambiar</em></button>
+    {matchedConsent && !consentSigned && <div className="form-note session-consent-note"><FileText size={15}/> Este servicio usa el consentimiento «{matchedConsent.title}» y todavía no está firmado. <button type="button" className="text-link" onClick={()=>onSignConsent?.(service)}>Firmar consentimiento</button></div>}
+    {matchedConsent && consentSigned && <div className="form-note"><Check size={15}/> El consentimiento de este servicio ya está firmado.</div>}
+    <div className="form-grid">
+      <label>Fecha<ClinicDateField name="sessionDate" defaultValue={localStamp.slice(0,10)} required/></label>
+      <label>Hora<ClinicTimeField name="sessionTime" defaultValue={localStamp.slice(11,16)} step={300} required/></label>
     </div>
-    <ProcedureAnatomyMap zones={zones} toggleZone={toggleZone} setZoneDose={setZoneDose} points={points} setPoints={setPoints} zoneOrder={zoneOrder}/>
-    {(consentChoices.length>0 || consentId)&&<label>Consentimiento de procedimiento firmado<select name="consentReference" defaultValue={consentId ? `document:${consentId}` : ""}><option value="">Sin vincular</option>{consentId&&!consentChoices.some(item=>item.id===consentId)&&<option value={`document:${consentId}`}>Consentimiento vinculado</option>}{consentChoices.map(item=><option value={`document:${item.id}`} key={item.id}>{item.title}</option>)}</select></label>}
-    <label>Cuidados posteriores y comentarios<textarea name="followUp" defaultValue={record?.followUp} rows="3" maxLength="4000" placeholder="Indicaciones, evolución esperada y seguimiento recomendado."/></label>
-    <div className="form-note"><ShieldCheck size={15}/>{sharedMode?'Registro clínico visible al equipo autorizado.':'Demostración local: se guarda en este navegador.'} Los puntos, zonas y dosis se conservan en el expediente.</div>
-    <div className="modal-actions"><button type="button" className="button secondary" disabled={pending} onClick={close}>Cancelar</button><button className="button primary" type="submit" disabled={pending || (!record && !zones.length && !points.length)}><Check size={15}/> Guardar nota</button></div>
-  </form></Modal>;
+    <div className="form-grid">
+      <label>Producto / marca<input name="product" defaultValue={record?.product||''} maxLength="160" placeholder="Opcional"/></label>
+      <label>Lote<input name="lotNumber" defaultValue={record?.lotNumber||''} maxLength="100" placeholder="Opcional"/></label>
+    </div>
+    <button type="button" className="choice-card session-service-card" onClick={()=>setMapOpen(true)}><span><strong>Mapa de aplicación</strong><small>{zoneCount ? `${zoneCount} ${zoneCount===1?'zona marcada':'zonas marcadas'}` : 'Opcional. Ábrelo solo si vas a marcar zonas.'}</small></span><em>{zoneCount?'Editar':'Abrir'}</em></button>
+    <div className="session-photo-block">
+      <div className="session-photo-heading"><strong>Fotos de la sesión</strong><span>{(record?existingPhotos:0)+shots.length}/4</span></div>
+      <div className="session-photo-actions">
+        <button type="button" className="button session-camera" onClick={()=>setCameraOn(true)} disabled={shots.length>=room}><Camera size={16}/> Tomar foto</button>
+        <label className={`button session-photo-pick ${shots.length>=room?'is-disabled':''}`}><Upload size={16}/> Elegir fotos<input className="profile-photo-input" type="file" accept="image/*" multiple disabled={shots.length>=room} onChange={event=>{ addShots(event.target.files||[]); event.target.value=''; }}/></label>
+      </div>
+      <SessionCameraStage open={cameraOn} disabled={shots.length>=room} onClose={()=>setCameraOn(false)} onCapture={file=>addShots([file])}/>
+      <SessionPhotoSlots shots={shots} reserved={record?existingPhotos:0} onRemove={shot=>setShots(current=>current.filter(item=>item.url!==shot.url))}/>
+    </div>
+    <label>Indicaciones<textarea name="followUp" defaultValue={record?.followUp||''} rows="3" maxLength="4000" placeholder="Cuidados, evolución esperada y seguimiento. Opcional."/></label>
+    <div className="form-note"><ShieldCheck size={15}/>{sharedMode?'Registro clínico visible al equipo autorizado.':'Demostración local: se guarda en este navegador.'} Las fotos se comprimen y quedan en esta sesión, no en documentos.</div>
+    <div className="modal-actions"><button type="button" className="button secondary" disabled={pending} onClick={()=>{setCameraOn(false); close();}}>Cancelar</button><button className="button primary" type="submit" disabled={pending || !service}><Check size={15}/> Guardar sesión</button></div>
+  </form>
+  {pickingService&&<NamePickerModal title="Servicio de la sesión" subtitle="Sale el servicio activo. Cámbialo solo si hoy vino por otra cosa." items={serviceItems} selectedId={service} placeholder="Buscar servicio" emptyLabel="No hay servicios con ese nombre." onClose={()=>setPickingService(false)} onSelect={item=>{setService(item.label);setPickingService(false);}}/>}
+  {mapOpen&&createPortal(<Modal className="name-picker-modal procedure-map-modal" title="Mapa de aplicación" subtitle="Marca las zonas y la dosis. Se guarda con la sesión." close={()=>setMapOpen(false)}><ProcedureAnatomyMap zones={zones} toggleZone={toggleZone} setZoneDose={setZoneDose} points={points} setPoints={setPoints} zoneOrder={zoneOrder}/><div className="modal-actions"><button type="button" className="button primary" onClick={()=>setMapOpen(false)}>Listo</button></div></Modal>, document.body)}
+  </Modal>;
 }
 
-function PatientFileModal({patient,sharedMode,close,onSubmit}) {
+function PatientFileModal({patient,close,onSubmit}) {
   const [kind,setKind]=useState('study');
-  const imageOnly=kind==='clinical_photo';
-  return <Modal title="Adjuntar archivo clínico" subtitle={`${patient.name} · Expediente ${patient.id}`} close={close}><form className="form-stack" onSubmit={onSubmit}>
-    <div className="form-grid"><label>Tipo<select name="kind" value={kind} onChange={event=>setKind(event.target.value)}><option value="study">Estudio</option><option value="clinical_photo">Foto clínica (antes / después)</option><option value="consent">Consentimiento firmado</option><option value="contract">Contrato firmado</option><option value="other">Otro documento</option></select></label><label>{kind==='consent'||kind==='contract'?'Fecha de firma':'Fecha del archivo'}<input name="signedAt" type="date"/></label></div>
-    <label>Nombre / descripción<input name="title" required maxLength="200" placeholder={imageOnly?'Ej. Antes · frente · fecha':'Ej. Laboratorio, ultrasonido o radiografía'} autoFocus/></label>
-    <label>{imageOnly?'Fotografía JPG o PNG':'Archivo PDF, JPG o PNG'}<input name="file" type="file" accept={imageOnly?'image/jpeg,image/png':'application/pdf,image/jpeg,image/png'} required/></label>
-    {imageOnly&&<p className="form-note"><ShieldCheck size={15}/> Fotografía clínica privada para documentación del tratamiento; no equivale a autorización de uso publicitario de imagen.</p>}
-    <div className="form-note"><ShieldCheck size={15}/>{sharedMode?'Archivo privado de la clínica. Máximo 10 MB.':'Archivo de demostración guardado en IndexedDB de este navegador. Máximo 10 MB.'}</div>
-    <div className="modal-actions"><button type="button" className="button secondary" onClick={close}>Cancelar</button><button className="button primary" type="submit"><FilePlus2 size={15}/> Adjuntar al expediente</button></div>
+  const [file,setFile]=useState(null);
+  const today=localISODate();
+  return <Modal title="Adjuntar archivo" subtitle={`${patient.name} · Estudios y documentos. Las fotos van en la sesión.`} close={close}><form className="form-stack" onSubmit={event=>{
+    if(!file){ event.preventDefault(); return; }
+    const input=event.currentTarget.querySelector('input[name="file"]');
+    if(input){ const transfer=new DataTransfer(); transfer.items.add(file); input.files=transfer.files; }
+    onSubmit(event);
+  }}>
+    <div className="form-grid"><label>Tipo<select name="kind" value={kind} onChange={event=>setKind(event.target.value)}><option value="study">Estudio</option><option value="consent">Consentimiento firmado</option><option value="contract">Contrato firmado</option><option value="other">Otro documento</option></select></label><label>{kind==='consent'||kind==='contract'?'Fecha de firma':'Fecha del archivo'}<ClinicDateField name="signedAt" defaultValue={today} required/></label></div>
+    <label>Nombre / descripción<input name="title" required maxLength="200" placeholder="Ej. Laboratorio, ultrasonido o radiografía" autoFocus/></label>
+    <input name="file" type="file" className="profile-photo-input" accept="application/pdf,image/jpeg,image/png"/>
+    <label className="session-media-button"><FilePlus2 size={16}/><span><strong>{file?file.name:'Elegir archivo'}</strong><small>PDF, JPG o PNG</small></span><input className="profile-photo-input" type="file" accept="application/pdf,image/jpeg,image/png" onChange={event=>setFile(event.target.files?.[0]||null)}/></label>
+    <div className="modal-actions"><button type="button" className="button secondary" onClick={close}>Cancelar</button><button className="button primary" type="submit" disabled={!file}><FilePlus2 size={15}/> Adjuntar al expediente</button></div>
   </form></Modal>;
 }
 
@@ -3834,7 +4363,7 @@ function DiagnosisModal({patient,sharedMode=false,close,onAccept}){
   return <Modal title={patient.diagnosisAccepted?'Revisar diagnóstico aceptado':'Diagnóstico'} subtitle={`${patient.name} · ${patient.treatment}`} close={close}>
     <form className="form-stack" onSubmit={onAccept}>
       <div className="workflow-stepper"><span className="step done">1 <small>Diagnóstico</small></span><i/><span className="step">2 <small>Contrato</small></span><i/><span className="step">3 <small>Firma</small></span></div>
-      <div className="document-preview"><span className="eyebrow">{sharedMode?'REGISTRO CLÍNICO':'RESUMEN CLÍNICO DE DEMOSTRACIÓN'}</span><h3>{patient.treatment}</h3><label>Resumen del diagnóstico<textarea name="summary" rows="5" maxLength="4000" value={summary} onChange={event=>setSummary(event.target.value)} placeholder="Escribe el resumen clínico que revisaste y aceptas." required/></label></div>
+      <div className="document-preview"><span className="eyebrow">{sharedMode?'REGISTRO CLÍNICO':'RESUMEN CLÍNICO DE DEMOSTRACIÓN'}</span><h3>{patient.treatment==='Por definir'?'Consulta de hoy':patient.treatment}</h3><label>Qué encontraste en la consulta<textarea name="summary" rows="5" maxLength="4000" value={summary} onChange={event=>setSummary(event.target.value)} placeholder="Motivo de la visita, lo que observaste y el plan. Ejemplo: valoración para bótox en frente." required/></label></div>
       <div className="form-note"><ShieldCheck size={15}/>{patient.diagnosisAccepted?'Puedes guardar una versión revisada; la versión anterior quedará en el historial.':sharedMode?'El resumen se guardará en el expediente compartido y será visible para personal clínico autorizado.':'Contenido de demostración: no agregues información clínica real.'}</div>
       <div className="modal-actions"><button type="button" className="button secondary" onClick={close}>Volver al expediente</button><button className="button primary" type="submit" disabled={unchanged}><Check size={15}/>{patient.diagnosisAccepted?'Guardar nueva versión':'Aceptar diagnóstico'}</button></div>
     </form>
@@ -3849,32 +4378,89 @@ function ContractPromptModal({patient,close,onViewContract,onPrepareContract}) {
   </Modal>;
 }
 
-function ContractViewerModal({patient,close,onPrint,onDiagnosis,onSign,onPrepare,sharedMode=false}) {
+function DocumentSignatureBlock({signed, signedAt, drawing, setDrawing, saving, onSaveSignature, staffName, staffSignatureUrl, who='la paciente'}) {
+  const padRef=useRef(null);
+  useEffect(()=>{ if(drawing) padRef.current?.scrollIntoView({block:'nearest'}) },[drawing]);
+  return <>
+    <div className="document-sign-row">
+      <figure><figcaption>Firma de {who}</figcaption>{signed?<span>Registrada{signedAt?` · ${new Intl.DateTimeFormat('es-MX',{dateStyle:'medium',timeStyle:'short'}).format(new Date(signedAt))}`:''}</span>:<span>Pendiente en este dispositivo</span>}</figure>
+      <figure><figcaption>Firma de {staffName||'la cuenta clínica'}</figcaption>{staffSignatureUrl?<img src={staffSignatureUrl} alt={`Firma de ${staffName||'la profesional'}`}/>:<span>Todavía no hay firma en Mi perfil.</span>}</figure>
+    </div>
+    {drawing&&<div ref={padRef}><SignaturePad confirmLabel="Firmar" saving={saving} onCancel={()=>setDrawing(false)} onSave={onSaveSignature}/></div>}
+  </>;
+}
+function SignatureCaptureModal({ title, subtitle, confirmLabel, saving, existingUrl, onUseExisting, onSave, onClose }) {
+  const [redraw,setRedraw]=useState(!existingUrl);
+  return <Modal className="signature-capture-modal" title={title} subtitle={subtitle} close={onClose}>
+    {existingUrl&&!redraw?<div className="signature-existing"><img src={existingUrl} alt={title}/><div className="modal-actions"><button type="button" className="button secondary" onClick={()=>setRedraw(true)}>Firmar de nuevo</button><button type="button" className="button primary" onClick={onUseExisting}>Usar esta firma</button></div></div>:<SignaturePad tall confirmLabel={confirmLabel} saving={saving} onCancel={onClose} onSave={onSave}/>}
+  </Modal>;
+}
+function ContractViewerModal({patient,close,onPrint,onDownload,onDiagnosis,onSaveSignature,onSaveStaffSignature,onPrepare,staffName,staffSignatureUrl}) {
+  const [signRole,setSignRole]=useState('');
+  const [patientSignature,setPatientSignature]=useState('');
+  const [staffDrawn,setStaffDrawn]=useState('');
+  const [staffAccepted,setStaffAccepted]=useState(false);
+  const [confirmed,setConfirmed]=useState(false);
+  const [saving,setSaving]=useState(false);
+  const [signError,setSignError]=useState('');
   const signed=patient.contract==='Firmado';
   const hasOfficialText=Boolean(patient.contractContent?.trim());
   const diagnosisMismatch=Boolean(patient.diagnosisId&&patient.contractDiagnosisId!==patient.diagnosisId);
   const needsDiagnosis=!signed&&!patient.diagnosisAccepted;
-  const canSign=!signed&&patient.contract==='Pendiente'&&patient.diagnosisAccepted&&hasOfficialText&&!diagnosisMismatch;
-  return <Modal title="Contrato de servicios" subtitle={`${patient.name} · Expediente ${patient.id}`} close={close} printable>
-    <div className="document-preview"><span className="eyebrow">VISTA PREVIA · {patient.contractType || 'PRESTACIÓN DE SERVICIOS'}</span><h3>{patient.contractTemplateTitle || 'Acuerdo de prestación de servicios'}</h3><div className="preview-section"><strong>Paciente</strong><span>{patient.name}</span></div><div className="preview-section"><strong>Servicio o tratamiento</strong><span>{patient.contractService || patient.treatment || 'Por definir'}</span></div><div className="preview-section"><strong>Estado del diagnóstico</strong><span>{patient.diagnosisAccepted ? 'Aceptado' : 'Pendiente de revisión'}</span></div>{hasOfficialText?<div className="template-content">{patient.contractContent}</div>:<p>Este expediente no tiene un contrato preparado con texto oficial. Prepara uno desde un formato revisado por la clínica antes de firmar.</p>}<p className="demo-legal-note">{sharedMode?'Copia guardada en el expediente. No se envía ni registra una firma electrónica.':'Vista de demostración: no se envía ni constituye una firma electrónica válida.'}</p></div>
-    {signed&&<div className="signature-box"><CheckCircle2 size={16}/> {sharedMode?'Firma registrada':'Firma simulada registrada'}{patient.contractSignedAt?` · ${new Intl.DateTimeFormat('es-MX',{dateStyle:'medium',timeStyle:'short'}).format(new Date(patient.contractSignedAt))}`:''}</div>}
-    {needsDiagnosis&&<div className="form-note"><ClipboardCheck size={15}/> Primero revisa y acepta el diagnóstico del paciente.</div>}
+  const canSign=!signed&&!confirmed&&patient.contract==='Pendiente'&&patient.diagnosisAccepted&&hasOfficialText&&!diagnosisMismatch;
+  const staffImage=staffDrawn||staffSignatureUrl||'';
+  const bothReady=Boolean(patientSignature)&&staffAccepted&&Boolean(staffImage);
+  const sealed=confirmed||signed;
+  const signatures=[{label:'Firma de la paciente',src:patientSignature},{label:`Firma de ${staffName||'el usuario'}`,src:staffImage}];
+  const confirmContract=async()=>{
+    if(!bothReady||saving) return;
+    setSaving(true);
+    try {
+      await onSaveSignature?.(dataUrlToFile(patientSignature,'firma-paciente.png'));
+      setConfirmed(true);
+    } catch {
+      setConfirmed(false);
+    } finally { setSaving(false); }
+  };
+  const acceptStaffSignature=async()=>{
+    setStaffAccepted(true);
+    setSignRole('');
+    if (!staffSignatureUrl) return;
+    try {
+      const response=await fetch(staffSignatureUrl);
+      const blob=await response.blob();
+      setStaffDrawn(await fileToDataUrl(new File([blob],'firma-medico.png',{type:blob.type||'image/png'})));
+    } catch { setStaffDrawn(staffSignatureUrl); }
+  };
+  return <><Modal title="Contrato de servicios" subtitle={`${patient.name} · Expediente ${patient.id}`} close={close} printable>
+    <div className="document-preview"><span className="eyebrow">VISTA PREVIA · {patient.contractType || 'PRESTACIÓN DE SERVICIOS'}</span><h3>{patient.contractTemplateTitle || 'Acuerdo de prestación de servicios'}</h3><div className="preview-section"><strong>Paciente</strong><span>{patient.name}</span></div><div className="preview-section"><strong>Servicio</strong><span>{patient.contractService || 'Elige el servicio al preparar el contrato'}</span></div><div className="preview-section"><strong>Estado del diagnóstico</strong><span>{patient.diagnosisAccepted ? 'Aceptado' : 'Pendiente de revisión'}</span></div>{hasOfficialText?<div className="template-content">{fillDocumentPlaceholders(patient.contractContent, {...patient, treatment: patient.contractService || patient.treatment})}</div>:<p>Este expediente no tiene un contrato preparado con texto oficial. Prepara uno desde un formato revisado por la clínica antes de firmar.</p>}
+      {canSign&&<div className="sign-launch"><button type="button" className={patientSignature?'is-done':''} onClick={()=>setSignRole('patient')}><strong>Firma de la paciente</strong><span>{patientSignature?'Lista. Toca para repetirla.':'Primero firma la paciente.'}</span>{patientSignature&&<img src={patientSignature} alt="Firma de la paciente"/>}</button><button type="button" className={staffAccepted?'is-done':''} disabled={!patientSignature} onClick={()=>setSignRole('staff')}><strong>Firma del médico</strong><span>{staffAccepted?'Lista. Toca para cambiarla.':patientSignature?'Ahora firma el médico.':'Disponible después de la paciente.'}</span>{staffAccepted&&staffImage&&<img src={staffImage} alt="Firma del médico"/>}</button></div>}
+      {signError&&<p>{signError}</p>}
+      {bothReady&&!sealed&&<div className="form-note"><CheckCircle2 size={15}/> Las dos firmas ya están. Confirma para generar el contrato con ellas.</div>}
+      {sealed&&<div className="contract-generated"><strong>Contrato generado con las firmas.</strong><span>Ya puedes descargarlo o imprimirlo.</span>{signatures.filter(item=>item.src).map(item=><figure key={item.label}><figcaption>{item.label}</figcaption><img src={item.src} alt={item.label}/></figure>)}</div>}
+    </div>
+    {needsDiagnosis&&<div className="form-note"><ClipboardCheck size={15}/> Primero escribe y acepta lo que encontraste en la consulta.</div>}
     {diagnosisMismatch&&<div className="form-note"><ClipboardCheck size={15}/> Este contrato corresponde a una valoración anterior. Prepara uno nuevo antes de continuar con el diagnóstico actual.</div>}
-    {sharedMode&&!signed&&patient.contract==='Pendiente'&&<div className="form-note"><ShieldCheck size={15}/> El documento está guardado y pendiente. La firma electrónica no está conectada.</div>}
-    {signed?<div className="modal-actions"><button className="button secondary" onClick={close}>Cerrar</button><button className="button outline" onClick={onPrint}><Printer size={15}/> Imprimir contrato</button>{diagnosisMismatch&&<button className="button outline" onClick={onPrepare}><FilePlus2 size={15}/> Preparar contrato actual</button>}<button className="button primary" onClick={close}><CheckCircle2 size={15}/> Listo</button></div>:<div className="modal-actions"><button className="button secondary" onClick={close}>Cerrar</button><button className="button outline" onClick={onPrint}><Printer size={15}/> Imprimir contrato</button>{needsDiagnosis?<button className="button primary" onClick={onDiagnosis}><ClipboardCheck size={15}/> Ir a diagnóstico</button>:diagnosisMismatch||!hasOfficialText?<button className="button primary" onClick={onPrepare}><FilePlus2 size={15}/> Preparar contrato</button>:canSign&&!sharedMode?<button className="button primary" onClick={onSign}><FileCheck2 size={15}/> Simular firma</button>:null}</div>}
-  </Modal>;
+    <div className="modal-actions"><button className="button secondary" onClick={close}>Cerrar</button>{needsDiagnosis&&<button className="button primary" onClick={onDiagnosis}><ClipboardCheck size={15}/> Ir a diagnóstico</button>}{(diagnosisMismatch||(!signed&&!hasOfficialText))&&<button className="button primary" onClick={onPrepare}><FilePlus2 size={15}/> Preparar contrato</button>}{canSign&&bothReady&&<button className="button primary" onClick={confirmContract} disabled={saving}><CheckCircle2 size={15}/>{saving?'Generando…':'Confirmar contrato'}</button>}{sealed&&<><button className="button outline" onClick={()=>onDownload?.(signatures)}><FileText size={15}/> Descargar</button><button className="button outline" onClick={onPrint}><Printer size={15}/> Imprimir contrato</button><button className="button primary" onClick={close}><CheckCircle2 size={15}/> Listo</button></>}</div>
+  </Modal>
+  {signRole==='patient'&&<SignatureCaptureModal title="Firma de la paciente" subtitle={`${patient.name} firma primero`} confirmLabel="Firmar como paciente" saving={saving} existingUrl={patientSignature} onClose={()=>setSignRole('')} onUseExisting={()=>setSignRole('')} onSave={async file=>{ const url=await fileToDataUrl(file); setPatientSignature(url); setSignRole(''); }}/>}
+  {signRole==='staff'&&<SignatureCaptureModal title="Firma del médico" subtitle={staffName||'Usuario de la cuenta'} confirmLabel="Firmar como médico" saving={saving} existingUrl={staffImage} onClose={()=>setSignRole('')} onUseExisting={acceptStaffSignature} onSave={async file=>{ setSignError(''); setSaving(true); try { const url=await onSaveStaffSignature?.(file); setStaffDrawn(url||await fileToDataUrl(file)); setStaffAccepted(true); setSignRole(''); } catch (error) { setSignError(error?.message || 'No se pudo guardar la firma del médico.'); } finally { setSaving(false); } }}/>}
+  </>;
 }
 
-function ConsentViewerModal({patient,document,content,status,signedAt,close,onPrint,onSign,sharedMode=false}) {
-  const signed=status==='Firmado';
-  const canSign=status==='Pendiente'&&Boolean(content?.trim());
-  return <Modal title={document} subtitle={`${patient.name} · Expediente ${patient.id}`} close={close} printable>
-    <div className="document-preview"><span className="eyebrow">{sharedMode?'COPIA DEL DOCUMENTO':'DOCUMENTO INFORMATIVO · DEMOSTRACIÓN'}</span><h3>{document}</h3><div className="preview-section"><strong>Paciente</strong><span>{patient.name}</span></div>{content?.trim()?<div className="template-content">{content}</div>:<p>Esta solicitud no conserva texto oficial. Agrega y valida el formato en la biblioteca antes de solicitar una firma.</p>}<p className="demo-legal-note">{sharedMode?'Esta copia quedó guardada en el expediente. No se envía ni captura una firma electrónica.':'Documento de demostración: no se envía, no captura una firma electrónica y no tiene validez legal.'}</p></div>
-    {signed&&<div className="signature-box"><CheckCircle2 size={16}/> {sharedMode?'Firma registrada':'Firma simulada registrada'}{signedAt?` · ${new Intl.DateTimeFormat('es-MX',{dateStyle:'medium',timeStyle:'short'}).format(new Date(signedAt))}`:''}</div>}
-    {status==='Pendiente'&&!content?.trim()&&<div className="form-note"><ShieldCheck size={15}/> La firma está deshabilitada hasta que exista texto oficial en la solicitud.</div>}
-    {sharedMode&&status==='Pendiente'&&<div className="form-note"><ShieldCheck size={15}/> La solicitud queda pendiente hasta que se conecte un proveedor de firma.</div>}
-    <div className="modal-actions"><button className="button secondary" onClick={close}>Cerrar</button><button className="button outline" onClick={onPrint}><Printer size={15}/> Imprimir consentimiento</button>{canSign&&!sharedMode&&<button className="button primary" onClick={onSign}><FileCheck2 size={15}/> Simular firma</button>}</div>
-  </Modal>;
+function ConsentViewerModal({patient,document,content,status,signedAt,close,onPrint,onDownload,onChangeService,onSign,onSaveSignature,staffName,staffSignatureUrl}) {
+  const consentText=withPatientWord(content);
+  const [signing,setSigning]=useState(false);
+  const [saving,setSaving]=useState(false);
+  const [justSigned,setJustSigned]=useState(false);
+  const signed=status==='Firmado'||justSigned;
+  const canSign=!signed&&status==='Pendiente'&&Boolean(content?.trim());
+  return <><Modal title={document} subtitle={`${patient.name} · Expediente ${patient.id}`} close={close} printable>
+    <div className="document-preview"><span className="eyebrow">{justSigned?'VISTA PREVIA · FIRMADO':'COPIA DEL DOCUMENTO'}</span><h3>{document}</h3><div className="preview-section"><strong>Paciente</strong><span>{patient.name}</span></div>{consentText.trim()?<div className="template-content consent-formatted-wrap"><ConsentFormattedCopy content={consentText}/></div>:<p>Esta solicitud no conserva texto oficial. Agrega y valida el formato en la biblioteca antes de solicitar una firma.</p>}<DocumentSignatureBlock signed={signed} signedAt={signedAt||(justSigned?new Date().toISOString():null)} drawing={false} setDrawing={()=>{}} saving={saving} staffName={staffName} staffSignatureUrl={staffSignatureUrl} who="la paciente" onSaveSignature={()=>{}}/>{justSigned&&<div className="contract-generated"><strong>Consentimiento firmado y guardado en el expediente.</strong><span>Puedes descargarlo o imprimirlo, y luego dar Listo.</span></div>}</div>
+    <div className="modal-actions">{justSigned?<><button className="button outline" onClick={onDownload}><FileText size={15}/> Descargar</button><button className="button outline" onClick={onPrint}><Printer size={15}/> Imprimir consentimiento</button><button className="button primary" onClick={close}><CheckCircle2 size={15}/> Listo</button></>:<><button className="button secondary" onClick={close}>Cerrar</button>{onChangeService&&<button className="button outline" onClick={onChangeService}>Cambiar servicio</button>}{signed&&<button className="button primary" onClick={close}><CheckCircle2 size={15}/> Listo</button>}{canSign&&<button className="button primary" onClick={()=>{ if(onSaveSignature) setSigning(true); else onSign?.(); }}><FileCheck2 size={15}/> Firmar</button>}</>}</div>
+  </Modal>
+  {signing&&<SignatureCaptureModal title="Firma de la paciente" subtitle={patient.name} confirmLabel="Firmar consentimiento" saving={saving} onClose={()=>setSigning(false)} onSave={async file=>{ setSaving(true); try { await onSaveSignature?.(file); setSigning(false); setJustSigned(true); } finally { setSaving(false); } }}/>}
+  </>;
 }function Modal({title,subtitle,close,children,printable=false,className=''}){
   useEffect(()=>{
     if(!printable)return undefined;

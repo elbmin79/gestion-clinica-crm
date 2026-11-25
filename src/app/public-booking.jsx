@@ -1,6 +1,7 @@
 'use client';
 import {useEffect,useRef,useState} from 'react';
 import {CalendarDays,CheckCircle2,Clock3,MapPin,ShieldCheck,ArrowLeft,Send,LoaderCircle} from 'lucide-react';
+import {ClinicDateField} from './clinic-date-field';
 
 export default function PublicBooking({slug}){
   const [catalog,setCatalog]=useState(null),[error,setError]=useState(''),[loading,setLoading]=useState(true);
@@ -48,7 +49,7 @@ export default function PublicBooking({slug}){
             <label>Sucursal<select required value={branch} onChange={e=>{setBranch(e.target.value);setService('');setProvider('');}}><option value="">Seleccionar sucursal</option>{branches.map(([id,name])=><option key={id} value={id}>{name}</option>)}</select></label>
             <label>Servicio<select required disabled={!branch} value={service} onChange={e=>{setService(e.target.value);setProvider('');}}><option value="">Seleccionar servicio</option>{services.map(([id,name])=><option key={id} value={id}>{name}</option>)}</select></label>
             <label>Profesional<select required disabled={!service} value={provider} onChange={e=>setProvider(e.target.value)}><option value="">Seleccionar profesional</option>{providers.map(([id,name])=><option key={id} value={id}>{name}</option>)}</select></label>
-            <label>Fecha<input required type="date" value={date} min={catalog.today} max={catalog.lastDate} onChange={e=>setDate(e.target.value)}/></label>
+            <label>Fecha<ClinicDateField required value={date} min={catalog.today} max={catalog.lastDate} onChange={e=>setDate(e.target.value)}/></label>
           </div>
           {offer&&<div className="public-booking-summary"><span><Clock3 size={15}/> {offer.duration} minutos</span><span><MapPin size={15}/> {offer.branch}</span><span>Anticipo requerido: {new Intl.NumberFormat('es-MX',{style:'currency',currency:'MXN'}).format(offer.deposit)} MXN</span></div>}
           {offer&&<div className="public-booking-slots" role="group" aria-label="Horarios disponibles">{slotsLoading?<p role="status">Consultando horarios…</p>:slotError?<p role="alert">{slotError}</p>:!slots.length?<p>No hay horarios disponibles para esta selección. Prueba otra fecha o profesional.</p>:slots.map(slot=><button type="button" key={slot.starts_at} aria-pressed={selected?.starts_at===slot.starts_at} onClick={()=>setSelected(slot)}>{time(slot.starts_at)}</button>)}</div>}

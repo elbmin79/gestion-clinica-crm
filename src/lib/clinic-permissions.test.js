@@ -42,6 +42,14 @@ test('availability scope grants only its selected level', () => {
   assert.equal(sanitizeClinicPermissions({ 'availability.scope': 'none' }, 'clinician')['availability.scope'], 'self');
 });
 
+test('only administrators can create, edit, or delete document templates', () => {
+  for (const role of ['clinician', 'receptionist', 'billing']) {
+    assert.equal(hasClinicPermission(role, { 'documents.manage_templates': true }, 'documents.manage_templates'), false);
+    assert.equal(sanitizeClinicPermissions({ 'documents.manage_templates': true }, role)['documents.manage_templates'], false);
+  }
+  assert.equal(hasClinicPermission('admin', {}, 'documents.manage_templates'), true);
+});
+
 test('administrator permissions are always complete and cannot be narrowed by supplied values', () => {
   const permissions = sanitizeClinicPermissions({ 'whatsapp.view': false, 'payments.refund': false }, 'admin');
   assert.equal(hasClinicPermission('admin', permissions, 'whatsapp.view'), true);

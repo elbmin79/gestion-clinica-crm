@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { datePartsInZone } from '@elixir-clinic/crm-core/clinic-time';
 import { billOccurrences, monthlyClose, parseExpense, parseMonthlyBill } from '../lib/clinic-expenses';
 import { createClinicExpensesStore } from '../lib/supabase/clinic-expenses';
+import { ClinicDateField } from './clinic-date-field';
 
 const mxn = new Intl.NumberFormat('es-MX',{style:'currency',currency:'MXN'});
 
@@ -116,7 +117,7 @@ export default function ClinicExpenseLedger({ clinicId, sharedMode, timeZone, ca
           {item.billMonth && <p className="form-note">Pago mensual del periodo {item.billMonth.slice(0,7)}</p>}
           <div className="form-grid">
             <label>Importe pagado (MXN)<input name="amount" type="number" min="0.01" max="9999999999.99" step="0.01" required defaultValue={item.amount ?? ''}/></label>
-            <label>Fecha de pago<input name="paidOn" type="date" max={today} required defaultValue={item.paidOn || today}/></label>
+            <label>Fecha de pago<ClinicDateField name="paidOn" max={today} required defaultValue={item.paidOn || today}/></label>
           </div>
           <label>Nota opcional<input name="note" maxLength="500" defaultValue={item.note || ''}/></label>
         </>}

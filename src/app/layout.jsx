@@ -4,10 +4,13 @@ import "./font-tokens.css";
 import RouteShell from "./route-shell";
 
 export const metadata = {
-  title: "CRM clínico",
-  icons: { apple: "/elixirclinic-web-icon-192.png" },
+  title: "Elixir Clinic",
   description:
     "Espacio de trabajo clínico para pacientes, documentos y agenda.",
+  icons: {
+    icon: "/elixirclinic-web-icon-192.png",
+    apple: "/elixirclinic-web-icon-192.png",
+  },
 };
 
 // Authenticated requests must not reuse HTML or refreshed session cookies across users.

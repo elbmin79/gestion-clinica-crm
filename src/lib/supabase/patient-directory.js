@@ -200,7 +200,13 @@ async function fetchDirectory(client, clinicId, role, patientId = '') {
   const patients = (patientResult.data || []).map((row, index) => {
     const branch = branches.find(item => item.id === row.primary_branch_id);
     const provider = providers.find(item => item.id === row.primary_provider_id);
-    const patientDocuments = documents.get(row.id) || [];
+    const patientFiles = filesByPatient.get(row.id) || [];
+    const patientDocuments = (documents.get(row.id) || []).map(document => {
+      if (document.status === 'Firmado') return document;
+      const fileKind = document.type === 'Prestación de servicios' ? 'contract' : 'consent';
+      const signatureFile = patientFiles.find(file => file.kind === fileKind && file.title === `Firma · ${document.title}`);
+      return signatureFile ? { ...document, status: 'Firmado', signedAt: signatureFile.signedAt || signatureFile.createdAt || null } : document;
+    });
     const contracts = patientDocuments.filter(item => item.type === 'Prestación de servicios');
     const consents = patientDocuments.filter(item => item.type === 'Consentimiento informado');
     const latestContract = contracts[0];
@@ -243,7 +249,7 @@ async function fetchDirectory(client, clinicId, role, patientId = '') {
       diagnosisSummary: diagnosis?.summary || '',
       diagnosisHistory: diagnosisHistory.get(row.id) || [],
       clinicalHistory: encountersByPatient.get(row.id) || [],
-      recordFiles: filesByPatient.get(row.id) || [],
+      recordFiles: patientFiles,
       botoxTreatments: botoxByPatient.get(row.id) || [],
       procedures: proceduresByPatient.get(row.id) || [],
       clinicalBackground: medicalHistoryByPatient.get(row.id) || null,
@@ -493,6 +499,20 @@ export function createPatientDirectoryStore({ clientFactory = createClient } = {
       });
       resultError(result, 'No se pudo guardar el formato. Verifica que tengas permisos de administrador.');
       return result.data?.[0] || null;
+    },
+
+    async renameTemplate(clinicId, templateId, title) {
+      const client = clientFactory();
+      if (!client) throw new Error('La conexión con Supabase no está configurada.');
+      const result = await client.from('document_templates').update({ title: title.trim() }).eq('clinic_id', clinicId).eq('id', templateId);
+      resultError(result, 'No se pudo cambiar el nombre del formato.');
+    },
+
+    async archiveTemplate(clinicId, templateId) {
+      const client = clientFactory();
+      if (!client) throw new Error('La conexión con Supabase no está configurada.');
+      const result = await client.from('document_templates').update({ active: false }).eq('clinic_id', clinicId).eq('id', templateId);
+      resultError(result, 'No se pudo quitar el formato de la biblioteca.');
     },
 
     async acceptDiagnosis(clinicId, patient, summary) {

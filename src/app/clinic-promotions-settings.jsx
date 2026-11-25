@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { parseClinicPromotion, promotionStatus } from '../lib/clinic-promotions';
+import { ClinicDateField } from './clinic-date-field';
 
 export default function ClinicPromotionsSettings({ promotions, services, today, status, canManage, onSave }) {
   const [draft, setDraft] = useState(null);
@@ -61,8 +62,8 @@ export default function ClinicPromotionsSettings({ promotions, services, today, 
           </> : <label>Moneda<select name="currency" defaultValue={draft.currency || 'MXN'}><option>MXN</option><option>USD</option></select></label>}
         </div>
         <div className="form-grid">
-          <label>Inicio de vigencia<input name="startsOn" type="date" required defaultValue={draft.startsOn || today}/></label>
-          <label>Fin de vigencia<input name="endsOn" type="date" required defaultValue={draft.endsOn || today}/></label>
+          <label>Inicio de vigencia<ClinicDateField name="startsOn" required defaultValue={draft.startsOn || today}/></label>
+          <label>Fin de vigencia<ClinicDateField name="endsOn" required defaultValue={draft.endsOn || today}/></label>
         </div>
         <div className="modal-actions">
           <button type="button" className="button secondary" disabled={busy} onClick={() => { setError(''); setDraft(null); }}>Cancelar</button>

@@ -80,6 +80,7 @@ export function hasClinicPermission(role, permissions, permission) {
   if (permission === 'whatsapp.reply' && normalized['whatsapp.reply']) return Boolean(normalized['whatsapp.view']);
   if (permission === 'whatsapp.manage' && normalized['whatsapp.manage']) return Boolean(normalized['whatsapp.view']);
   if (permission === 'team.manage_access') return false;
+  if (permission === 'documents.manage_templates') return false;
   return normalized[permission] === true;
 }
 
@@ -93,6 +94,6 @@ export function sanitizeClinicPermissions(value, role) {
     if (permission === 'availability.scope') {
       return [permission, normalized[permission]];
     }
-    return [permission, role === 'admin' ? true : normalized[permission] === true];
+    return [permission, role === 'admin' ? true : permission === 'documents.manage_templates' ? false : normalized[permission] === true];
   }));
 }

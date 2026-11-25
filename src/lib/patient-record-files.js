@@ -41,6 +41,21 @@ export async function saveDemoRecordFile(id, file) {
   db.close();
 }
 
+export async function compressClinicalPhoto(file, maxEdge = 1600, quality = 0.72) {
+  if (!file?.type?.startsWith('image/')) return file;
+  const bitmap = await createImageBitmap(file);
+  const scale = Math.min(1, maxEdge / Math.max(bitmap.width, bitmap.height));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+  canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+  canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  bitmap.close?.();
+  const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', quality));
+  if (!blob) return file;
+  const name = file.name?.replace(/\.\w+$/, '') || 'foto-clinica';
+  return new File([blob], `${name}.jpg`, { type: 'image/jpeg' });
+}
+
 export async function openDemoRecordFile(id) {
   const db = await openDb();
   const file = await new Promise((resolve, reject) => {
